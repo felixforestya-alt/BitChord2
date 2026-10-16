@@ -703,15 +703,16 @@ private fun InlineQueueRow(
     onDrag: (Float) -> Unit = {},
     onDragEnd: () -> Unit = {},
 ) {
+    val inset = LocalQueueRowInset.current
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(if (inset > 0.dp) 14.dp else 8.dp))
             .background(if (lifted) Color.White.copy(alpha = 0.06f) else Color.Transparent)
             // Disabled rather than ignored: a tap that ripples and then does
             // nothing reads as the app having missed it.
             .clickable(enabled = !locked, onClick = onClick)
-            .padding(vertical = 6.dp),
+            .padding(horizontal = inset, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (draggable) {
@@ -722,8 +723,8 @@ private fun InlineQueueRow(
                 modifier = Modifier
                     .size(20.dp)
                     // The glyph sits well inset in its own box; this pulls it
-                    // back to the row's edge.
-                    .offset(x = (-4).dp)
+                    // back to the row's edge — unless the row has room of its own.
+                    .offset(x = if (inset > 0.dp) 0.dp else (-4).dp)
                     .pointerInput(Unit) {
                         detectDragGestures(
                             onDragStart = { onDragStart() },
@@ -789,3 +790,10 @@ private fun InlineQueueRow(
         }
     }
 }
+
+/**
+ * Room inside each queue row, so a highlight under the pointer clears the handle and the remove
+ * button rather than touching them. None on the phone, where rows run edge to edge; the desktop's
+ * queue, on a pane of its own, sets some.
+ */
+val LocalQueueRowInset = androidx.compose.runtime.compositionLocalOf { 0.dp }

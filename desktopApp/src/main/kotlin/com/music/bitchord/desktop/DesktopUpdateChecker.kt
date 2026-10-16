@@ -37,6 +37,13 @@ internal object DesktopUpdateChecker {
 
     val currentVersion: String = System.getProperty("bitchord.version") ?: "1.8-beta1"
 
+    /**
+     * This is a personal build with its own changes. The official installer the prompt would offer
+     * replaces it wholesale, so the prompt stays quiet; upstream releases are merged in with git
+     * instead.
+     */
+    const val customBuild = true
+
     private val json = Json { ignoreUnknownKeys = true }
 
     private val http = HttpClient(CIO) {

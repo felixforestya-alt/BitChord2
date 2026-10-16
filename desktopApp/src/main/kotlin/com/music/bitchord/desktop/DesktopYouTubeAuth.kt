@@ -54,6 +54,19 @@ internal object DesktopYouTubeAuth {
         )
     }
 
+    /**
+     * Swaps in a renewed cookie header for the same session.
+     *
+     * Not [adopt]: the identity has not changed, so the player config and PoToken binding a new
+     * session would throw away are still good — only the header every request carries moves on.
+     */
+    fun renewCookie(cookie: String) {
+        val current = session ?: return
+        if (current.cookie == cookie) return
+        session = current.copy(cookie = cookie)
+        Innertube.cookie = cookie
+    }
+
     /** The headers an authenticated request carries, or nothing when signed out. */
     fun headers(origin: String = MUSIC_ORIGIN): Map<String, String> {
         val current = session ?: return emptyMap()

@@ -1,5 +1,49 @@
 <div align="center">
 
+# BitChord²
+
+### A desktop fork of [BitChord](https://github.com/kushagrasinghx/BitChord), rebuilt for Windows
+
+**[⬇ Download for Windows](https://github.com/felixforestya-alt/BitChord2/releases/latest)**
+
+</div>
+
+## What's different
+
+**The player**
+- A full-window disc player: the cover on a spinning CD, a broadcast-style room lit in the cover's colours, visualisers, and every control on a glass deck
+- Music videos play right in the player, with a one-click switch between the song and its video
+- Karaoke lyrics word by word, with translation and romanisation, also on the home card when the player is closed
+- Queue on glass, sleep timer, audio output picker, Spotify Canvas backgrounds
+
+**The look**
+- Liquid glass panes that bend and blur what is under them
+- Home card that morphs into the now-playing bar as you scroll
+- Tinted pill bar, top or bottom, quick settings, tray popup, account in the sidebar
+- Translations for all desktop strings
+
+**Smoothness** — measured frame by frame on a 4K, 160 Hz screen
+- Smooth wheel scrolling with snap, and browser-style middle-click autoscroll
+- No redraws while nothing moves; artwork no longer re-uploaded to the GPU every frame
+- Music video at up to 1440p without memory climbing into gigabytes as it used to
+- No network work on the UI thread: links and video versions are fetched before the player opens
+- The player is prepared off-screen, so its first opening does not stall compiling GPU shaders
+- Drawing threads and the GPU run at raised priority
+
+## Install
+
+Download `BitChord-windows-x64.zip` from [Releases](https://github.com/felixforestya-alt/BitChord2/releases/latest), unpack it anywhere and run `BitChord.exe`. No installer, nothing written outside your user profile.
+
+Your sign-in stays on your computer, in your user profile; nothing of it is in this repository or in the download.
+
+## Credits
+
+BitChord² is a fork of [BitChord](https://github.com/kushagrasinghx/BitChord) by Kushagra Singh, under the same GPL-3.0 licence. Everything below is the original project's README.
+
+---
+
+<div align="center">
+
 <br/>
 <br/>
 

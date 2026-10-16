@@ -61,6 +61,9 @@ internal fun DesktopLyricsSourcesDialog(
     onPrioritizeSyllables: (Boolean) -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
+    /** The provider asked first for every track, or null to let the order decide. */
+    defaultSource: String? = null,
+    onDefaultSource: (String?) -> Unit = {},
 ) {
     DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 420) {
         Column(
@@ -86,6 +89,46 @@ internal fun DesktopLyricsSourcesDialog(
                 modifier = Modifier.padding(top = 5.dp),
             )
         }
+        // Not just another tick in the list: the one provider that is always asked first, alone.
+        Column(Modifier.fillMaxWidth().padding(horizontal = panelInset(18.dp), vertical = 4.dp)) {
+            Text(
+                DesktopStrings["d_default_lyrics_source", "Default source"],
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = Color.White,
+            )
+            Text(
+                DesktopStrings[
+                    "d_default_lyrics_source_subtitle",
+                    "Asked first for every track; the others only when it has nothing.",
+                ],
+                style = MaterialTheme.typography.bodySmall,
+                color = DesktopSecondary,
+            )
+            Spacer(Modifier.size(8.dp))
+            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                androidx.compose.material3.FilterChip(
+                    colors = desktopChipColors(),
+                    selected = defaultSource == null,
+                    onClick = { onDefaultSource(null) },
+                    label = { Text(DesktopStrings["d_default_lyrics_source_auto", "Automatic"]) },
+                )
+                order.forEach { name ->
+                    androidx.compose.material3.FilterChip(
+                        colors = desktopChipColors(),
+                        selected = defaultSource == name,
+                        onClick = { onDefaultSource(name) },
+                        label = { Text(name) },
+                    )
+                }
+            }
+            Spacer(Modifier.size(10.dp))
+        }
+        DesktopCardRule()
         // Scrolls: enough providers have been added that the card runs off both ends of a short
         // window, taking Reset and Done with it. A plain Column inside, not a lazy list — the
         // drag-reorder measures itself against the rows it has, and a lazy list would recycle one

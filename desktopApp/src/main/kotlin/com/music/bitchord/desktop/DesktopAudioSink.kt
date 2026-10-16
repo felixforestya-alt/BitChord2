@@ -53,6 +53,8 @@ internal class DesktopAudioSink {
                 openedForSelection = selectedDevice
                 format = requested
                 diagnosticBlocks = 0
+                submittedFrames = framesPlayed()
+                stage.reset()
                 closeLine(previous)
                 DesktopTrackLog.log(
                     "audio output opened: ${deviceName ?: "Windows system default"} · " +
@@ -118,6 +120,8 @@ internal class DesktopAudioSink {
         openedForSelection = selectedDevice
         format = accepted
         diagnosticBlocks = 0
+        submittedFrames = 0L
+        stage.reset()
         closeLine(previous)
         DesktopTrackLog.log(
             "audio output opened: ${deviceName ?: "system default"} · " +
@@ -149,17 +153,33 @@ internal class DesktopAudioSink {
     val bufferBytes: Int
         get() = if (windowsOutput) windowsBufferBytes else runCatching { line?.bufferSize ?: 0 }.getOrDefault(0)
 
+    /** Volume and the peak limiter; see [DesktopOutputStage]. */
+    private val stage = DesktopOutputStage()
+    private val dither = DesktopDither()
+
+    /** Frames handed to the device since it was opened, for the visualiser's latency. */
+    private var submittedFrames = 0L
+
     /** Writes [count] interleaved samples, blocking until the device takes them. */
     fun write(samples: FloatArray, count: Int): Int {
+        if (count <= 0) return 0
+        val channels = format.channels.coerceAtLeast(1)
+        val rate = format.sampleRate.coerceAtLeast(1)
+        // How long this block waits behind what the device already holds.
+        val queued = (submittedFrames - framesPlayed()).coerceAtLeast(0L)
+        DesktopAudioAnalyzer.feed(samples, count, channels, rate, queued * 1_000_000_000L / rate)
+        val shaped = stage.process(samples, count, channels, rate, gain)
         if (windowsOutput) {
-            val written = DesktopWindowsAudio.write(samples, count, gain)
+            // Volume and limiting are already in the samples.
+            val written = DesktopWindowsAudio.write(shaped, count, 1f)
+            submittedFrames += count / channels
             diagnose(samples, count, written)
             return written
         }
         val target = line ?: return 0
-        if (count <= 0) return 0
-        val bytes = convert(samples, count)
+        val bytes = convert(shaped, count)
         val written = target.write(bytes, 0, count * format.bytesPerSample)
+        submittedFrames += count / channels
         diagnose(samples, count, written)
         return written
     }
@@ -178,25 +198,25 @@ internal class DesktopAudioSink {
         }
     }
 
-    /** Floats to whatever the device accepted, scaled by [gain]. */
+    /** Floats (already volume-scaled and limited) to whatever the device accepted. */
     private fun convert(samples: FloatArray, count: Int): ByteArray {
         val current = format
-        val volume = gain
         val bytes = count * current.bytesPerSample
         if (staging.size < bytes) staging = ByteArray(bytes)
         val out = staging
 
         when {
             current.isFloat -> for (index in 0 until count) {
-                writeIntLe(out, index * 4, (samples[index] * volume).toRawBits())
+                writeIntLe(out, index * 4, samples[index].toRawBits())
             }
             current.bytesPerSample == 4 -> for (index in 0 until count) {
-                val scaled = (samples[index] * volume).coerceIn(-1f, 1f)
-                writeIntLe(out, index * 4, (scaled * Int.MAX_VALUE).toInt())
+                val scaled = samples[index].coerceIn(-1f, 1f)
+                writeIntLe(out, index * 4, (scaled.toDouble() * Int.MAX_VALUE).toInt())
             }
             else -> for (index in 0 until count) {
-                val scaled = (samples[index] * volume).coerceIn(-1f, 1f)
-                val value = (scaled * 32_767f).toInt()
+                // Dithered rather than truncated: 16 bits is the one depth where it is audible.
+                val scaled = (samples[index] + dither.sample()).coerceIn(-1f, 1f)
+                val value = Math.round(scaled * 32_767f)
                 val at = index * 2
                 out[at] = value.toByte()
                 out[at + 1] = (value shr 8).toByte()
@@ -227,6 +247,10 @@ internal class DesktopAudioSink {
     /** Throws away what is queued, so a seek is heard at once. */
     fun flush() {
         if (windowsOutput) DesktopWindowsAudio.flush() else line?.flush()
+        // Nothing is queued any more: what has been played is all that was submitted.
+        submittedFrames = framesPlayed()
+        stage.reset()
+        DesktopAudioAnalyzer.reset()
     }
 
     /** Waits for the queue to finish, so the end of a track is not clipped. */

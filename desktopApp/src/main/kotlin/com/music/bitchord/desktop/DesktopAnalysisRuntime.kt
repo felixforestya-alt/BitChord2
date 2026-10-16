@@ -95,7 +95,23 @@ internal object DesktopAnalysisRuntime {
             }
             val partial = home.resolve("$name.partial")
             Files.copy(input, partial, StandardCopyOption.REPLACE_EXISTING)
-            Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING)
+            try {
+                Files.move(partial, target, StandardCopyOption.REPLACE_EXISTING)
+            } catch (locked: java.nio.file.FileSystemException) {
+                // Windows will not replace a DLL another process has loaded — a second copy of the
+                // app, an older build still in the tray. This build's own copy goes beside it under
+                // a name of its own, rather than this build running without its natives.
+                val stem = name.substringBeforeLast('.')
+                val extension = name.substringAfterLast('.', "")
+                val beside = home.resolve("$stem-$expected-$builtAt${if (extension.isNotEmpty()) ".$extension" else ""}")
+                if (!(Files.exists(beside) && Files.size(beside) == expected)) {
+                    Files.move(partial, beside, StandardCopyOption.REPLACE_EXISTING)
+                } else {
+                    Files.deleteIfExists(partial)
+                }
+                DesktopTrackLog.log("${target.fileName} is in use by another process; loading ${beside.fileName}")
+                return beside
+            }
         }
         return target
     }

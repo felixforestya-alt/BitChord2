@@ -29,10 +29,11 @@ internal object DesktopWindowBackdrop {
      * Whether this window can carry a material: Windows 11 and the native frame. Decided once, at
      * start, because it decides whether the window is created transparent.
      */
-    val available: Boolean =
+    val available: Boolean = System.getenv("BITCHORD_OPAQUE") != "1" && (
         (DesktopPlatform.isWindows && DesktopPlatform.drawsOwnWindowFrame &&
             System.getProperty("os.name").orEmpty().contains("11")) ||
-        DesktopPlatform.isMac
+            DesktopPlatform.isMac
+        )
 
     private val _selected = MutableStateFlow(
         runCatching { DesktopBackdrop.valueOf(DesktopPersistence().string(KEY, DesktopBackdrop.MICA.name)) }

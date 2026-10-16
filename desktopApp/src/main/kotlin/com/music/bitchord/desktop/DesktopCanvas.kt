@@ -292,7 +292,7 @@ fun DesktopCanvasView(
                     shown++
                     // `pixels` is handed to Skia rather than copied into it, so the array cannot be
                     // the one the decoder writes the next frame into.
-                    val next = Image.makeRaster(info, pixels.copyOf(), decoder.width * 4).toComposeImageBitmap()
+                    val next = Image.makeRaster(info, pixels.copyOf(), decoder.width * 4).toComposeImageBitmap().frozen()
                     frame = next
                     // The backdrop reads the first frame and holds it: re-meshing every frame would
                     // be a full resample twenty-five times a second for a wash nobody is watching

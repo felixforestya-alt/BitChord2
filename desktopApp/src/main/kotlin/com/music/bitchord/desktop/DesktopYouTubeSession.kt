@@ -56,14 +56,18 @@ internal object DesktopYouTubeSession {
      * and adopts its visitor id.
      */
     suspend fun adoptSessionScope(cookie: String): DesktopYouTubeAuth.Session? {
+        // Whatever the shell renews on the way in is kept, as a browser would keep it.
+        var renewed = cookie
         val html = runCatching {
-            client.get("https://music.youtube.com/") {
+            val response = client.get("https://music.youtube.com/") {
                 header("User-Agent", WEB_USER_AGENT)
                 header("Accept-Language", "en-US,en;q=0.9")
                 header("Cookie", cookie)
                 DesktopYouTubeAuth.signatureFor(cookie, DesktopYouTubeAuth.MUSIC_ORIGIN)
                     ?.let { header("Authorization", it) }
-            }.bodyAsText()
+            }
+            renewed = DesktopCookieJar.merge(cookie, response.headers.getAll("Set-Cookie").orEmpty())
+            response.bodyAsText()
         }.getOrElse {
             DesktopTrackLog.log("could not read the session scope: ${it.message}")
             return null
@@ -81,7 +85,7 @@ internal object DesktopYouTubeSession {
             sessionBound = true
         }
         return DesktopYouTubeAuth.Session(
-            cookie = cookie,
+            cookie = renewed,
             authUser = CONFIG_SESSION_INDEX.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() } ?: "0",
             pageId = CONFIG_PAGE_ID.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() },
             // `<accountSyncId>||<sessionSyncId>`; only the first half names the account, and the

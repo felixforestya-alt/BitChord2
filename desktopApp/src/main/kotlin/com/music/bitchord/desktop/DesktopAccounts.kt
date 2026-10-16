@@ -86,15 +86,27 @@ internal object DesktopAccounts {
             return null
         }
         val profile = activeProfile()
-        val stored = sessionFor(account, profile)
-        if (stored == null) {
+        val saved = sessionFor(account, profile)
+        if (saved == null) {
             DesktopTrackLog.log("account '${account.email.ifBlank { account.name }}' has no stored credential any more")
             DesktopYouTubeAuth.adopt(null)
             return null
         }
+        // Renewed before it is first used, as a browser renews a tab it reopens: the copy on disk
+        // is however old the last launch left it.
+        val rotated = DesktopSessionKeeper.rotate(saved.cookie)
+        // Also the moment a credential an older build left in plain preferences moves into the
+        // keyring (DPAPI on Windows).
+        if (rotated != saved.cookie || DesktopSecretStore.lookup(attributesFor(account.accountId)) == null) {
+            writeCookie(account.accountId, rotated)
+        }
+        val stored = saved.copy(cookie = rotated)
         DesktopYouTubeSession.adoptSessionScope(stored.cookie)?.let { live ->
-            val session = healedIdentity(account, profile, stored, live)
+            // The shell may have renewed a cookie or two of its own on the way.
+            if (live.cookie != stored.cookie) writeCookie(account.accountId, live.cookie)
+            val session = healedIdentity(account, profile, stored.copy(cookie = live.cookie), live)
             DesktopYouTubeAuth.adopt(session)
+            DesktopSessionKeeper.start()
             return session
         }
 
@@ -180,7 +192,13 @@ internal object DesktopAccounts {
         }
         // Brand channel: keep what the listener picked, but take the live
         // session's fresh cookie context for everything else.
-        return stored
+        return stored.copy(cookie = live.cookie)
+    }
+
+    /** Stores a renewed header for [accountId] in place of the one it replaces. */
+    fun storeRenewedCookie(accountId: String, cookie: String) {
+        if (accounts().none { it.accountId == accountId }) return
+        writeCookie(accountId, cookie)
     }
 
     /** Reads the source browser's cookies again and saves them if they are live. */
@@ -197,7 +215,7 @@ internal object DesktopAccounts {
                 (account.sourceProfile != null && profile.database.toString() == account.sourceProfile)
             if (!belongs) continue
             DesktopYouTubeAuth.adopt(scope)
-            writeCookie(account.accountId, jar)
+            writeCookie(account.accountId, scope.cookie)
             rememberSource(account, profile.database.toString())
             DesktopTrackLog.log("renewed the session from ${profile.label}")
             return scope
@@ -277,6 +295,7 @@ internal object DesktopAccounts {
         writeCookie(accountId, cookie)
         write(accounts().filterNot { it.accountId == accountId } + account)
         select(accountId, chosen.profileId)
+        DesktopSessionKeeper.start()
         return account
     }
 
@@ -284,6 +303,20 @@ internal object DesktopAccounts {
         persistence.saveString(KEY_ACTIVE_ACCOUNT, accountId)
         persistence.saveString(KEY_ACTIVE_PROFILE, profileId.orEmpty())
         applyActive()
+    }
+
+    /**
+     * The listener picked [accountId] in the switcher: make it the active one, then put it into
+     * force only if Google still accepts it. Null when it does not — the caller signs in again.
+     *
+     * [select] adopts whatever cookie is on disk, which is right just after a sign-in saved it
+     * and wrong for a login that has since expired: picking one of those put a dead credential
+     * on every request, and every page after that came back 401.
+     */
+    suspend fun choose(accountId: String, profileId: String?): DesktopYouTubeAuth.Session? {
+        persistence.saveString(KEY_ACTIVE_ACCOUNT, accountId)
+        persistence.saveString(KEY_ACTIVE_PROFILE, profileId.orEmpty())
+        return activate()
     }
 
     fun remove(accountId: String) {
@@ -294,7 +327,8 @@ internal object DesktopAccounts {
         val next = remaining.firstOrNull()
         persistence.saveString(KEY_ACTIVE_ACCOUNT, next?.accountId.orEmpty())
         persistence.saveString(KEY_ACTIVE_PROFILE, next?.activeProfileId.orEmpty())
-        applyActive()
+        // Guest until the next account, if any, has been checked — see [choose].
+        DesktopYouTubeAuth.adopt(null)
     }
 
     private fun write(value: List<DesktopGoogleAccount>) {

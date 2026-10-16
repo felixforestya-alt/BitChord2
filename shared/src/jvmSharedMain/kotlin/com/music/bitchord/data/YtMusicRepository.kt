@@ -251,7 +251,7 @@ object YtMusicRepository {
     private const val RECENT_TITLE = "Recents"
 
     /** Enough to scroll through, short of turning the shelf into the history page. */
-    private const val RECENT_LIMIT = 20
+    private const val RECENT_LIMIT = 48
 
     private suspend fun shelvesOf(browseId: String): List<HomeShelf> =
         InnertubeParser.parseHome(Innertube.browse(browseId))

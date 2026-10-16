@@ -57,6 +57,15 @@ class DesktopPersistence {
         )
     }
 
+    /**
+     * The provider asked first, on its own, for every track — the listener's pick rather than
+     * merely the top of the order. Null for none: the order alone decides.
+     */
+    fun lyricsDefaultSource(): String? =
+        string(KEY_LYRICS_DEFAULT).takeIf { it.isNotBlank() && lyricsSourceNamed(it) != null }
+
+    fun saveLyricsDefaultSource(name: String?) = saveString(KEY_LYRICS_DEFAULT, name.orEmpty())
+
     private fun readNames(key: String): List<String> =
         string(key, "").split(',').map(String::trim).filter(String::isNotBlank)
 
@@ -301,6 +310,7 @@ class DesktopPersistence {
         const val KEY_DOWNLOADS = "downloads"
         const val KEY_PLAYLISTS = "playlists"
         const val KEY_MODULE_INDEX_URL = "module_index_url"
+        const val KEY_LYRICS_DEFAULT = "lyrics_default_source"
         private const val KEY_ORIGINAL_VERSIONS = "original_versions"
         private const val KEY_AUDIO_QUALITY = "audio_quality"
         private const val KEY_AUDIO_QUALITY_RUNGS = "audio_quality_rungs"

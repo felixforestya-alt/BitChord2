@@ -53,7 +53,7 @@
     <string name="d_playlists_on_this_computer">本机上的播放列表</string>
     <string name="d_quit_bitchord">退出 BitChord</string>
     <string name="d_recently_played_on_this_computer">最近在本机播放</string>
-    <string name="d_recents">最近</string>
+    <string name="d_recents">Recents</string>
     <string name="d_remove_from_playlist">从播放列表中移除</string>
     <string name="d_repeat">循环</string>
     <string name="d_scroll_left">向左滚动</string>
@@ -89,4 +89,20 @@
     <string name="d_translation_unavailable">无法翻译</string>
     <string name="d_what_the_translate_button_translates_into">歌词翻译按钮翻译成的语言</string>
     <string name="d_off">关闭</string>
+    <string name="d_quick_settings">Player settings</string>
+    <string name="d_all_settings">All settings</string>
+    <string name="d_on_this_computer">On This Computer</string>
+    <string name="d_unknown_album">Unknown Album</string>
+    <string name="d_sort_added">Added</string>
+    <string name="d_sort_modified">Modified</string>
+    <string name="d_change_view">Change view</string>
+    <string name="d_nothing_playing">Nothing playing</string>
+    <string name="d_like">Like</string>
+    <string name="d_switch_account">Switch account</string>
+    <string name="d_add_account">Add account</string>
+    <string name="d_manage_accounts">Manage accounts</string>
+    <string name="d_playing_from">FROM</string>
+    <string name="d_now_playing_title">now playing.</string>
+    <string name="d_bar_tinted">Player bar in the cover\'s colour</string>
+    <string name="d_bar_tinted_subtitle">The floating player bar, top or bottom, takes the playing cover\'s colour. Off, it is clear glass</string>
 </resources>

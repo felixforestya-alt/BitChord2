@@ -497,7 +497,30 @@ compose.desktop {
         }.get()
         mainClass = composeMainClass
         jvmArgs("-Xmx512m")
-        jvmArgs("-XX:+UseG1GC", "-XX:G1PeriodicGCInterval=20000", "-XX:G1PeriodicGCSystemLoadThreshold=0")
+        jvmArgs("-XX:+UseG1GC", "-XX:G1PeriodicGCInterval=300000", "-XX:G1PeriodicGCSystemLoadThreshold=0")
+        // Short collector pauses, so a collection lands between frames instead of dropping one
+        // in the middle of an animation.
+        jvmArgs("-XX:MaxGCPauseMillis=6")
+        // Windows' 1 ms timer instead of its default 15.6 ms one, so a wait for the next frame
+        // or a short animation delay is not rounded up by a whole display refresh or two.
+        jvmArgs("-XX:+ForceTimeHighResolution")
+        // Hand memory the heap no longer needs back to Windows rather than sitting on it, and keep
+        // one copy of the many identical strings the YouTube responses are made of.
+        jvmArgs("-XX:MinHeapFreeRatio=15", "-XX:MaxHeapFreeRatio=60", "-XX:+UseStringDeduplication")
+        jvmArgs("-XX:ReservedCodeCacheSize=96m")
+        // Start small: left alone the JVM commits a 64th of the machine's memory up front — half
+        // a gigabyte on a 32 GB PC — before the app has asked for any of it.
+        jvmArgs("-Xms96m")
+        // The collector and the JIT size their thread pools (and each thread's buffers) to the
+        // CPU; a music player does not need fifteen GC refinement threads.
+        jvmArgs("-XX:CICompilerCount=4", "-XX:ParallelGCThreads=4", "-XX:ConcGCThreads=2", "-XX:G1ConcRefinementThreads=2")
+        // JavaFX only hosts the hidden BotGuard page and the sign-in window. In software it does
+        // not open a second GPU device beside Compose's — and a second copy of the graphics
+        // driver with it.
+        jvmArgs("-Dprism.order=sw")
+        // Likewise AWT's own Direct3D pipeline: Compose draws through Skia, so Java2D's device is
+        // a third GPU context doing nothing.
+        jvmArgs("-Dsun.java2d.d3d=false", "-Dsun.java2d.noddraw=true")
         jvmArgs("-Dbitchord.version=$appVersion")
         if (desktopModuleIndexUrl.isNotBlank()) {
             jvmArgs("-Dbitchord.module.index=$desktopModuleIndexUrl")
@@ -527,6 +550,9 @@ compose.desktop {
             )
             packageName = "BitChord"
             packageVersion = nativePackageVersion
+            // -Pbitchord.dist=<dir> builds somewhere else, so a new build can be made while the
+            // last one is still running out of the default folder.
+            providers.gradleProperty("bitchord.dist").orNull?.let { outputBaseDir.set(file(it)) }
             description = if (targetOs == "windows") "BitChord" else "Aesthetic YouTube Music client"
             vendor = "BitChord contributors"
             copyright = "Copyright © 2026 BitChord contributors"

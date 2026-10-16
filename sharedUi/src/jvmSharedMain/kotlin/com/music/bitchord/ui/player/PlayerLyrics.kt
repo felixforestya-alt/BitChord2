@@ -437,6 +437,42 @@ internal sealed interface LyricsTranslationUiState {
 
 internal enum class LyricsDisplayMode { Original, Romanized, Translated }
 
+/**
+ * Which version of a track's lyrics is on, and the versions already fetched, for every surface at
+ * once — the lyrics panel, the line over the title, the home card. Each used to keep its own, so a
+ * translation turned on in the panel never showed anywhere else.
+ */
+internal object LyricsSharedVersions {
+    val modes = androidx.compose.runtime.mutableStateMapOf<String, LyricsDisplayMode>()
+    val translated = androidx.compose.runtime.mutableStateMapOf<String, List<LyricLine>>()
+    val romanized = androidx.compose.runtime.mutableStateMapOf<String, List<LyricLine>>()
+}
+
+/** [LyricsSharedVersions.modes] for one key, as a local variable. */
+internal class SharedLyricsMode(private val key: String) {
+    operator fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): LyricsDisplayMode =
+        LyricsSharedVersions.modes[key] ?: LyricsDisplayMode.Original
+
+    operator fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: LyricsDisplayMode) {
+        LyricsSharedVersions.modes[key] = value
+    }
+}
+
+/** A fetch state that also counts a version another surface already fetched, and shares its own. */
+internal class SharedLyricsState(
+    private val local: androidx.compose.runtime.MutableState<LyricsTranslationUiState>,
+    private val store: MutableMap<String, List<LyricLine>>,
+    private val key: String,
+) {
+    operator fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): LyricsTranslationUiState =
+        store[key]?.let { LyricsTranslationUiState.Ready(it) } ?: local.value
+
+    operator fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: LyricsTranslationUiState) {
+        local.value = value
+        if (value is LyricsTranslationUiState.Ready) store[key] = value.lines
+    }
+}
+
 private const val TRANSLATION_MOTION_MS = 540
 private const val PARTICLES_PER_VOICE = 18
 
@@ -1533,6 +1569,12 @@ internal fun rememberPlayerControlsOnScroll(
 }
 
 /**
+ * How far down the lyrics panel the line being sung is held, as a share of its height; null keeps
+ * the panel's own top anchor. Provided by a host that wants the line centred rather than leading.
+ */
+val LocalLyricsFocusFraction = androidx.compose.runtime.staticCompositionLocalOf<Float?> { null }
+
+/**
  * Apple Music's lyrics view: big tight type, the playing line crisp and
  * everything else falling out of focus the further it is from it. Blur needs
  * API 31+, so alpha carries the same hierarchy on older devices.
@@ -1793,7 +1835,14 @@ internal fun LyricsPanel(
         // list hands that much back — otherwise the lines would sit a glow's
         // width further apart and further in than they used to.
         contentPadding = PaddingValues(
-            top = 40.dp - GLOW_ROOM,
+            // The line being sung sits where the list's content starts: 40dp down by default, or
+            // a share of the way down the panel where a host asks for it — the desktop's disc
+            // player keeps it in the middle.
+            top = LocalLyricsFocusFraction.current
+                ?.let { fraction -> with(LocalDensity.current) { viewportHeight.toDp() } * fraction }
+                ?.minus(GLOW_ROOM)
+                ?.coerceAtLeast(0.dp)
+                ?: (40.dp - GLOW_ROOM),
             bottom = with(LocalDensity.current) { viewportHeight.toDp() } * 0.8f,
             start = PLAYER_GUTTER - GLOW_ROOM,
             end = PLAYER_GUTTER - GLOW_ROOM,
@@ -2741,15 +2790,17 @@ internal fun rememberLyricsTranslation(
     val translationUnavailableMessage = stringResource(Res.string.lyrics_translation_unavailable)
     val alreadyRomanizedMessage = stringResource(Res.string.lyrics_already_romanized)
     val romanizationUnavailableMessage = stringResource(Res.string.lyrics_romanization_unavailable)
-    var translationState by remember(trackId, translationLanguage, lyrics) {
+    // Shared by every surface showing these lyrics — see [LyricsSharedVersions].
+    val sharedKey = "$trackId|$translationLanguage|${lyrics?.size ?: 0}"
+    val translationLocal = remember(trackId, translationLanguage, lyrics) {
         mutableStateOf<LyricsTranslationUiState>(LyricsTranslationUiState.Idle)
     }
-    var romanizationState by remember(trackId, translationLanguage, lyrics) {
+    val romanizationLocal = remember(trackId, translationLanguage, lyrics) {
         mutableStateOf<LyricsTranslationUiState>(LyricsTranslationUiState.Idle)
     }
-    var lyricsDisplayMode by remember(trackId, translationLanguage, lyrics) {
-        mutableStateOf(LyricsDisplayMode.Original)
-    }
+    var translationState by SharedLyricsState(translationLocal, LyricsSharedVersions.translated, sharedKey)
+    var romanizationState by SharedLyricsState(romanizationLocal, LyricsSharedVersions.romanized, sharedKey)
+    var lyricsDisplayMode by SharedLyricsMode(sharedKey)
     val showingTranslation = lyricsDisplayMode == LyricsDisplayMode.Translated
     val showingRomanization = lyricsDisplayMode == LyricsDisplayMode.Romanized
     var translationTransition by remember(trackId) { mutableIntStateOf(0) }
@@ -2924,5 +2975,87 @@ internal fun rememberLyricsTranslation(
         status = status,
         toggleTranslation = toggleTranslation,
         toggleRomanization = toggleRomanization,
+    )
+}
+
+/**
+ * One lyric line with the player's own karaoke sweep — word by word where the
+ * source has word timing, whole otherwise — on the same frame-steered clock the
+ * lyrics panel runs. For the surfaces outside the panel that show the line
+ * being sung: the desktop's big player and its home card.
+ */
+@Composable
+fun KaraokeLyricLine(
+    line: LyricLine,
+    position: PlaybackPosition,
+    isPlaying: Boolean,
+    trackKey: Any,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    dimAlpha: Float = UNSUNG_ALPHA_STRIP,
+    maxLines: Int = 2,
+    glowAlpha: Float = 0f,
+) {
+    val playhead = rememberLyricPlayhead(position)
+    val clock = rememberLyricClock(trackKey, playhead, isPlaying)
+    if (line.isWordSynced) {
+        SweptLyricLine(
+            line = line,
+            clock = clock,
+            style = style,
+            dimAlpha = dimAlpha,
+            modifier = modifier,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+            glowAlpha = glowAlpha,
+            rise = false,
+        )
+    } else {
+        Text(line.text, style = style, color = Color.White, maxLines = maxLines, overflow = TextOverflow.Ellipsis, modifier = modifier)
+    }
+}
+
+/**
+ * The lyrics panel's translation and romanization, for a surface outside the
+ * panel: the same requests, cache and state, with the panel's own two buttons.
+ * [subLines] runs parallel to the lyrics — the version shown under each line, or
+ * null while only the originals are on.
+ */
+class LyricsVersions internal constructor(internal val ui: LyricsTranslationUi) {
+    val subLines: List<LyricLine>? get() = ui.subLines
+}
+
+@Composable
+fun rememberLyricsVersions(trackId: String, lyrics: List<LyricLine>?): LyricsVersions {
+    val ui = rememberLyricsTranslation(
+        trackId = trackId,
+        lyrics = lyrics,
+        lyricsSource = null,
+        lyricsUnavailable = false,
+        loadingText = "",
+        haptics = com.music.bitchord.ui.haptics.rememberHaptics(),
+    )
+    return LyricsVersions(ui)
+}
+
+/** The panel's romanization button, for [versions]. */
+@Composable
+fun LyricsRomanizationButton(versions: LyricsVersions, enabled: Boolean) {
+    RomanizationToggleButton(
+        state = versions.ui.romanizationState,
+        showingRomanization = versions.ui.showingRomanization,
+        enabled = enabled,
+        onClick = versions.ui.toggleRomanization,
+    )
+}
+
+/** The panel's translation button, for [versions]. */
+@Composable
+fun LyricsTranslationButton(versions: LyricsVersions, enabled: Boolean) {
+    TranslationToggleButton(
+        state = versions.ui.translationState,
+        showingTranslation = versions.ui.showingTranslation,
+        enabled = enabled,
+        onClick = versions.ui.toggleTranslation,
     )
 }

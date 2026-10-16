@@ -127,8 +127,9 @@ internal fun DesktopAccountSelector(
         val shape = RoundedCornerShape(20.dp)
         Column(
             Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 64.dp, end = 24.dp)
+                // Over the account row it opens from, at the foot of the sidebar.
+                .align(Alignment.BottomStart)
+                .padding(start = 12.dp, bottom = 92.dp)
                 .widthIn(max = 380.dp)
                 .fillMaxWidth()
                 .clip(shape)
@@ -141,7 +142,7 @@ internal fun DesktopAccountSelector(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    if (accounts.isEmpty()) "Accounts" else "Switch account",
+                    if (accounts.isEmpty()) DesktopStrings["accounts", "Accounts"] else DesktopStrings["d_switch_account", "Switch account"],
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = Color.White,
@@ -185,15 +186,15 @@ internal fun DesktopAccountSelector(
                         )
                     }
                 }
-                item { DesktopSelectorAction(BitChordIcons.Plus, "Add account", onAddAccount) }
+                item { DesktopSelectorAction(BitChordIcons.Plus, DesktopStrings["d_add_account", "Add account"], onAddAccount) }
                 if (accounts.isNotEmpty()) {
                     item {
-                        DesktopSelectorAction(Icons.Rounded.ManageAccounts, "Manage accounts") {
+                        DesktopSelectorAction(Icons.Rounded.ManageAccounts, DesktopStrings["d_manage_accounts", "Manage accounts"]) {
                             managing = !managing
                         }
                     }
                 }
-                item { DesktopSelectorAction(Icons.Rounded.Settings, "Settings", onOpenSettings) }
+                item { DesktopSelectorAction(Icons.Rounded.Settings, DesktopStrings["settings", "Settings"], onOpenSettings) }
                 item { Spacer(Modifier.height(10.dp)) }
             }
         }

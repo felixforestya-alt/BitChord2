@@ -1228,14 +1228,15 @@ class DesktopPlaybackEngine(
         fadeRemaining = 0
 
         val decoded = track.decoder.outputFormat
+        val outputRate = outputRateFor(decoded.sampleRate)
         // Only renegotiate when the device would actually have to change.
         val output = if (
             !sink.isOpen ||
             !sink.isUsingSelection(DesktopAudioDevices.selected.value) ||
-            sink.format.sampleRate != decoded.sampleRate ||
+            sink.format.sampleRate != outputRate ||
             sink.format.channels != decoded.channels
         ) {
-            sink.open(decoded.copy(bytesPerSample = precisionBytes(), isFloat = preferFloat))
+            sink.open(decoded.copy(sampleRate = outputRate, bytesPerSample = precisionBytes(), isFloat = preferFloat))
         } else {
             Result.success(sink.format)
         }
@@ -1268,7 +1269,13 @@ class DesktopPlaybackEngine(
         // Where the next block written carries on from: what was queued on the old line is dropped
         // with it, and the decoder is already past it.
         val positionUs = playhead.peek(framesWritten)
-        sink.open(decoded.copy(bytesPerSample = precisionBytes(), isFloat = preferFloat))
+        sink.open(
+            decoded.copy(
+                sampleRate = outputRateFor(decoded.sampleRate),
+                bytesPerSample = precisionBytes(),
+                isFloat = preferFloat,
+            ),
+        )
             .onSuccess {
                 sink.gain = volume
                 framesWritten = sink.framesPlayed()
@@ -1280,6 +1287,21 @@ class DesktopPlaybackEngine(
             .onFailure { failure ->
                 _state.update { it.copy(error = "No audio output: ${failure.message}") }
             }
+    }
+
+    /**
+     * The rate to open the output at for a source of [sourceRate].
+     *
+     * On Windows that is the endpoint's own shared-mode mix rate: WASAPI would otherwise convert
+     * every 44.1 kHz track to a 48 kHz mixer itself, with the engine's general-purpose converter.
+     * Opened at the mix rate, the conversion happens here instead, in [DesktopRateConverter]'s
+     * 24-crossing windowed sinc — and a source already at the mix rate (YouTube's Opus on almost
+     * every PC) reaches the mixer untouched. Rates outside the usual range keep the old behaviour.
+     */
+    private fun outputRateFor(sourceRate: Int): Int {
+        if (!DesktopPlatform.isWindows || sourceRate <= 0) return sourceRate
+        val mix = DesktopWindowsAudio.mixRate(DesktopAudioDevices.selected.value) ?: return sourceRate
+        return if (mix in 44_100..192_000) mix else sourceRate
     }
 
     private fun buildChain() {

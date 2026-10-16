@@ -1,6 +1,10 @@
 package com.music.bitchord.ui.screens
 
 import com.music.bitchord.ui.components.contextClick
+import com.music.bitchord.ui.components.CardHoverPlay
+import com.music.bitchord.ui.components.cardEntrance
+import com.music.bitchord.ui.components.cardHoverLift
+import com.music.bitchord.ui.components.rememberCardHover
 import com.music.bitchord.ui.AppUi
 import com.music.bitchord.sharedui.resources.*
 import org.jetbrains.compose.resources.painterResource
@@ -30,6 +34,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import com.music.bitchord.ui.components.ShelfRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -138,6 +143,8 @@ fun HomeScreen(
     leadHero: Boolean = true,
     currentSong: Song? = null,
     isPlaying: Boolean = false,
+    /** Scrolls in at the head of the feed, above everything — the desktop's greeting. */
+    header: (@Composable () -> Unit)? = null,
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
 
@@ -163,6 +170,9 @@ fun HomeScreen(
         ) {
             if (title != null) {
                 item { HomeTitle(title) }
+            }
+            if (header != null) {
+                item(key = "header") { header() }
             }
             if (!signedIn && onSignIn != null) {
                 item {
@@ -296,7 +306,8 @@ private fun RecentShelf(
 ) {
     Column(Modifier.padding(bottom = 26.dp)) {
         RecentSectionHeader(
-            title = shelf.title,
+            // The feed names it in English; it is shown in the app's language.
+            title = if (shelf.title.equals(RECENTS_TITLE, ignoreCase = true)) stringResource(Res.string.shelf_recents) else shelf.title,
             subtitle = shelf.subtitle,
             viewType = viewType,
             onViewTypeToggle = onViewTypeToggle,
@@ -306,7 +317,7 @@ private fun RecentShelf(
                 val columnWidth = trackColumnWidth(maxWidth)
                 ShelfRow(
                     contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
                 ) {
                     items(shelf.items.chunked(RECENT_TRACKS_PER_COLUMN)) { column ->
                         Column(Modifier.width(columnWidth)) {
@@ -440,11 +451,14 @@ fun CompactTrackRow(
     isPlaying: Boolean = false,
 ) {
     Row(
+        // Rounded and inset, so a highlight under the pointer takes in the ⋮ at its end instead
+        // of stopping short of it.
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
             .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
             .contextClick(onLongPress)
-            .padding(vertical = 4.dp),
+            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(48.dp)) {
@@ -757,12 +771,12 @@ private fun HeroShelf(
                 contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                items(shelf.items) { item ->
+                itemsIndexed(shelf.items) { index, item ->
                     HeroCard(
                         item = item,
                         onClick = { onItemClick(item) },
                         onLongPress = onItemLongPress?.let { { it(item) } },
-                        modifier = Modifier.width(cardWidth),
+                        modifier = Modifier.width(cardWidth).cardEntrance(index),
                         isCurrent = item.matchesCurrentlyPlaying(currentSong),
                         isPlaying = item.matchesCurrentlyPlaying(currentSong) && isPlaying,
                     )
@@ -783,8 +797,10 @@ private fun HeroCard(
     isCurrent: Boolean = false,
     isPlaying: Boolean = false,
 ) {
+    val hover = rememberCardHover()
     Box(
         modifier = modifier
+            .cardHoverLift(hover)
             .aspectRatio(HERO_CARD_RATIO)
             .clip(RoundedCornerShape(18.dp))
             .thumbnailBorder(RoundedCornerShape(18.dp))
@@ -799,6 +815,7 @@ private fun HeroCard(
             modifier = Modifier.fillMaxSize(),
         )
         if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+        CardHoverPlay(hover, Alignment.TopEnd)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -855,11 +872,12 @@ internal fun Shelf(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             leadingCard?.let { card -> item(key = "leading") { card() } }
-            items(shelf.items) { item ->
+            itemsIndexed(shelf.items) { index, item ->
                 ShelfCard(
                     item = item,
                     onClick = { onItemClick(item) },
                     onLongPress = onItemLongPress?.let { { it(item) } },
+                    modifier = Modifier.width(SHELF_CARD_WIDTH).cardEntrance(index),
                     isCurrent = item.matchesCurrentlyPlaying(currentSong),
                     isPlaying = item.matchesCurrentlyPlaying(currentSong) && isPlaying,
                 )
@@ -972,8 +990,10 @@ internal fun ShelfCard(
     isCurrent: Boolean = false,
     isPlaying: Boolean = false,
 ) {
+    val hover = rememberCardHover()
     Column(
         modifier = modifier
+            .cardHoverLift(hover)
             .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
             .contextClick(onLongPress),
     ) {
@@ -1037,6 +1057,7 @@ internal fun ShelfCard(
                         modifier = Modifier.fillMaxSize(),
                     )
                     if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
+                    CardHoverPlay(hover)
                 }
             }
         }

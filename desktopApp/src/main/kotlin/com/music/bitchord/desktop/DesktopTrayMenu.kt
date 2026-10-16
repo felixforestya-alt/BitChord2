@@ -60,6 +60,10 @@ internal object DesktopTrayMenu {
         quit = onQuit
     }
 
+    /** The playing cover, for the drawn menu's header; null with nothing playing. */
+    @Volatile
+    var artworkUrl: String? = null
+
     fun onLayoutChanged(listener: (Int) -> Unit) = synchronized(lock) { onLayoutChanged = listener }
 
     /** Keeps the menu's text in step with playback; silent when nothing moved. */
@@ -85,7 +89,7 @@ internal object DesktopTrayMenu {
             add(
                 Entry(
                     ID_PLAY_PAUSE,
-                    label = if (isPlaying) "Pause" else "Play",
+                    label = if (isPlaying) DesktopStrings["widget_pause", "Pause"] else DesktopStrings["widget_play", "Play"],
                     icon = if (isPlaying) "media-playback-pause" else "media-playback-start",
                     action = playPause,
                 ),
@@ -98,6 +102,22 @@ internal object DesktopTrayMenu {
             add(Entry(ID_SEPARATOR_BOTTOM, separator = true))
             add(Entry(ID_QUIT, label = DesktopStrings["d_quit_bitchord", "Quit BitChord"], icon = "application-exit", action = quit))
         }
+    }
+
+    /** What the drawn tray menu shows and does, read at the moment it opens. */
+    internal class Snapshot(
+        val title: String?,
+        val playing: Boolean,
+        val playPause: () -> Unit,
+        val next: () -> Unit,
+        val previous: () -> Unit,
+        val openPlayer: () -> Unit,
+        val openSettings: () -> Unit,
+        val quit: () -> Unit,
+    )
+
+    fun snapshot(): Snapshot = synchronized(lock) {
+        Snapshot(nowPlaying, isPlaying, playPause, next, previous, openPlayer, openSettings, quit)
     }
 
     /** The same menu, as AWT's own widgets. */

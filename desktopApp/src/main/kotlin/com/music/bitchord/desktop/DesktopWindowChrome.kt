@@ -3,6 +3,9 @@ package com.music.bitchord.desktop
 import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -51,14 +54,22 @@ internal fun DesktopTitleBar() {
     DesktopTitleBarDragArea(
         Modifier
             .fillMaxWidth()
-            .height(CAPTION_HEIGHT)
+            .height(if (DesktopPlatform.isMac) CAPTION_HEIGHT else WIN_CAPTION_HEIGHT)
             .desktopWindowGlass(),
     ) {
         Box(Modifier.fillMaxSize()) {
-            DesktopWindowButtons(Modifier.align(Alignment.CenterStart))
+            DesktopWindowButtons(
+                Modifier.align(if (DesktopPlatform.isMac) Alignment.CenterStart else Alignment.CenterEnd),
+            )
         }
     }
 }
+
+/**
+ * Where the caption buttons go: macOS leads with its traffic lights, Windows ends with
+ * minimise / maximise / close, as every other window on that desktop does.
+ */
+internal val DesktopCaptionOnRight: Boolean get() = !DesktopPlatform.isMac
 
 /** Whether there is a title bar at all. */
 internal object DesktopTitleBarSetting {
@@ -115,6 +126,10 @@ internal fun DesktopTitleBarDragArea(
 internal fun DesktopWindowButtons(modifier: Modifier = Modifier) {
     if (!DesktopPlatform.drawsOwnWindowFrame) return
     val actions = LocalDesktopWindowActions.current ?: return
+    if (!DesktopPlatform.isMac) {
+        WindowsCaptionButtons(actions, modifier)
+        return
+    }
     val maximized by DesktopWindowMode.maximized.collectAsState()
     val windowInfo = androidx.compose.ui.platform.LocalWindowInfo.current
     val isFocused = windowInfo.isWindowFocused
@@ -202,6 +217,101 @@ private fun MacCaptionButton(
         contentAlignment = Alignment.Center,
     ) {}
 }
+
+/**
+ * Windows 11's caption buttons: three flat 46-wide cells at the right-hand end, a thin glyph in
+ * each, a faint wash on hover and the system red behind close.
+ */
+@Composable
+private fun WindowsCaptionButtons(actions: DesktopWindowActions, modifier: Modifier = Modifier) {
+    val maximized by DesktopWindowMode.maximized.collectAsState()
+    val focused = androidx.compose.ui.platform.LocalWindowInfo.current.isWindowFocused
+    val glyph = if (focused) Color.White else Color.White.copy(alpha = 0.45f)
+    Row(
+        modifier = modifier.height(WIN_CAPTION_HEIGHT),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        WindowsCaptionButton("Minimize", glyph, onClick = actions.minimize) { color ->
+            val half = WIN_GLYPH_HALF.toPx()
+            drawLine(color, Offset(center.x - half, center.y), Offset(center.x + half, center.y), WIN_HAIRLINE.toPx())
+        }
+        WindowsCaptionButton(if (maximized) "Restore" else "Maximize", glyph, onClick = actions.toggleMaximize) { color ->
+            val half = WIN_GLYPH_HALF.toPx()
+            val line = WIN_HAIRLINE.toPx()
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = line)
+            if (maximized) {
+                // Restore: the front square, and the corner of the one behind it.
+                val inset = 2.dp.toPx()
+                drawRoundRect(
+                    color,
+                    topLeft = Offset(center.x - half, center.y - half + inset),
+                    size = androidx.compose.ui.geometry.Size(half * 2 - inset, half * 2 - inset),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.dp.toPx()),
+                    style = stroke,
+                )
+                drawLine(color, Offset(center.x - half + inset, center.y - half), Offset(center.x + half, center.y - half), line)
+                drawLine(color, Offset(center.x + half, center.y - half), Offset(center.x + half, center.y + half - inset), line)
+            } else {
+                drawRoundRect(
+                    color,
+                    topLeft = Offset(center.x - half, center.y - half),
+                    size = androidx.compose.ui.geometry.Size(half * 2, half * 2),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx()),
+                    style = stroke,
+                )
+            }
+        }
+        WindowsCaptionButton("Close", glyph, onClick = actions.close, isClose = true) { color ->
+            val half = WIN_GLYPH_HALF.toPx()
+            val line = WIN_HAIRLINE.toPx()
+            drawLine(color, Offset(center.x - half, center.y - half), Offset(center.x + half, center.y + half), line, StrokeCap.Round)
+            drawLine(color, Offset(center.x + half, center.y - half), Offset(center.x - half, center.y + half), line, StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+private fun WindowsCaptionButton(
+    label: String,
+    glyphColor: Color,
+    onClick: () -> Unit,
+    isClose: Boolean = false,
+    glyph: androidx.compose.ui.graphics.drawscope.DrawScope.(Color) -> Unit,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val wash by androidx.compose.animation.animateColorAsState(
+        targetValue = when {
+            isClose && pressed -> WIN_CLOSE_PRESSED
+            isClose && hovered -> WIN_CLOSE_HOVER
+            pressed -> Color.White.copy(alpha = 0.04f)
+            hovered -> Color.White.copy(alpha = 0.08f)
+            else -> Color.Transparent
+        },
+        animationSpec = androidx.compose.animation.core.tween(if (hovered) 90 else 160),
+        label = "captionWash",
+    )
+    val glyphTint = if (isClose && (hovered || pressed)) Color.White else glyphColor
+    Box(
+        Modifier
+            .width(WIN_CAPTION_WIDTH)
+            .fillMaxHeight()
+            .hoverable(interaction)
+            .pointerHoverIcon(PointerIcon.Default)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .semantics { contentDescription = label }
+            .background(wash)
+            .drawBehind { glyph(glyphTint) },
+    )
+}
+
+private val WIN_CAPTION_WIDTH = 46.dp
+internal val WIN_CAPTION_HEIGHT = 32.dp
+private val WIN_GLYPH_HALF = 5.dp
+private val WIN_HAIRLINE = 1.dp
+private val WIN_CLOSE_HOVER = Color(0xFFC42B1C)
+private val WIN_CLOSE_PRESSED = Color(0xFFB2271A)
 
 /**
  * The platform's own caption metrics, which is what makes these read as the window's controls

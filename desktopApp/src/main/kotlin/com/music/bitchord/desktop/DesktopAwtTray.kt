@@ -34,8 +34,20 @@ internal object DesktopAwtTray {
                 if (icon != null) return@invokeLater
                 val tray = runCatching { SystemTray.getSystemTray() }.getOrNull() ?: return@invokeLater
                 val art = image ?: blank(tray.trayIconSize.width.coerceAtLeast(16))
-                val created = TrayIcon(art, tooltip, DesktopTrayMenu.awtPopup()).apply {
+                // On Windows the menu is drawn by the app — see [DesktopTrayPopup]; the system's
+                // own is a grey list of plain text.
+                val drawnMenu = DesktopPlatform.isWindows
+                val created = TrayIcon(art, tooltip, if (drawnMenu) null else DesktopTrayMenu.awtPopup()).apply {
                     isImageAutoSize = true
+                    if (drawnMenu) {
+                        addMouseListener(object : java.awt.event.MouseAdapter() {
+                            override fun mouseReleased(e: java.awt.event.MouseEvent) {
+                                if (e.button == java.awt.event.MouseEvent.BUTTON3 || e.isPopupTrigger) {
+                                    DesktopTrayPopup.show(e.locationOnScreen, synchronized(lock) { image })
+                                }
+                            }
+                        })
+                    }
                     // Windows opens the menu on right-click itself; the left click is the shortcut
                     // back to the window, which is what every media player there does.
                     addActionListener { EventQueue.invokeLater(onActivate) }
@@ -68,7 +80,7 @@ internal object DesktopAwtTray {
                 tooltip = text
                 val current = icon ?: return@invokeLater
                 current.toolTip = text
-                current.popupMenu = DesktopTrayMenu.awtPopup()
+                if (current.popupMenu != null) current.popupMenu = DesktopTrayMenu.awtPopup()
             }
         }
     }

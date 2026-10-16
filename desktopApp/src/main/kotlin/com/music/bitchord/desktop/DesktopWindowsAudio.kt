@@ -30,6 +30,15 @@ internal object DesktopWindowsAudio {
         bytes
     }
 
+    /**
+     * The endpoint's shared-mode mix rate, or null when the native side cannot say (an older
+     * library without the call, or no device at all).
+     */
+    fun mixRate(device: String): Int? {
+        if (!available) return null
+        return runCatching { nativeMixRate(device) }.getOrNull()?.takeIf { it > 0 }
+    }
+
     fun write(samples: FloatArray, count: Int, gain: Float): Int =
         if (available) nativeWrite(samples, count, gain) else 0
 
@@ -81,6 +90,7 @@ internal object DesktopWindowsAudio {
         floatingPoint: Boolean,
     ): Int
 
+    @JvmStatic private external fun nativeMixRate(device: String): Int
     @JvmStatic private external fun nativeDevices(): Array<String>
     @JvmStatic private external fun nativeWrite(samples: FloatArray, count: Int, gain: Float): Int
     @JvmStatic private external fun nativeFramesPlayed(): Long

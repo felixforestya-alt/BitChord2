@@ -44,3 +44,16 @@ keystore.properties
 # AI agent configuration
 AGENTS.md
 /output/
+
+# Local distributable builds (-Pbitchord.dist)
+/dist/
+/dist2/
+/out/
+/out2/
+/test-build/
+/app-latest/
+/app-final/
+/app-final2/
+/dist3/
+/render/
+/release/

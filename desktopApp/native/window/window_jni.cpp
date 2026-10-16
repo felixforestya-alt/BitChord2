@@ -151,8 +151,11 @@ bool install_frame(HWND window) {
     g_original_proc = previous;
 
     LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
-    style &= ~static_cast<LONG_PTR>(WS_POPUP);
-    style |= WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME |
+    // No WS_SYSMENU: with it, DWM paints its own minimise / maximise / close into the frame
+    // extended under a Mica or Acrylic window — a second set of buttons beside the app's own for
+    // the first frames after launch. The app's buttons post the same system commands.
+    style &= ~static_cast<LONG_PTR>(WS_POPUP | WS_SYSMENU);
+    style |= WS_OVERLAPPED | WS_CAPTION | WS_THICKFRAME |
         WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
     SetWindowLongPtrW(window, GWL_STYLE, style);
 
@@ -664,6 +667,32 @@ int write_audio(const float* samples, int sample_count, float gain) {
     return static_cast<int>(frame_at * g_audio_channels * g_audio_bytes_per_sample);
 }
 
+/**
+ * The shared-mode mix rate of the endpoint [wanted] resolves to, or 0. Opening the stream at this
+ * rate means the Windows engine has nothing left to resample, so the app's own windowed-sinc
+ * converter is the only one the audio ever passes through.
+ */
+int mix_rate(const std::wstring& wanted) {
+    std::lock_guard<std::mutex> guard(g_audio_mutex);
+    ComScope com;
+    if (!com.ready()) return 0;
+    IMMDevice* device = resolve_device_locked(wanted);
+    if (device == nullptr) return 0;
+    IAudioClient* client = nullptr;
+    int rate = 0;
+    if (SUCCEEDED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                   reinterpret_cast<void**>(&client))) && client != nullptr) {
+        WAVEFORMATEX* mix = nullptr;
+        if (SUCCEEDED(client->GetMixFormat(&mix)) && mix != nullptr) {
+            rate = static_cast<int>(mix->nSamplesPerSec);
+            CoTaskMemFree(mix);
+        }
+        client->Release();
+    }
+    device->Release();
+    return rate;
+}
+
 jobjectArray list_devices(JNIEnv* env) {
     std::vector<std::wstring> values;
     {
@@ -753,6 +782,16 @@ Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeOpen(
         static_cast<int>(channels),
         static_cast<int>(bytes_per_sample),
         floating == JNI_TRUE));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeMixRate(JNIEnv* env, jclass, jstring device) {
+    if (g_vm == nullptr) env->GetJavaVM(&g_vm);
+    const jchar* chars = env->GetStringChars(device, nullptr);
+    const jsize length = env->GetStringLength(device);
+    std::wstring wanted(reinterpret_cast<const wchar_t*>(chars), static_cast<size_t>(length));
+    env->ReleaseStringChars(device, chars);
+    return static_cast<jint>(mix_rate(wanted));
 }
 
 JNIEXPORT jobjectArray JNICALL

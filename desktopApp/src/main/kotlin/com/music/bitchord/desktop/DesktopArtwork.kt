@@ -10,6 +10,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asSkiaBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
@@ -35,7 +36,7 @@ internal object DesktopArtworkCache {
      * large one does not decide it may hold half a gigabyte of thumbnails.
      */
     internal val budgetBytes: Long =
-        (Runtime.getRuntime().maxMemory() / 6).coerceIn(32L * 1024 * 1024, 128L * 1024 * 1024)
+        (Runtime.getRuntime().maxMemory() / 8).coerceIn(24L * 1024 * 1024, 64L * 1024 * 1024)
 
     /** Four bytes a pixel, which is what every format here decodes to. */
     private val images = DesktopByteBudgetLru<ImageBitmap>(budgetBytes) {
@@ -45,14 +46,24 @@ internal object DesktopArtworkCache {
     /** Everything held, dropped — what the Storage settings' "Clear image cache" does. */
     fun clear() = images.clear()
 
+    /** What is already held for [url], without fetching. */
+    fun peek(url: String?): ImageBitmap? = url?.takeIf { it.isNotBlank() }?.let(images::get)
+
     suspend fun load(url: String?): ImageBitmap? {
         if (url.isNullOrBlank()) return null
+        images.get(url)?.let { return it }
+        // Off the UI thread whoever calls: a fetch made there froze the window for as long as
+        // the artwork server took to answer — seconds, at worst the whole read timeout.
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { fetch(url) }
+    }
+
+    private fun fetch(url: String): ImageBitmap? {
         images.get(url)?.let { return it }
         return runCatching {
             URI(url).toURL().openConnection().apply {
                 connectTimeout = 10_000
                 readTimeout = 10_000
-            }.getInputStream().use { stream -> stream.readBytes().decodeToImageBitmap() }
+            }.getInputStream().use { stream -> stream.readBytes().decodeToImageBitmap().frozen() }
         }.getOrNull()?.also { images.put(url, it) }
     }
 }
@@ -83,3 +94,14 @@ fun DesktopArtwork(
         )
     }
 }
+
+/**
+ * Marks the bitmap behind this as never changing again, and returns it.
+ *
+ * Compose draws a bitmap by wrapping it in a Skia image each time. A bitmap Skia may still see
+ * change is copied for that and uploaded to the GPU afresh on every draw — for a cover spinning on
+ * the disc, eight megabytes a frame, a hundred and sixty frames a second, which stalled the frames
+ * whenever the GPU had wound its clocks down. Frozen, it is uploaded once and drawn from the GPU's
+ * own copy after that. Call it once the pixels are final.
+ */
+internal fun ImageBitmap.frozen(): ImageBitmap = also { it.asSkiaBitmap().setImmutable() }

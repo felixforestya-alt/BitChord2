@@ -128,17 +128,23 @@ class DesktopReplayTest {
 
     @Test
     fun `the cards lead with minutes and skip a category with nothing in it`() {
+        // The labels as the catalogue in force has them, so this reads the same on any machine.
+        val minutes = DesktopStrings["minutes_listened", "Minutes listened"]
+        val topAlbum = DesktopStrings["top_album", "Top album"]
         val summary = DesktopListeningStats.summarise(history, DesktopReplayPeriod.ALL_TIME, today)
         val cards = summary.heroCards()
-        assertEquals("Minutes listened", cards.first().label)
-        assertEquals(listOf("Minutes listened", "Top artist", "Top song", "Top album"), cards.map { it.label })
+        assertEquals(minutes, cards.first().label)
+        assertEquals(
+            listOf(minutes, DesktopStrings["top_artist", "Top artist"], DesktopStrings["top_song", "Top song"], topAlbum),
+            cards.map { it.label },
+        )
 
         val bare = DesktopListeningStats.summarise(
             listOf(bucket("2026-09", Triple(song("n", "No Album", "Nobody"), 60_000L, 1))),
             DesktopReplayPeriod.ALL_TIME,
             today,
         )
-        assertTrue(bare.heroCards().none { it.label == "Top album" } || bare.albums.isNotEmpty())
+        assertTrue(bare.heroCards().none { it.label == topAlbum } || bare.albums.isNotEmpty())
     }
 
     @Test

@@ -125,7 +125,7 @@ internal object DesktopArtworkMesh {
         bitmap.allocPixels(info)
         bitmap.installPixels(bytes)
         bitmap.setImmutable()
-        return org.jetbrains.skia.Image.makeFromBitmap(bitmap).toComposeImageBitmap()
+        return org.jetbrains.skia.Image.makeFromBitmap(bitmap).toComposeImageBitmap().frozen()
     }
 
     private fun smoothstep(t: Float): Float {

@@ -1027,6 +1027,82 @@ object StreamResolver {
         }
     }
 
+    // ---- Music video (picture only) ------------------------------------------
+
+    /**
+     * A video-only rendition of [videoId]: the picture of a music video, to be shown muted beside
+     * the audio this object already resolves.
+     */
+    class VideoStream(
+        val url: String,
+        val width: Int,
+        val height: Int,
+        val fps: Int,
+        val codec: String,
+        val headers: Map<String, String>,
+    )
+
+    private class ResolvedVideo(val stream: VideoStream, val at: Long)
+
+    private val videoStreams = ConcurrentHashMap<String, ResolvedVideo>()
+
+    /** Its own gate, so a slow video extraction never holds up the next track's audio. */
+    private val videoGate = Mutex()
+
+    /**
+     * The best video-only stream for [videoId] no taller than [maxHeight]. H.264 is preferred over
+     * VP9, and VP9 over AV1, at the same height: all three decode, but H.264 costs a desktop CPU
+     * least and leaves the most headroom for the rest of the player.
+     *
+     * Through NewPipe, which resolves the signature and `n` transforms for every format it lists;
+     * held for [URL_TTL_MS] like the audio.
+     */
+    suspend fun resolveVideoStream(videoId: String, maxHeight: Int = 1080): VideoStream {
+        init
+        videoStreams[videoId]
+            ?.takeIf { MonotonicClock.nowMs() - it.at < URL_TTL_MS && it.stream.height <= maxHeight }
+            ?.let { return it.stream }
+        return videoGate.withLock {
+            withContext(Dispatchers.IO) {
+                val extractor = ServiceList.YouTube.getStreamExtractor(
+                    "https://www.youtube.com/watch?v=$videoId",
+                )
+                extractor.fetchPage()
+                val candidates = extractor.videoOnlyStreams.filter {
+                    !it.content.isNullOrBlank() &&
+                        it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP &&
+                        it.height in 1..maxHeight
+                }
+                fun codecRank(codec: String?): Int {
+                    val name = codec.orEmpty().lowercase()
+                    return when {
+                        name.startsWith("avc") -> 0
+                        name.startsWith("vp9") || name.startsWith("vp09") -> 1
+                        name.startsWith("av01") -> 2
+                        else -> 3
+                    }
+                }
+                val best = candidates.sortedWith(
+                    compareByDescending<org.schabi.newpipe.extractor.stream.VideoStream> { it.height }
+                        .thenBy { codecRank(it.codec) }
+                        .thenByDescending { it.fps },
+                ).firstOrNull() ?: error("No video picture for $videoId")
+                val url = best.content
+                VideoStream(
+                    url = url,
+                    width = best.width,
+                    height = best.height,
+                    fps = best.fps,
+                    codec = best.codec.orEmpty(),
+                    headers = mediaHeadersFor(url),
+                ).also {
+                    TrackLog.d(TAG, "video for $videoId: ${it.width}x${it.height}@${it.fps} ${it.codec}")
+                    videoStreams[videoId] = ResolvedVideo(it, MonotonicClock.nowMs())
+                }
+            }
+        }
+    }
+
     /**
      * The container, which is all NewPipe's mime type reports.
      *

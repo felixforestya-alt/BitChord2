@@ -37,8 +37,66 @@ internal object DesktopSecretStore {
         null
     }
 
+    // ---- Windows: the current user's DPAPI ------------------------------------
+    //
+    // Windows has no Secret Service, and the credential used to fall through to a plain registry
+    // value anyone with the user's registry could read. DPAPI seals it to this Windows account
+    // instead; what lands in the registry is ciphertext only this user can open.
+
+    private fun windowsKey(attributes: Map<String, String>): String {
+        val canonical = attributes.toSortedMap().entries.joinToString("\u0000") { "${it.key}=${it.value}" }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(canonical.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+        return "secret_dpapi_${digest.take(32)}"
+    }
+
+    private fun windowsLookup(attributes: Map<String, String>): ByteArray? {
+        val sealed = DesktopPreferenceChunks.read(DesktopPersistence().preferences, windowsKey(attributes))
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+        val bytes = runCatching { java.util.Base64.getDecoder().decode(sealed) }.getOrNull() ?: return null
+        return DesktopWindowsCrypto.unprotect(bytes)
+    }
+
+    private fun windowsStore(attributes: Map<String, String>, secret: ByteArray): Boolean {
+        val sealed = DesktopWindowsCrypto.protect(secret) ?: return false
+        DesktopPreferenceChunks.write(
+            DesktopPersistence().preferences,
+            windowsKey(attributes),
+            java.util.Base64.getEncoder().encodeToString(sealed),
+        )
+        return true
+    }
+
+    private fun windowsRemove(attributes: Map<String, String>): Boolean {
+        DesktopPreferenceChunks.remove(DesktopPersistence().preferences, windowsKey(attributes))
+        return true
+    }
+
     /** The first secret stored under [attributes], as bytes. */
-    fun lookup(attributes: Map<String, String>): ByteArray? = withService { _, service, session ->
+    fun lookup(attributes: Map<String, String>): ByteArray? =
+        if (DesktopPlatform.isWindows) windowsLookup(attributes) else linuxLookup(attributes)
+
+    /** Stores [secret] under [attributes], replacing whatever was there. */
+    fun store(label: String, attributes: Map<String, String>, secret: ByteArray): Boolean =
+        if (DesktopPlatform.isWindows) windowsStore(attributes, secret) else linuxStore(label, attributes, secret)
+
+    /** Forgets everything stored under [attributes]. */
+    fun remove(attributes: Map<String, String>): Boolean =
+        if (DesktopPlatform.isWindows) windowsRemove(attributes) else linuxRemove(attributes)
+
+    /** Whether a store is actually reachable, for the settings screen to say so. */
+    fun isAvailable(): Boolean =
+        if (DesktopPlatform.isWindows) {
+            DesktopWindowsCrypto.protect(byteArrayOf(1)) != null
+        } else {
+            withService { _, _, _ -> true } == true
+        }
+
+    // ---- Linux: Secret Service -------------------------------------------------
+
+    private fun linuxLookup(attributes: Map<String, String>): ByteArray? = withService { _, service, session ->
         val found = service.SearchItems(attributes)
         val items = buildList {
             addAll(found.unlocked)
@@ -50,8 +108,7 @@ internal object DesktopSecretStore {
         service.GetSecrets(items, session).values.firstOrNull()?.value
     }
 
-    /** Stores [secret] under [attributes], replacing whatever was there. */
-    fun store(label: String, attributes: Map<String, String>, secret: ByteArray): Boolean =
+    private fun linuxStore(label: String, attributes: Map<String, String>, secret: ByteArray): Boolean =
         withService { connection, service, session ->
             val collection = runCatching { service.ReadAlias("default")?.path }
                 .getOrNull()
@@ -74,8 +131,7 @@ internal object DesktopSecretStore {
             true
         } ?: false
 
-    /** Forgets everything stored under [attributes]. */
-    fun remove(attributes: Map<String, String>): Boolean = withService { connection, service, _ ->
+    private fun linuxRemove(attributes: Map<String, String>): Boolean = withService { connection, service, _ ->
         val found = service.SearchItems(attributes)
         (found.unlocked + found.locked).forEach { path ->
             runCatching {
@@ -88,7 +144,4 @@ internal object DesktopSecretStore {
         }
         true
     } ?: false
-
-    /** Whether a store is actually reachable, for the settings screen to say so. */
-    fun isAvailable(): Boolean = withService { _, _, _ -> true } == true
 }

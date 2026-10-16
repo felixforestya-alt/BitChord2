@@ -1,5 +1,6 @@
 package com.music.bitchord.desktop
 
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.CompositionLocalProvider
 import com.music.bitchord.ui.player.PlayerPlatform
 import com.music.bitchord.data.DebugLog
@@ -24,6 +25,7 @@ import java.awt.Dimension
 import java.awt.Rectangle
 import java.awt.Toolkit
 import kotlin.math.roundToInt
+import okio.Path.Companion.toOkioPath
 import org.jetbrains.compose.resources.painterResource
 
 fun main() {
@@ -63,10 +65,45 @@ fun main() {
     )
     // The public "apps open right now" count; see Presence.
     DesktopPresence.install()
+    installImageLoader()
     desktopMain()
 }
 
+/**
+ * Coil, which every shared card and shelf loads its artwork through, with both of its caches
+ * sized on purpose. Left to its defaults it kept decoded covers in memory against a share of the
+ * whole heap and nothing on disk, so the app grew as you browsed and fetched every cover again on
+ * every launch. Now: a bounded set of decoded covers in memory, and the files themselves on disk,
+ * so a page seen before comes back at once without the memory to show for it.
+ */
+private fun installImageLoader() {
+    coil3.SingletonImageLoader.setSafe { context ->
+        coil3.ImageLoader.Builder(context)
+            .memoryCache {
+                coil3.memory.MemoryCache.Builder()
+                    .maxSizeBytes(48L * 1024 * 1024)
+                    .build()
+            }
+            .diskCache {
+                coil3.disk.DiskCache.Builder()
+                    .directory(DesktopMediaCache.directory.resolve("images").toFile().toOkioPath())
+                    .maxSizeBytes(300L * 1024 * 1024)
+                    .build()
+            }
+            .build()
+    }
+}
+
 private fun desktopMain() = application {
+    // The thread that composes and draws every frame goes first: at 160 Hz a frame has six
+    // milliseconds, and background work at the same priority — decoding the next track, the
+    // analysis, artwork — was taking enough of them to drop frames while the page moved.
+    LaunchedEffect(Unit) {
+        Thread.currentThread().priority = Thread.MAX_PRIORITY
+        DesktopSchedulingBoost.boostProcess()
+        DesktopSchedulingBoost.boostRenderThread()
+        DesktopSchedulingBoost.boostGpu()
+    }
     // Closing puts the window away rather than ending the process, while there is a tray icon to
     // bring it back from — see [DesktopWindowVisibility].
     val visible by DesktopWindowVisibility.visible.collectAsState()
@@ -110,6 +147,7 @@ private fun desktopMain() = application {
         val openingSize = remember { state.size }
         LaunchedEffect(composeWindow) {
             DesktopWindowVisibility.attachWindow(composeWindow)
+            this.launch { DesktopGpuCache.raise(composeWindow) }
             // AWT's default is white, and it is what shows for the frame or two a moved or resized
             // window takes to repaint: a white band along its edges.
             // Not over a transparent window, whose clear background is what the material shows
@@ -138,6 +176,14 @@ private fun desktopMain() = application {
             composeWindow.size = Dimension(
                 (openingSize.width.value * transform.scaleX).roundToInt(),
                 (openingSize.height.value * transform.scaleY).roundToInt(),
+            )
+            // What draws the window — the GPU, or the CPU when Skia could not get a device — and
+            // at what rate the screen asks for frames: the first thing to know about smoothness.
+            DesktopTrackLog.log(
+                "render: ${composeWindow.renderApi}, " +
+                    "${composeWindow.graphicsConfiguration.device.displayMode.refreshRate} Hz, " +
+                    "${composeWindow.graphicsConfiguration.device.displayMode.width}x" +
+                    "${composeWindow.graphicsConfiguration.device.displayMode.height}",
             )
             if (DesktopPlatform.isWindows && DesktopWindowsFrame.install("BitChord")) {
                 DesktopWindowBackdrop.apply()

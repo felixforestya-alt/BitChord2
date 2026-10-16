@@ -60,8 +60,10 @@ internal class DesktopDecodeAhead(
 
     private val worker = Thread(::decodeLoop, name).apply {
         isDaemon = true
-        // Above the UI, below the audio thread itself.
-        priority = Thread.NORM_PRIORITY + 1
+        // Below the UI thread, which draws every frame of the display and must never wait on
+        // this; it buffers well ahead, so a frame's worth of delay costs it nothing. The audio
+        // thread itself stays above both.
+        priority = Thread.NORM_PRIORITY
         start()
     }
 

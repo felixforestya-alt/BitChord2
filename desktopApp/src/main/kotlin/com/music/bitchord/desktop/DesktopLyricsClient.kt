@@ -74,23 +74,45 @@ object DesktopLyricsClient {
         // the feature being off.
         if (asked.isEmpty()) return Result.failure(IllegalStateException("No lyrics sources are enabled"))
 
-        val cacheKey = "${song.videoId}|$durationMs|${only.orEmpty()}"
+        // The default provider, when one is set: asked first and alone, so its answer wins whenever
+        // it has one — not just when it happens to be quickest in the race.
+        val preferred = if (only == null) persistence.lyricsDefaultSource()?.let(::lyricsSourceNamed) else null
+
+        val cacheKey = "${song.videoId}|$durationMs|${only.orEmpty()}|${preferred?.label.orEmpty()}"
         cache[cacheKey]?.takeIf { System.currentTimeMillis() - it.createdAt < CACHE_TTL_MS }?.let { return it.result }
 
         // A downloaded or local file carries its own words; asking servers for a string already
         // on disk is a round trip, and it is why a download showed nothing offline.
         val embedded = if (only == null) embedded(song) else null
+        val fromDefault = if (embedded == null && preferred != null) {
+            LyricsRepository.lyrics(
+                videoId = song.videoId,
+                title = song.title,
+                artist = song.artist,
+                durationMs = durationMs,
+                album = song.albumName,
+                sources = setOf(preferred),
+                order = listOf(preferred),
+                prioritizeSyllableSync = persistence.boolean(KEY_PRIORITIZE_SYLLABLES, false),
+            )
+        } else {
+            null
+        }
         val result = if (embedded != null) {
             Result.success(DesktopLyrics("Downloaded", embedded))
+        } else if (fromDefault != null) {
+            Result.success(DesktopLyrics(fromDefault.source.label, fromDefault.lines))
         } else {
+            // The default, if it was asked above, has already said no.
+            val rest = asked.filterNot { it == preferred }.ifEmpty { asked }
             val found = LyricsRepository.lyrics(
                 videoId = song.videoId,
                 title = song.title,
                 artist = song.artist,
                 durationMs = durationMs,
                 album = song.albumName,
-                sources = asked.toSet(),
-                order = asked,
+                sources = rest.toSet(),
+                order = rest,
                 prioritizeSyllableSync = persistence.boolean(KEY_PRIORITIZE_SYLLABLES, false),
             )
             if (found == null) {

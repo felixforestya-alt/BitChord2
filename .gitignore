@@ -57,3 +57,7 @@ AGENTS.md
 /dist3/
 /render/
 /release/
+
+# Built packages — release APKs/bundles are handed out, never committed
+*.apk
+*.aab

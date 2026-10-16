@@ -739,7 +739,11 @@ fun BitChordDesktopApp() {
     var libraryState by remember { mutableStateOf<UiState<LibraryPage>>(UiState.Loading) }
     // Whether YouTube is actually accepting the session, which is not the same as having an account
     // saved.
-    var youtubeSignedIn by remember { mutableStateOf(false) }
+    // Taken as signed in from launch when an account is saved, so the sidebar shows it rather than
+    // a sign-in button for the moment the session takes to come back; settled once it has.
+    var youtubeSignedIn by remember { mutableStateOf(DesktopAccounts.activeAccountId() != null) }
+    // Whether the saved session has been put back into force (or found gone) since launch.
+    var sessionSettled by remember { mutableStateOf(false) }
     // Set by an edit that the library feed has not caught up with yet.
     var libraryStale by remember { mutableStateOf(false) }
     // Bumped when the session changes underneath, so the loader below re-runs without anything it
@@ -791,8 +795,12 @@ fun BitChordDesktopApp() {
     // Whoever was signed in last is signed in again, before anything asks YouTube for something
     // that depends on it.
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { DesktopAccounts.activate() }
-        sessionRevision++
+        try {
+            withContext(Dispatchers.IO) { DesktopAccounts.activate() }
+        } finally {
+            sessionSettled = true
+            sessionRevision++
+        }
     }
     var audioQuality by remember { mutableStateOf(persistence.audioQuality()) }
     var sourceConfigs by remember { mutableStateOf(persistence.sourceConfigs()) }
@@ -2678,6 +2686,10 @@ fun BitChordDesktopApp() {
             downloads = onDisk
             persistence.saveDownloads(onDisk)
         }
+        // Not before the saved session is back: started at once, the feed came as a guest's and
+        // was then thrown away and fetched again for the account. A session slow to come back
+        // (renewed from the browser) is not waited on for long; the reload below follows it.
+        kotlinx.coroutines.withTimeoutOrNull(SESSION_WAIT_MS) { snapshotFlow { sessionSettled }.first { it } }
         loadHome()
     }
 
@@ -2955,6 +2967,8 @@ fun BitChordDesktopApp() {
      * channel, signing out.
      */
     LaunchedEffect(activeAccountId, activeProfileId, sessionRevision) {
+        // Nothing to read until the saved session is back; the bump that follows runs this again.
+        if (!sessionSettled) return@LaunchedEffect
         youtubeSignedIn = DesktopYouTubeAuth.isSignedIn
         if (!DesktopYouTubeAuth.isSignedIn) {
             libraryState = UiState.Success(LibraryPage(emptyList(), emptyList(), emptyList()))
@@ -9064,6 +9078,9 @@ private const val BOTTOM_REVEAL_FROM = 0.6f
 
 /** Between the top bar and a page, with no player pinned over it. */
 internal val PAGE_TOP_GAP = 16.dp
+
+/** How long Home waits at launch for the saved session before loading as a guest. */
+private const val SESSION_WAIT_MS = 8_000L
 
 /** Explore is read from disk, or fetched, this long after launch, so it is ready when opened. */
 private const val EXPLORE_PREFETCH_DELAY_MS = 4_000L

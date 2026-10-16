@@ -352,16 +352,6 @@ private val GAP_ROW_SPACING = 16.dp
 private val LINE_FALLOFF_ALPHA = floatArrayOf(1f, 0.42f, 0.28f, 0.2f, 0.16f)
 
 /**
- * How the lines already sung fall away above the playing one.
- *
- * Unlike the read-ahead falloff above, this one runs straight to nothing: a line
- * is fully gone the moment it is no longer the one being sung, rather than
- * lingering as a half-lit ghost. The lines ahead keep their gentler ramp, so
- * what is coming stays legible.
- */
-private val LINE_SUNG_ALPHA = floatArrayOf(1f, 0f)
-
-/**
  * How far a line defocuses per row of distance from the one being sung, and the
  * ceiling on it — carried over from the accompanist lyrics animation, which
  * measures blur in *pixels* (`blurDelta = 3`) rather than dp. That distinction
@@ -2191,8 +2181,8 @@ internal fun LyricsPanel(
                 // Reading by hand is not following along: the stack flattens
                 // to one brightness so no row is being pointed at.
                 browsing -> BROWSING_ALPHA
-                // A line already sung rises and lets go; one still ahead stays legible.
-                sung -> falloffAlpha(LINE_SUNG_ALPHA, distance)
+                // Lines already sung fall away as gently as the ones ahead, so the
+                // whole song stays on the page to scroll back through and click.
                 else -> falloffAlpha(LINE_FALLOFF_ALPHA, distance)
             }
             val lineAlpha by animateFloatAsState(

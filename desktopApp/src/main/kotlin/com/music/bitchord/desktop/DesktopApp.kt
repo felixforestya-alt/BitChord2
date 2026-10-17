@@ -3456,6 +3456,11 @@ fun BitChordDesktopApp() {
             }
             snapshotFlow { sessionSettled }.first { it }
             delay(3_000)
+            if (System.getenv("BITCHORD_SELFTEST_JAM") == "1") {
+                startWave()
+                DesktopTrackLog.log("selftest jam started")
+                return@LaunchedEffect
+            }
             DesktopWaveTuning.entries.forEach { tuning ->
                 DesktopMyWave.setTuning(tuning)
                 val liked = (libraryState as? UiState.Success)?.data?.likedSongs.orEmpty()

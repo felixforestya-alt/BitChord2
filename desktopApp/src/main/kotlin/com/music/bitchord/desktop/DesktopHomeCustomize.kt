@@ -232,8 +232,17 @@ internal fun DesktopWaveCard(
             Modifier
                 .weight(1f)
                 .height(112.dp)
+                .onSizeChanged { DesktopJamJoin.cardHeightPx = it.height.toFloat() }
                 .clip(RoundedCornerShape(topStart = corner, topEnd = corner, bottomStart = 26.dp, bottomEnd = 26.dp))
-                .background(Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f), light.copy(alpha = 0.55f), deep.copy(alpha = 0.85f))))
+                .drawBehind {
+                    // Its own colour, which gives way to the shared backdrop as it joins.
+                    val own = 1f - (join * heroVisible()).coerceIn(0f, 1f)
+                    if (own > 0.01f) {
+                        drawRect(
+                            Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f * own), light.copy(alpha = 0.55f * own), deep.copy(alpha = 0.85f * own))),
+                        )
+                    }
+                }
                 .drawBehind {
                     // The wave: lines drifting across, in the light of the cover.
                     for (k in 0 until 3) {
@@ -250,11 +259,21 @@ internal fun DesktopWaveCard(
                         drawPath(path, light.copy(alpha = 0.45f - k * 0.12f), style = Stroke(width = (3.5f - k).dp.toPx()))
                     }
                 }
-                .clickable(enabled = !starting, onClick = if (playing) onPlayPause else onPlay)
-                .padding(horizontal = 24.dp),
+                .clickable(enabled = !starting, onClick = if (playing) onPlayPause else onPlay),
             contentAlignment = Alignment.CenterStart,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Joined: the very backdrop the card above has, carried on from where it stops.
+            if (merged || join > 0.01f) {
+                DesktopHeroBackdrop(
+                    coverUrl = coverUrl,
+                    accent = light,
+                    modifier = Modifier
+                        .matchParentSize()
+                        .graphicsLayer { alpha = (join * heroVisible()).coerceIn(0f, 1f) },
+                    shiftUp = { DesktopJamJoin.heroHeightPx },
+                )
+            }
+            Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(56.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
                     when {
                         starting -> CircularProgressIndicator(Modifier.size(24.dp), color = Color.Black, strokeWidth = 2.5.dp)
@@ -629,6 +648,12 @@ private fun TextAction(label: String, filled: Boolean, onClick: () -> Unit) {
 /** How far My Jam's card is joined to the "now playing" card above it, 0 to 1 — read by that card. */
 internal object DesktopJamJoin {
     var amount by androidx.compose.runtime.mutableFloatStateOf(0f)
+
+    /** The jam card's height, for the card above to draw its backdrop down over both. */
+    var cardHeightPx by androidx.compose.runtime.mutableFloatStateOf(0f)
+
+    /** The card above's height, for the jam card to take up that backdrop where it leaves off. */
+    var heroHeightPx by androidx.compose.runtime.mutableFloatStateOf(0f)
 }
 
 /** The room between the "now playing" card and My Jam's: the header's foot and the card's own top. */

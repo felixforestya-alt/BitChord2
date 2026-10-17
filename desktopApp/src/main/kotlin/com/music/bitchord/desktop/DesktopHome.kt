@@ -328,6 +328,8 @@ internal fun DesktopMorphingPlayer(
                 }
                 .desktopLiquidGlass(
                     26.dp,
+                    // The bright rim ran along the seam with My Jam's card: gone while they are one.
+                    rimLight = 0.75f * (1f - DesktopJamJoin.amount),
                     tint = Color.Black.copy(alpha = 0.46f),
                     blurRadius = 8.dp,
                     // Halfway it is most a lens: it bends and magnifies what is under it hardest while
@@ -448,12 +450,14 @@ internal fun DesktopHeroCard(
 ) {
     val palette = rememberVividPalette(song.thumbnailUrl)
     val accent by animateColorAsState(palette.vivid, tween(1_200), label = "heroAccent")
-    val shape = RoundedCornerShape(26.dp)
     Box(
         modifier
             .graphicsLayer {
-                shadowElevation = 18.dp.toPx()
-                this.shape = shape
+                // Joined to My Jam's card below: no shadow onto it, and a square foot to meet it.
+                val joined = DesktopJamJoin.amount
+                shadowElevation = 18.dp.toPx() * (1f - joined)
+                val foot = 26.dp * (1f - joined)
+                this.shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp, bottomStart = foot, bottomEnd = foot)
                 clip = true
             },
     ) {
@@ -463,10 +467,39 @@ internal fun DesktopHeroCard(
 }
 
 @Composable
-private fun HeroBackground(song: Song, accent: Color, modifier: Modifier) {
+private fun HeroBackground(song: Song, accent: Color, modifier: Modifier) =
+    DesktopHeroBackdrop(
+        song.thumbnailUrl,
+        accent,
+        // The card's own height, for My Jam's card to carry the backdrop on from its foot.
+        modifier.onSizeChanged { DesktopJamJoin.heroHeightPx = it.height.toFloat() },
+        extendBelow = { DesktopJamJoin.amount * DesktopJamJoin.cardHeightPx },
+    )
+
+/**
+ * The home card's backdrop: the cover blurred, in a wash of its colour. Laid out [extendBelow] px
+ * taller than the card and [shiftUp] px higher, so that with My Jam's card joined beneath, the two
+ * draw one backdrop between them — the top of it here, the rest there — with no seam.
+ */
+@Composable
+internal fun DesktopHeroBackdrop(
+    coverUrl: String?,
+    accent: Color,
+    modifier: Modifier,
+    extendBelow: () -> Float = { 0f },
+    shiftUp: () -> Float = { 0f },
+) {
     // Blurred once and stretched — a live blur here was redone on every frame of the morph.
-    val art = rememberBlurredArtwork(song.thumbnailUrl, edge = 64, sigma = 4f)
-    Box(modifier.background(Brush.linearGradient(listOf(accent.hueShifted(0f, 0.45f), accent.hueShifted(-30f, 0.16f), Color(0xFF0C0C10))))) {
+    val art = rememberBlurredArtwork(coverUrl, edge = 64, sigma = 4f)
+    Box(
+        modifier.layout { measurable, constraints ->
+            val extra = extendBelow().roundToInt().coerceAtLeast(0)
+            val up = shiftUp().roundToInt().coerceAtLeast(0)
+            val w = constraints.maxWidth
+            val h = constraints.maxHeight
+            val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(w, (h + extra + up).coerceAtLeast(1)))
+            layout(w, h) { placeable.place(0, -up) }
+        }.background(Brush.linearGradient(listOf(accent.hueShifted(0f, 0.45f), accent.hueShifted(-30f, 0.16f), Color(0xFF0C0C10))))) {
         Canvas(
             Modifier.fillMaxSize().graphicsLayer {
                 alpha = 0.55f

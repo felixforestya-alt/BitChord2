@@ -122,28 +122,39 @@ internal fun keepScrollInList(listState: LazyListState) = object : NestedScrollC
  */
 private val QUEUE_ROW_MOTION = tween<IntOffset>(durationMillis = 200, easing = FastOutSlowInEasing)
 
-/** Softens the list where it meets the header and the scrubber. */
-internal fun Modifier.fadingEdges(): Modifier = this
+/**
+ * Softens the list where it meets the header and the scrubber — on each side only while there is
+ * more of the list that way. A short queue sitting at rest has nothing under its edges, and its
+ * first heading was being faded for no reason (BitChord²).
+ */
+internal fun Modifier.fadingEdges(
+    top: () -> Boolean = { true },
+    bottom: () -> Boolean = { true },
+): Modifier = this
     .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
     .drawWithContent {
         drawContent()
         val fade = 28.dp.toPx()
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(Color.Transparent, Color.Black),
-                startY = 0f,
-                endY = fade,
-            ),
-            blendMode = BlendMode.DstIn,
-        )
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(Color.Black, Color.Transparent),
-                startY = size.height - fade,
-                endY = size.height,
-            ),
-            blendMode = BlendMode.DstIn,
-        )
+        if (top()) {
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color.Transparent, Color.Black),
+                    startY = 0f,
+                    endY = fade,
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
+        if (bottom()) {
+            drawRect(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color.Black, Color.Transparent),
+                    startY = size.height - fade,
+                    endY = size.height,
+                ),
+                blendMode = BlendMode.DstIn,
+            )
+        }
     }
 
 /** One track in [InlineQueue], and where it sits in the player's timeline. */
@@ -291,7 +302,7 @@ internal fun InlineQueue(
             modifier = Modifier
                 .fillMaxWidth()
                 .bleedHorizontally(PLAYER_GUTTER)
-                .fadingEdges(),
+                .fadingEdges(top = { listState.canScrollBackward }, bottom = { listState.canScrollForward }),
         ) {
             LazyColumn(
                 state = listState,

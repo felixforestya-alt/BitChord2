@@ -3268,7 +3268,14 @@ private fun BitChordApp(
                                 onRetry = { viewModel.openMoodGenre(category) },
                                 contentPadding = listPadding,
                             )
-                        } ?: Bc2ExploreScreen(
+                        } ?: Box(Modifier.fillMaxSize()) {
+                            // BitChord²: lit by what is playing, as Home is.
+                            LivingBackdrop(
+                                coverUrl = player.song?.thumbnailUrl,
+                                covered = { playerDock.openFraction() >= 0.99f },
+                                modifier = Modifier.matchParentSize(),
+                            )
+                            Bc2ExploreScreen(
                             state = exploreState,
                             gridState = exploreGridState,
                             onCategoryClick = viewModel::openMoodGenre,
@@ -3278,6 +3285,7 @@ private fun BitChordApp(
                             pullState = explorePull,
                             contentPadding = listPadding,
                         )
+                        }
                         TAB_SEARCH -> SearchScreen(
                             query = query,
                             onQueryChange = viewModel::onQueryChange,

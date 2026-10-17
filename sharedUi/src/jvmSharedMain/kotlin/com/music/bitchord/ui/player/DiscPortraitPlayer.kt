@@ -168,15 +168,22 @@ internal fun DiscPortraitPlayer(
     BoxWithConstraints(modifier.fillMaxSize().clipToBounds().background(Color.Black)) {
         val width = maxWidth
         val height = maxHeight
+        // On its side the phone takes the desktop's shape: the disc down the left, a little
+        // over half of it showing past the edge, and everything else beside it on the right.
+        val wide = width > height
         val statusTop = with(density) { stableStatusBarInsets().getTop(this).toDp() }
         // Where the disc's lower edge sits: two thirds of a screen-wide disc below the top.
         val discBottom = statusTop + min(width * 0.94f, height * 0.5f) * 0.68f
         // A bigger disc in that same stretch of screen: wider than the screen and higher up, so
         // more of its print shows rather than more of the screen going to it.
-        val discSize = min(width * 1.22f, height * 0.62f)
-        val discCentreY = discBottom - discSize / 2
-        // Risen with a panel up: a band of disc across the top, the hub just under the edge.
-        val discRise = discCentreY + discSize * 0.5f - (statusTop + PANEL_BAND)
+        val discSize = if (wide) min(height * 0.94f, width * 0.6f) else min(width * 1.22f, height * 0.62f)
+        val discCentreX = if (wide) width * 0.06f else width / 2
+        val discCentreY = if (wide) height / 2 else discBottom - discSize / 2
+        // Risen with a panel up: a band of disc across the top, the hub just under the edge. On
+        // its side the disc stays where it is and the panel takes the stage beside it.
+        val discRise = if (wide) 0.dp else discCentreY + discSize * 0.5f - (statusTop + PANEL_BAND)
+        // Where the words, the panels and the deck begin, on its side.
+        val stageStart = if (wide) width * 0.40f else 0.dp
 
         // ---- The room, and everything the player's sheets frost ---------------------------
         Box(
@@ -215,7 +222,7 @@ internal fun DiscPortraitPlayer(
                 accent = glow,
                 disc = {
                     with(density) {
-                        Offset(width.toPx() / 2f, (discCentreY - discRise * panelT).toPx()) to discSize.toPx() / 2f
+                        Offset(discCentreX.toPx(), (discCentreY - discRise * panelT).toPx()) to discSize.toPx() / 2f
                     }
                 },
                 modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 1f - panelT * 0.45f },
@@ -233,10 +240,12 @@ internal fun DiscPortraitPlayer(
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithContent {
                         drawContent()
-                        drawRect(
-                            Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fadeTo),
-                            blendMode = BlendMode.DstIn,
-                        )
+                        if (!wide) {
+                            drawRect(
+                                Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fadeTo),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        }
                     },
             ) {
             AnimatedContent(
@@ -250,8 +259,8 @@ internal fun DiscPortraitPlayer(
                 // squeezed to the screen's width.
                 modifier = Modifier
                     .fillMaxWidth()
-                    .wrapContentSize(Alignment.TopCenter, unbounded = true)
-                    .offset(y = discCentreY - discSize / 2)
+                    .wrapContentSize(if (wide) Alignment.TopStart else Alignment.TopCenter, unbounded = true)
+                    .offset(x = if (wide) discCentreX - discSize / 2 else 0.dp, y = discCentreY - discSize / 2)
                     .graphicsLayer {
                         translationY = -discRise.toPx() * panelT
                         val s = 1f - 0.12f * panelT
@@ -287,10 +296,11 @@ internal fun DiscPortraitPlayer(
         Column(
             Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing.union(stableStatusBarInsets())),
+                .windowInsetsPadding(WindowInsets.safeDrawing.union(stableStatusBarInsets()))
+                .padding(start = stageStart / UI_SCALE),
         ) {
-            // The mark, top left, as on a broadcast ident.
-            Text(
+            // The mark, top left, as on a broadcast ident — on its side, over the disc instead.
+            if (!wide) Text(
                 "BC².",
                 color = Color.White.copy(alpha = 0.85f),
                 fontWeight = FontWeight.Black,
@@ -302,7 +312,7 @@ internal fun DiscPortraitPlayer(
                 Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(top = PANEL_BAND * panelT),
+                    .padding(top = if (wide) 0.dp else PANEL_BAND * panelT),
             ) {
                 AnimatedContent(
                     targetState = pane,
@@ -315,22 +325,39 @@ internal fun DiscPortraitPlayer(
                             verticalArrangement = Arrangement.Bottom,
                         ) {
                             if (caption != null) {
-                                Text(
-                                    caption.uppercase(),
-                                    color = Color.White.copy(alpha = 0.62f),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 2.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier
-                                        .padding(bottom = 8.dp)
+                                // Where the session came from, as the desktop captions it: a small
+                                // "playing from" over the place itself, named in the phone's
+                                // language rather than the feed's English.
+                                val source = song.playbackSource?.takeIf { it.isNotBlank() }
+                                Column(
+                                    Modifier
+                                        .padding(bottom = 10.dp)
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
                                             indication = null,
                                             onClick = onOpenCaption,
                                         ),
-                                )
+                                ) {
+                                    Text(
+                                        if (source != null) playingFromLabel() else caption.uppercase(),
+                                        color = Color.White.copy(alpha = 0.6f),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 2.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (source != null) {
+                                        Text(
+                                            localisedSource(source),
+                                            color = Color.White.copy(alpha = 0.92f),
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
                             }
                             // The desktop's heading, as big as the room allows.
                             Text(
@@ -357,6 +384,9 @@ internal fun DiscPortraitPlayer(
                             val here = LocalDensity.current
                             androidx.compose.runtime.CompositionLocalProvider(
                                 LocalDensity provides androidx.compose.ui.unit.Density(here.density * WORDS_SCALE, here.fontScale * WORDS_FONT_SCALE),
+                                // The like and menu buttons down by the artist, clear of the title
+                                // and of the line being sung below.
+                                LocalCreditsButtonsAlignment provides Alignment.Bottom,
                             ) {
                                 Column {
                                     credits()
@@ -415,6 +445,14 @@ internal fun DiscPortraitPlayer(
         }
     }
 }
+
+/** "Playing from", in the phone's language. */
+private fun playingFromLabel(): String =
+    if (java.util.Locale.getDefault().language == "ru") "ИГРАЕТ ИЗ" else "PLAYING FROM"
+
+/** A source as the feed names it, in the phone's language where it is one of the feed's own. */
+private fun localisedSource(source: String): String =
+    if (source.equals("Recents", ignoreCase = true) && java.util.Locale.getDefault().language == "ru") "Недавние" else source
 
 /** The desktop's heading over the track, in the phone's language. */
 private fun nowPlayingHeading(): String =

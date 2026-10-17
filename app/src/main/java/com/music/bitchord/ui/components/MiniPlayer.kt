@@ -1,5 +1,6 @@
 package com.music.bitchord.ui.components
 
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawBehind
 import com.music.bitchord.R
@@ -545,19 +546,23 @@ internal fun MiniPlayerPreviousGlyph(tint: Color) {
 }
 
 /**
- * How far through the track the bar is, as a hairline along its foot — not a control, only so
- * a glance says how much is left. Kept inside the pill's straight stretch, clear of its round
- * ends, and read in drawing, so the playhead's ticks redraw it and nothing else.
+ * How far through the track the bar is, as a hairline along its very foot from edge to edge —
+ * not a control, only so a glance says how much is left. The bar's own rounded clip takes the
+ * ends, so it follows the pill's curve. Read in drawing, so the playhead's ticks redraw it and
+ * nothing else.
  */
 internal fun Modifier.miniProgress(progress: () -> Float, color: Color): Modifier = drawWithContent {
     drawContent()
-    val inset = size.height / 2f
-    val track = (size.width - inset * 2f).coerceAtLeast(0f)
-    val y = size.height - 2.5.dp.toPx()
     val stroke = 2.dp.toPx()
-    drawLine(color.copy(alpha = 0.16f), androidx.compose.ui.geometry.Offset(inset, y), androidx.compose.ui.geometry.Offset(inset + track, y), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-    val p = progress().coerceIn(0f, 1f)
-    if (p > 0f) {
-        drawLine(color.copy(alpha = 0.75f), androidx.compose.ui.geometry.Offset(inset, y), androidx.compose.ui.geometry.Offset(inset + track * p, y), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    val top = size.height - stroke
+    val pill = androidx.compose.ui.graphics.Path().apply {
+        addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, size.width, size.height, androidx.compose.ui.geometry.CornerRadius(size.height / 2f)))
+    }
+    clipPath(pill) {
+        drawRect(color.copy(alpha = 0.16f), topLeft = androidx.compose.ui.geometry.Offset(0f, top), size = androidx.compose.ui.geometry.Size(size.width, stroke))
+        val p = progress().coerceIn(0f, 1f)
+        if (p > 0f) {
+            drawRect(color.copy(alpha = 0.8f), topLeft = androidx.compose.ui.geometry.Offset(0f, top), size = androidx.compose.ui.geometry.Size(size.width * p, stroke))
+        }
     }
 }

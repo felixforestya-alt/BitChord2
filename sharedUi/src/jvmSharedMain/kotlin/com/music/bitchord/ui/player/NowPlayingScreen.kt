@@ -1594,7 +1594,9 @@ fun NowPlayingScreen(
     // phone only the lyrics and queue replace the main player's seam-aware,
     // reflected mesh; the main player deliberately keeps its existing look.
     val tabletArtworkBackdrop = tabletSizedPlayer(windowWidth)
-    val discPortrait = discPlayerEnabled && !landscape && !tabletArtworkBackdrop
+    // The disc player on a phone either way up — on its side it takes the desktop's shape — and
+    // not on a tablet held upright, whose player has room for its own layout.
+    val discPortrait = discPlayerEnabled && (landscape || !tabletArtworkBackdrop)
     // Owned by the song-level player composition, not by any one screen state.
     // Opening lyrics/queue, and rotating into or out of landscape, therefore
     // reuse the same tiny pre-blurred bitmap instead of running a screen-sized
@@ -1887,7 +1889,7 @@ fun NowPlayingScreen(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (landscape) {
+        if (landscape && !discPortrait) {
             // Paused always wins outright over a scrub in progress — see
             // [ARTWORK_PAUSE_SHRINK_SCALE].
             val landscapeArtScale by animateFloatAsState(

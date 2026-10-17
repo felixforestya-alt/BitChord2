@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.components
 
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
 import com.music.bitchord.R
 
 import androidx.compose.foundation.background
@@ -357,9 +359,15 @@ fun MiniPlayer(
     dock: PlayerDock? = null,
     /** Dragging the bar up into the player. */
     pull: MiniPlayerPull? = null,
+    /** How far through the track, 0 to 1 — drawn as a hairline along the bar, nothing more. */
+    progress: () -> Float = { 0f },
     modifier: Modifier = Modifier,
 ) {
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
+    // BitChord²: the bar wears the playing cover's colour, as the desktop's does — over the frost.
+    val palette = com.music.bitchord.ui.player.rememberDiscPalette(rememberRemoteArtworkUrl(song))
+    val tint by androidx.compose.animation.animateColorAsState(palette.vivid, label = "miniTint")
+    val deep by androidx.compose.animation.animateColorAsState(palette.deep, label = "miniDeep")
     val haptics = rememberHaptics()
     // percent rather than a dp figure, so the corner stays exactly half the
     // height if the row's contents ever change it — which is what keeps a pill
@@ -394,6 +402,18 @@ fun MiniPlayer(
                     )
                 },
             )
+            .drawBehind {
+                drawRect(
+                    androidx.compose.ui.graphics.Brush.horizontalGradient(
+                        listOf(
+                            androidx.compose.ui.graphics.lerp(tint, Color.Black, 0.45f).copy(alpha = 0.85f),
+                            androidx.compose.ui.graphics.lerp(tint, deep, 0.6f).copy(alpha = 0.70f),
+                            Color(0xFF0C0C10).copy(alpha = 0.60f),
+                        ),
+                    ),
+                )
+            }
+            .miniProgress(progress, Color.White)
             .border(0.5.dp, Color.White.copy(alpha = 0.10f), shape)
             // Deliberately silent: the whole bar is the target, so it catches
             // stray taps meant for the page behind it, and the sheet rising is
@@ -424,20 +444,31 @@ fun MiniPlayer(
                 ExplicitSongTitle(
                     song = song,
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
+                    color = Color.White,
                 )
                 Text(
                     text = song.artist,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = Color.White.copy(alpha = 0.7f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            IconButton(
+                onClick = {
+                    haptics.play(Haptic.SkipPrevious)
+                    onPrevious()
+                },
+                enabled = !controlsLocked,
+                modifier = Modifier.size(GLYPH_SLOT),
+            ) {
+                MiniPlayerPreviousGlyph(tint = Color.White.copy(alpha = if (controlsLocked) 0.3f else 1f))
+            }
+            Spacer(Modifier.width(TRANSPORT_GAP))
             if (isLoading) {
                 Box(Modifier.size(GLYPH_SLOT), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(
-                        color = MaterialTheme.colorScheme.onBackground,
+                        color = Color.White,
                         strokeWidth = 2.dp,
                         modifier = Modifier.size(SPINNER_SIZE),
                     )
@@ -453,7 +484,7 @@ fun MiniPlayer(
                     Icon(
                         imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = stringResource(if (isPlaying) R.string.pause else R.string.play),
-                        tint = MaterialTheme.colorScheme.onBackground,
+                        tint = Color.White,
                         modifier = Modifier.size(GLYPH_SIZE),
                     )
                 }
@@ -470,8 +501,7 @@ fun MiniPlayer(
                 modifier = Modifier.size(GLYPH_SLOT),
             ) {
                 MiniPlayerNextGlyph(
-                    tint = MaterialTheme.colorScheme.onBackground
-                        .copy(alpha = if (controlsLocked) 0.3f else 1f),
+                    tint = Color.White.copy(alpha = if (controlsLocked) 0.3f else 1f),
                 )
             }
         }
@@ -499,3 +529,35 @@ internal fun MiniPlayerNextGlyph(tint: Color) {
 }
 
 private val NEXT_GLYPH_SIZE = 25.dp
+
+/** The skip-back glyph, the twin of [MiniPlayerNextGlyph] — BitChord²'s. */
+@Composable
+internal fun MiniPlayerPreviousGlyph(tint: Color) {
+    Icon(
+        // The next glyph turned round: the same drawing, so the two read as a pair.
+        painter = painterResource(SharedRes.drawable.ic_player_next),
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier
+            .size(NEXT_GLYPH_SIZE)
+            .graphicsLayer { scaleY = 0.85f; scaleX = -1f },
+    )
+}
+
+/**
+ * How far through the track the bar is, as a hairline along its foot — not a control, only so
+ * a glance says how much is left. Kept inside the pill's straight stretch, clear of its round
+ * ends, and read in drawing, so the playhead's ticks redraw it and nothing else.
+ */
+internal fun Modifier.miniProgress(progress: () -> Float, color: Color): Modifier = drawWithContent {
+    drawContent()
+    val inset = size.height / 2f
+    val track = (size.width - inset * 2f).coerceAtLeast(0f)
+    val y = size.height - 2.5.dp.toPx()
+    val stroke = 2.dp.toPx()
+    drawLine(color.copy(alpha = 0.16f), androidx.compose.ui.geometry.Offset(inset, y), androidx.compose.ui.geometry.Offset(inset + track, y), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    val p = progress().coerceIn(0f, 1f)
+    if (p > 0f) {
+        drawLine(color.copy(alpha = 0.75f), androidx.compose.ui.geometry.Offset(inset, y), androidx.compose.ui.geometry.Offset(inset + track * p, y), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+    }
+}

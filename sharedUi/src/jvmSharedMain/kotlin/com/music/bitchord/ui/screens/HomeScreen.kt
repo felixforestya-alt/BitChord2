@@ -348,22 +348,21 @@ private fun RecentShelf(
                 }
             }
         } else {
-            BoxWithConstraints {
-                val cardWidth = heroCardWidth(maxWidth)
-                ShelfRow(
-                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    items(shelf.items) { item ->
-                        HeroCard(
-                            item = item,
-                            onClick = { onItemClick(item) },
-                            onLongPress = onItemLongPress?.let { { it(item) } },
-                            modifier = Modifier.width(cardWidth),
-                            isCurrent = isCurrentItem(item),
-                            isPlaying = isCurrentItem(item) && isPlaying,
-                        )
-                    }
+            // BitChord²: the covers at the size every other shelf's are, with their words at
+            // the size those have — the hero posters here were all cover and no title.
+            ShelfRow(
+                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                itemsIndexed(shelf.items) { index, item ->
+                    ShelfCard(
+                        item = item,
+                        onClick = { onItemClick(item) },
+                        onLongPress = onItemLongPress?.let { { it(item) } },
+                        modifier = Modifier.width(SHELF_CARD_WIDTH).cardEntrance(index),
+                        isCurrent = isCurrentItem(item),
+                        isPlaying = isCurrentItem(item) && isPlaying,
+                    )
                 }
             }
         }

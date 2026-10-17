@@ -351,10 +351,20 @@ internal fun DiscPortraitPlayer(
                                 ),
                                 modifier = Modifier.padding(bottom = 14.dp),
                             )
-                            credits()
-                            if (lyricStrip != null) {
-                                Spacer(Modifier.height(10.dp))
-                                lyricStrip()
+                            // The track, its artist, the line being sung, and the like and menu
+                            // buttons beside them: larger than the app sets them, as the point of
+                            // the screen.
+                            val here = LocalDensity.current
+                            androidx.compose.runtime.CompositionLocalProvider(
+                                LocalDensity provides androidx.compose.ui.unit.Density(here.density * WORDS_SCALE, here.fontScale * WORDS_FONT_SCALE),
+                            ) {
+                                Column {
+                                    credits()
+                                    if (lyricStrip != null) {
+                                        Spacer(Modifier.height(10.dp))
+                                        lyricStrip()
+                                    }
+                                }
                             }
                             Spacer(Modifier.height(18.dp))
                         }
@@ -412,6 +422,10 @@ private fun nowPlayingHeading(): String =
 
 /** How much larger than the app's own scale the player's words and deck are drawn. */
 private const val UI_SCALE = 1.08f
+
+/** And the track's own words and their buttons, larger again. */
+private const val WORDS_SCALE = 1.12f
+private const val WORDS_FONT_SCALE = 1.14f
 
 /** One revolution every this many seconds — a slow, legible spin rather than a blur. */
 private const val DISC_PERIOD_S = 3.2f

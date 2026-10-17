@@ -949,6 +949,11 @@ private fun BitChordApp(
     }
     val controller = rememberMediaController()
     val player = rememberPlayerState(controller)
+    // The floating player's hairline: how far through the track, read where it is drawn.
+    val miniProgress: () -> Float = {
+        val duration = player.durationMs
+        if (duration > 0) player.position.positionMs.toFloat() / duration else 0f
+    }
     // A resume in a party is performed on the instant the server schedules, not
     // when it was pressed, and nothing about the player moves in between — so
     // the transport spends that round trip drawn as though the tap never landed.
@@ -4102,6 +4107,7 @@ private fun BitChordApp(
                         onBlockedControl = showHostOnlyNotice,
                         dock = activeDock,
                         pull = playerSheetMotion.takeIf { !reducePlayerMotion },
+                        progress = miniProgress,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else Column(
@@ -4139,6 +4145,7 @@ private fun BitChordApp(
                             onBlockedControl = showHostOnlyNotice,
                             dock = activeDock,
                             pull = playerSheetMotion.takeIf { !reducePlayerMotion },
+                            progress = miniProgress,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Spacer(Modifier.height(8.dp))

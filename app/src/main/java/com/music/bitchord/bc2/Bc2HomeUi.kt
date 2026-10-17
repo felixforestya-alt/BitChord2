@@ -112,7 +112,7 @@ internal fun JamCard(
     Box(
         modifier
             .fillMaxWidth()
-            .height(124.dp)
+            .heightIn(min = 132.dp)
             .clip(RoundedCornerShape(26.dp))
             .background(Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f), light.copy(alpha = 0.55f), deep.copy(alpha = 0.85f))))
             .drawBehind {
@@ -135,7 +135,7 @@ internal fun JamCard(
             .clickable(enabled = !starting, onClick = if (playing) onPlayPause else onPlay),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Row(Modifier.padding(start = 20.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 20.dp, end = 14.dp, top = 14.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
                     .size(64.dp)
@@ -152,32 +152,33 @@ internal fun JamCard(
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    MyJam.radioName,
-                    color = Color.White,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = (-0.5).sp,
-                    maxLines = 1,
-                    softWrap = false,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                // Playing or paused: a tag at the head of the second line, where it never pushes
-                // the name off the card.
+                // The name and, while it plays, whether it is playing or paused, on one line.
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                if (playing) {
                     Text(
-                        (if (paused) bc2("пауза", "paused") else bc2("играет", "playing")).uppercase(),
-                        color = Color.Black,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp,
+                        MyJam.radioName,
+                        color = Color.White,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = (-0.5).sp,
                         maxLines = 1,
                         softWrap = false,
-                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.9f)).padding(horizontal = 7.dp, vertical = 2.dp),
                     )
-                    Spacer(Modifier.width(8.dp))
+                    if (playing) {
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            (if (paused) bc2("пауза", "paused") else bc2("играет", "playing")).uppercase(),
+                            color = Color.Black,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.9f)).padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
                 }
+                Spacer(Modifier.height(2.dp))
+                // The artist and the track in full: two lines rather than cut off.
                 Text(
                     if (playing && current != null) {
                         "${current.artist} — ${current.title}"
@@ -189,13 +190,15 @@ internal fun JamCard(
                     },
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                }
             }
-            if (playing) CardIcon(Icons.Rounded.SkipNext, bc2("Дальше", "Next"), onSkip)
-            CardIcon(Icons.Rounded.Tune, bc2("Настройки джема", "Jam settings"), onTune)
+            // Skip over the jam's settings, one above the other, so the words have the width.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                if (playing) CardIcon(Icons.Rounded.SkipNext, bc2("Дальше", "Next"), onSkip)
+                CardIcon(Icons.Rounded.Tune, bc2("Настройки джема", "Jam settings"), onTune)
+            }
         }
     }
 }

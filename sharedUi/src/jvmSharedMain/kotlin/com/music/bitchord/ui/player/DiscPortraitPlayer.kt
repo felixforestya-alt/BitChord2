@@ -420,7 +420,7 @@ internal fun DiscPortraitPlayer(
                                     LocalLyricsFocusFraction provides 0.42f,
                                     // On its side the toggles and the source line a size down, so the
                                     // words have the height.
-                                    LocalLyricsPaneControls provides LyricsPaneControls(scale = if (wide) 0.85f else 1.3f, bottomGap = if (wide) 4.dp else 14.dp),
+                                    LocalLyricsPaneControls provides LyricsPaneControls(scale = if (wide) 1.05f else 1.3f, bottomGap = if (wide) 4.dp else 14.dp),
                                     LocalDensity provides androidx.compose.ui.unit.Density(
                                         paneDensity.density * (if (wide) WIDE_LYRICS_SCALE else 1f),
                                         paneDensity.fontScale * (if (wide) WIDE_LYRICS_SCALE else 1f),

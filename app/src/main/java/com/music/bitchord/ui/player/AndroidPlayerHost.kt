@@ -9,7 +9,13 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import com.music.bitchord.ui.components.backdrop.backdrops.layerBackdrop
+import com.music.bitchord.ui.components.backdrop.backdrops.rememberLayerBackdrop
+import com.music.bitchord.ui.components.isGlassSupported
+import com.music.bitchord.ui.components.liquidGlass
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -83,6 +89,22 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
 
         override fun setLastPlayerScreen(value: LastPlayerScreen) = AppSettings.setLastPlayerScreen(value)
         override fun setLyricsOffsetMs(value: Int) = AppSettings.setLyricsOffsetMs(value)
+    }
+
+    // The disc player's deck, as the floating tab bar is: Kyant's liquid glass over the room.
+    @Composable
+    override fun rememberPlayerGlass(): PlayerGlass? {
+        if (!isGlassSupported()) return null
+        val backdrop = rememberLayerBackdrop()
+        return remember(backdrop) {
+            object : PlayerGlass {
+                override fun source(modifier: Modifier): Modifier = modifier.layerBackdrop(backdrop)
+
+                @Composable
+                override fun pane(modifier: Modifier, shape: CornerBasedShape): Modifier =
+                    modifier.liquidGlass(shape, sampling = backdrop)
+            }
+        }
     }
 
     override fun cachedCanvas(song: Song): CanvasArtwork? = CanvasRepository.cached(song)

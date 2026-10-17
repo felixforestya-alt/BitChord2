@@ -29,6 +29,13 @@ import kotlinx.coroutines.flow.StateFlow
  * [PlayerPlatform.install] before the player is first drawn.
  */
 interface PlayerHost {
+    /**
+     * BitChord²: liquid glass for the disc player's deck, where the platform can draw it — null
+     * where it cannot, and the deck is smoked glass instead. See [PlayerGlass].
+     */
+    @Composable
+    fun rememberPlayerGlass(): PlayerGlass? = null
+
     val settings: PlayerSettingsSource
 
     /** A Canvas already settled for [song], without a lookup. */
@@ -351,3 +358,15 @@ internal fun rememberRemoteArtworkUrl(song: Song?): String? =
 @Composable
 internal fun AudioPipelineDialog(hazeState: HazeState, isPlaying: Boolean, onDismiss: () -> Unit) =
     PlayerPlatform.host.AudioPipelineDialog(hazeState, isPlaying, onDismiss)
+
+
+/**
+ * A liquid glass surface and what it refracts: [source] goes on the layer behind, [pane] on the
+ * surface itself — BitChord²'s disc player deck.
+ */
+interface PlayerGlass {
+    fun source(modifier: Modifier): Modifier
+
+    @Composable
+    fun pane(modifier: Modifier, shape: androidx.compose.foundation.shape.CornerBasedShape): Modifier
+}

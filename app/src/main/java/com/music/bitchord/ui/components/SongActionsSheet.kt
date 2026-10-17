@@ -57,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -208,7 +209,13 @@ fun SongActionsSheet(
     val palette = if (menu) {
         neutralMenuPalette()
     } else {
-        rememberArtworkPalette(song.thumbnailUrl, artPx = ROW_ART_PX)
+        // Over the disc player's dark room (see [Bc2SheetBackdrop]) the words are always light;
+        // only the accent comes from the sleeve.
+        rememberArtworkPalette(song.thumbnailUrl, artPx = ROW_ART_PX).copy(
+            onBackground = Color.White,
+            onBackgroundVariant = Color.White.copy(alpha = 0.65f),
+            divider = Color.White.copy(alpha = 0.10f),
+        )
     }
     val liked = likeStatus == LikeStatus.LIKE
     val disliked = likeStatus == LikeStatus.DISLIKE
@@ -467,15 +474,9 @@ private fun TintedSheet(
             .fillMaxWidth()
             .clip(SHEET_SHAPE),
     ) {
-        ArtworkBackdrop(
-            palette = palette,
-            imageUrl = imageUrl,
-            modifier = Modifier.matchParentSize(),
-            // A sheet is a fraction of the height of a page, so the wash has
-            // to resolve over a much shorter run to read the same way.
-            washFraction = 0.75f,
-            artPx = ROW_ART_PX,
-        )
+        // BitChord²: the disc player's room rather than a wash of its own — the cover's
+        // strongest colour as a light from above, falling off into its own deep shade.
+        Bc2SheetBackdrop(imageUrl, Modifier.matchParentSize())
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight)) {
             // Drawn rather than taken from BottomSheetDefaults, whose handle
             // carries 22dp of padding on each side — half a row's worth of
@@ -947,5 +948,29 @@ internal fun SheetHeading(text: String) {
         style = MaterialTheme.typography.labelMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 16.dp, bottom = 4.dp),
+    )
+}
+
+/** The disc player's room, for a sheet: lit from above in the cover's colour. */
+@Composable
+private fun Bc2SheetBackdrop(imageUrl: String?, modifier: Modifier) {
+    val palette = com.music.bitchord.ui.player.rememberDiscPalette(imageUrl)
+    val glow by androidx.compose.animation.animateColorAsState(palette.vivid, label = "sheetGlow")
+    val deep by androidx.compose.animation.animateColorAsState(palette.deep, label = "sheetDeep")
+    Box(
+        modifier.drawBehind {
+            drawRect(androidx.compose.ui.graphics.lerp(deep, Color.Black, 0.35f))
+            drawRect(
+                androidx.compose.ui.graphics.Brush.radialGradient(
+                    0f to glow.copy(alpha = 0.55f),
+                    0.6f to androidx.compose.ui.graphics.lerp(glow, deep, 0.6f).copy(alpha = 0.25f),
+                    1f to Color.Transparent,
+                    center = androidx.compose.ui.geometry.Offset(size.width * 0.5f, 0f),
+                    radius = size.maxDimension * 0.75f,
+                ),
+            )
+            // The deck's hairline, along the top edge.
+            drawLine(Color.White.copy(alpha = 0.14f), androidx.compose.ui.geometry.Offset(0f, 0.5f), androidx.compose.ui.geometry.Offset(size.width, 0.5f), strokeWidth = 1f)
+        },
     )
 }

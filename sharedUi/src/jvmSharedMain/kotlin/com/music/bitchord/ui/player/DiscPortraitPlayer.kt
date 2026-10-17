@@ -85,6 +85,8 @@ import kotlin.math.min
 internal fun DiscPortraitPlayer(
     pane: PlayerPane,
     song: Song,
+    /** Where the track is in the queue: a later one rolls in from the right, an earlier from the left. */
+    trackIndex: Int,
     coverUrl: String?,
     isPlaying: Boolean,
     /** Applied to the room, so the player's sheets frost what is behind them. */
@@ -152,6 +154,15 @@ internal fun DiscPortraitPlayer(
     )
     val density = LocalDensity.current
     val off = remember { discLayersOff() }
+    val glass = PlayerPlatform.host.rememberPlayerGlass()
+    // Which way the disc moved last: forward through the queue it leaves to the left and the next
+    // one comes in from the right, as a swipe forward does; back, the other way.
+    val lastIndex = remember { androidx.compose.runtime.mutableIntStateOf(trackIndex) }
+    val forward = remember { androidx.compose.runtime.mutableStateOf(true) }
+    if (trackIndex != lastIndex.intValue) {
+        forward.value = trackIndex > lastIndex.intValue
+        lastIndex.intValue = trackIndex
+    }
 
     // Clipped to the sheet: pulled down, the disc goes with it rather than hanging over the page.
     BoxWithConstraints(modifier.fillMaxSize().clipToBounds().background(Color.Black)) {
@@ -168,7 +179,12 @@ internal fun DiscPortraitPlayer(
         val discRise = discCentreY + discSize * 0.5f - (statusTop + PANEL_BAND)
 
         // ---- The room, and everything the player's sheets frost ---------------------------
-        Box(Modifier.fillMaxSize().then(if ("haze" in off) Modifier else hazeSource)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if ("haze" in off) Modifier else hazeSource)
+                .let { if (glass != null) glass.source(it) else it },
+        ) {
             // The light and the soft cover under it change with the track and nothing else: one
             // cached layer, so a frame composites one picture rather than redrawing both.
             if ("room" !in off) Box(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
@@ -226,8 +242,9 @@ internal fun DiscPortraitPlayer(
             AnimatedContent(
                 targetState = cover,
                 transitionSpec = {
-                    (slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { -it } + fadeIn(tween(500))) togetherWith
-                        (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(450)))
+                    val dir = if (forward.value) 1 else -1
+                    (slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { it * dir } + fadeIn(tween(500))) togetherWith
+                        (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { -it * dir } + fadeOut(tween(450)))
                 },
                 // Wider than the screen, so laid out unbounded and centred across it, rather than
                 // squeezed to the screen's width.
@@ -262,6 +279,11 @@ internal fun DiscPortraitPlayer(
         }
 
         // ---- The words, the lyrics or the queue, and the deck ------------------------------
+        // A little larger than the app's own scale: the player is the one screen made to be
+        // looked at from arm's length.
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalDensity provides androidx.compose.ui.unit.Density(density.density * UI_SCALE, density.fontScale),
+        ) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -294,11 +316,11 @@ internal fun DiscPortraitPlayer(
                         ) {
                             if (caption != null) {
                                 Text(
-                                    caption,
+                                    caption.uppercase(),
                                     color = Color.White.copy(alpha = 0.62f),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    letterSpacing = 1.2.sp,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 2.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier
@@ -310,6 +332,25 @@ internal fun DiscPortraitPlayer(
                                         ),
                                 )
                             }
+                            // The desktop's heading, as big as the room allows.
+                            Text(
+                                nowPlayingHeading(),
+                                color = Color.White,
+                                fontFamily = androidx.compose.material3.MaterialTheme.typography.displayLarge.fontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 46.sp,
+                                letterSpacing = (-1.4).sp,
+                                maxLines = 1,
+                                style = androidx.compose.ui.text.TextStyle(
+                                    shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 6f), 28f),
+                                    lineHeight = 48.sp,
+                                    lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                                        androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                                        androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+                                    ),
+                                ),
+                                modifier = Modifier.padding(bottom = 14.dp),
+                            )
                             credits()
                             if (lyricStrip != null) {
                                 Spacer(Modifier.height(10.dp))
@@ -317,7 +358,14 @@ internal fun DiscPortraitPlayer(
                             }
                             Spacer(Modifier.height(18.dp))
                         }
-                        PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = PANE_GUTTER)) { lyricsPane() }
+                        PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = PANE_GUTTER)) {
+                            // The line being sung in the middle of the stretch, as on the desktop,
+                            // and the pane's toggles big enough to hit, clear of the deck.
+                            androidx.compose.runtime.CompositionLocalProvider(
+                                LocalLyricsFocusFraction provides 0.42f,
+                                LocalLyricsPaneControls provides LyricsPaneControls(scale = 1.3f, bottomGap = 14.dp),
+                            ) { lyricsPane() }
+                        }
                         PlayerPane.Queue -> Box(Modifier.fillMaxSize().padding(horizontal = PANE_GUTTER)) { queuePane() }
                     }
                 }
@@ -330,9 +378,17 @@ internal fun DiscPortraitPlayer(
                     .padding(horizontal = 12.dp)
                     .padding(bottom = 10.dp)
                     .fillMaxWidth()
-                    .clip(DECK_SHAPE)
-                    .background(Color.Black.copy(alpha = 0.34f))
-                    .border(0.5.dp, Color.White.copy(alpha = 0.14f), DECK_SHAPE)
+                    .let { deck ->
+                        // Liquid glass, as the tab bar on the page is, where the phone can draw it;
+                        // smoked glass otherwise.
+                        if (glass != null) {
+                            glass.pane(deck, DECK_SHAPE)
+                        } else {
+                            deck.clip(DECK_SHAPE)
+                                .background(Color.Black.copy(alpha = 0.34f))
+                                .border(0.5.dp, Color.White.copy(alpha = 0.14f), DECK_SHAPE)
+                        }
+                    }
                     .padding(horizontal = PLAYER_GUTTER - 12.dp, vertical = 14.dp),
             ) {
                 scrubber()
@@ -346,8 +402,16 @@ internal fun DiscPortraitPlayer(
                 actions()
             }
         }
+        }
     }
 }
+
+/** The desktop's heading over the track, in the phone's language. */
+private fun nowPlayingHeading(): String =
+    if (java.util.Locale.getDefault().language == "ru") "сейчас играет." else "now playing."
+
+/** How much larger than the app's own scale the player's words and deck are drawn. */
+private const val UI_SCALE = 1.08f
 
 /** One revolution every this many seconds — a slow, legible spin rather than a blur. */
 private const val DISC_PERIOD_S = 3.2f

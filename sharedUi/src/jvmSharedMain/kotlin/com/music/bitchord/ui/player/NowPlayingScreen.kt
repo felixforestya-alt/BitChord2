@@ -2069,6 +2069,7 @@ fun NowPlayingScreen(
                         else -> PlayerPane.Main
                     },
                     song = song,
+                    trackIndex = queueIndex,
                     coverUrl = remoteArt,
                     isPlaying = isPlaying,
                     hazeSource = Modifier.hazeSource(playerHaze),

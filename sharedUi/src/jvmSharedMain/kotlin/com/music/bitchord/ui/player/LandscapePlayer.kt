@@ -485,6 +485,21 @@ internal fun LandscapeCredits(
 }
 
 /**
+ * How big the lyrics pane's two toggles are drawn, and how far its bottom row stands off what is
+ * under it — larger on the disc player, whose deck sits right below.
+ */
+internal data class LyricsPaneControls(val scale: Float = 1f, val bottomGap: androidx.compose.ui.unit.Dp = 0.dp)
+
+internal val LocalLyricsPaneControls = androidx.compose.runtime.staticCompositionLocalOf { LyricsPaneControls() }
+
+@Composable
+private fun ScaledToggle(scale: Float, content: @Composable () -> Unit) {
+    Box(Modifier.size(34.dp * scale), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).graphicsLayer { scaleX = scale; scaleY = scale }, contentAlignment = Alignment.Center) { content() }
+    }
+}
+
+/**
  * The landscape player's right column with the lyrics open: the sheet, and
  * under it the romanize / source / translate bar.
  *
@@ -538,15 +553,16 @@ internal fun LandscapeLyricsPane(
         if (picking) {
             Box(Modifier.fillMaxWidth()) { pickBar() }
         } else {
+        val controls = LocalLyricsPaneControls.current
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 10.dp),
+                .padding(top = 10.dp, bottom = controls.bottomGap),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Fixed slots either side whether or not the toggles are drawn, so
             // the status line stays centred as lyrics arrive.
-            Box(Modifier.size(34.dp)) { if (hasLyrics) romanizationToggle() }
+            ScaledToggle(controls.scale) { if (hasLyrics) romanizationToggle() }
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -558,7 +574,7 @@ internal fun LandscapeLyricsPane(
                     onStatusClick = onStatusClick,
                 )
             }
-            Box(Modifier.size(34.dp)) { if (hasLyrics) translationToggle() }
+            ScaledToggle(controls.scale) { if (hasLyrics) translationToggle() }
         }
         }
     }

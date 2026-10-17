@@ -152,19 +152,31 @@ internal fun JamCard(
             }
             Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
+                Text(
+                    MyJam.radioName,
+                    color = Color.White,
+                    fontSize = 28.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = (-0.5).sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // Playing or paused: a tag at the head of the second line, where it never pushes
+                // the name off the card.
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(MyJam.radioName, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp, maxLines = 1)
-                    if (playing) {
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            (if (paused) bc2("пауза", "paused") else bc2("играет", "playing")).uppercase(),
-                            color = Color.Black,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp,
-                            modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.9f)).padding(horizontal = 7.dp, vertical = 2.dp),
-                        )
-                    }
+                if (playing) {
+                    Text(
+                        (if (paused) bc2("пауза", "paused") else bc2("играет", "playing")).uppercase(),
+                        color = Color.Black,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.9f)).padding(horizontal = 7.dp, vertical = 2.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
                 }
                 Text(
                     if (playing && current != null) {
@@ -180,6 +192,7 @@ internal fun JamCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                }
             }
             if (playing) CardIcon(Icons.Rounded.SkipNext, bc2("Дальше", "Next"), onSkip)
             CardIcon(Icons.Rounded.Tune, bc2("Настройки джема", "Jam settings"), onTune)

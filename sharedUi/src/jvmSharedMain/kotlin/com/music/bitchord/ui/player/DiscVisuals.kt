@@ -767,10 +767,10 @@ fun LivingBackdrop(coverUrl: String?, covered: () -> Boolean, modifier: Modifier
     val palette = rememberDiscPalette(coverUrl)
     val accent by androidx.compose.animation.animateColorAsState(
         if (coverUrl != null) palette.vivid else Color(0xFF5B4BFF),
-        tween(2_000),
+        tween(700),
         label = "livingAccent",
     )
-    val shown by animateFloatAsState(if (coverUrl != null) 1f else 0f, tween(900), label = "livingShown")
+    val shown by animateFloatAsState(if (coverUrl != null) 1f else 0f, tween(350), label = "livingShown")
     val time = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
         var last = System.nanoTime()

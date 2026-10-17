@@ -515,6 +515,10 @@ private enum class DesktopRepeatMode {
 
 @Composable
 fun BitChordDesktopApp() {
+    if (DesktopFrameProfiler.recompositions) {
+        val composition = androidx.compose.runtime.currentComposer.composition
+        remember { DesktopFrameProfiler.observe(composition) }
+    }
     val scope = rememberCoroutineScope()
     // Filled once the audio engine exists. Local playback helpers use this single hook so every
     // transport and queue gesture reaches Listen Together without duplicating protocol logic.
@@ -585,7 +589,7 @@ fun BitChordDesktopApp() {
     // phone; it is only asked for with an account to have played on.
     var homeRecentsLoading by remember { mutableStateOf(false) }
     // Held out here so a page keeps its place when another is visited and it is come back to.
-    val homeListState = rememberLazyListState()
+    val homeListState = DesktopPrefetch.rememberListState()
     val exploreListState = rememberLazyListState()
     val exploreGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val moodGenreListState = rememberLazyListState()
@@ -3370,7 +3374,7 @@ fun BitChordDesktopApp() {
 
     // My Jam's row along the foot of the "now playing" card, while the jam has joined it.
     val jamFootRow = @Composable { rowModifier: Modifier ->
-        val phase by rememberInfiniteTransition(label = "jamFoot").animateFloat(
+        val phase = rememberInfiniteTransition(label = "jamFoot").animateFloat(
             0f,
             1f,
             infiniteRepeatable(tween(2_600, easing = LinearEasing), RepeatMode.Restart),
@@ -3381,7 +3385,7 @@ fun BitChordDesktopApp() {
             playing = true,
             paused = !playback.isPlaying,
             current = selectedSong,
-            phase = phase,
+            phase = { phase.value },
             onPlayPause = ::togglePlayPauseFromUser,
             onSkip = ::playNext,
             onTune = { waveSettingsOpen = true },
@@ -3497,6 +3501,10 @@ fun BitChordDesktopApp() {
             if (pickedAtStart == null && standIn != null) selectedSong = standIn
             // The window's first frames, and the page laid out.
             repeat(12) { androidx.compose.runtime.withFrameNanos { } }
+            // Words too, word-timed, as a track's lyrics arrive: the card's and the player's lyric
+            // lines, their buttons and their text set out, all for the first time here rather than
+            // on the frame a real track's lyrics come in. Taken away again after.
+            if (lyrics == null && selectedSong != null) lyrics = WARMUP_LYRICS
             val song = selectedSong
             // Every step only while still cloaked: should the guard have shown the window
             // already, the listener is not to watch the player open and close by itself.
@@ -3522,6 +3530,7 @@ fun BitChordDesktopApp() {
                 repeat(30) { androidx.compose.runtime.withFrameNanos { } }
             }
         } finally {
+            if (lyrics === WARMUP_LYRICS) lyrics = null
             if (pickedAtStart == null && selectedSong == standIn) selectedSong = null
             DesktopStartupWarmup.finish()
         }
@@ -3779,6 +3788,9 @@ fun BitChordDesktopApp() {
             LocalContentColor provides Color.White,
             LocalNowPlaying provides selectedSong,
         ) {
+            // The track's pictures onto the GPU as they load, before the player or the card shows
+            // them — see [DesktopTextureWarmer]. A pixel, under the window's own frame.
+            DesktopTextureWarmer(selectedSong?.let(::withSleeve)?.thumbnailUrl)
             DesktopFrame(
                 // The phone's page is black, not the near-black of its cards.
                 containerColor = DesktopBackground,
@@ -8831,7 +8843,7 @@ internal fun DesktopScrollableRow(
     spacing: Dp = 14.dp,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
-    val rowState = rememberLazyListState()
+    val rowState = com.music.bitchord.ui.components.rememberShelfRowState()
     DesktopShelfRowChrome.Wrap(rowState) {
         LazyRow(
             state = rowState,
@@ -9416,6 +9428,25 @@ private const val SESSION_WAIT_MS = 8_000L
 
 /** The player's opening and its entrance, then its closing, as the cloaked warm-up plays them. */
 private const val WARMUP_OPEN_MS = 950L
+
+/** A few word-timed lines for the warm-up — see the warm-up in [BitChordDesktopApp]. */
+private val WARMUP_LYRICS = DesktopLyrics(
+    source = "warmup",
+    lines = listOf(
+        com.music.bitchord.data.lyrics.LyricLine(
+            timeMs = 0,
+            text = "La la la la",
+            words = listOf(
+                com.music.bitchord.data.lyrics.LyricWord(0, 400, "La "),
+                com.music.bitchord.data.lyrics.LyricWord(400, 800, "la "),
+                com.music.bitchord.data.lyrics.LyricWord(800, 1200, "la "),
+                com.music.bitchord.data.lyrics.LyricWord(1200, 1600, "la"),
+            ),
+        ),
+        com.music.bitchord.data.lyrics.LyricLine(timeMs = 1_600, text = "Ла ла ла"),
+        com.music.bitchord.data.lyrics.LyricLine(timeMs = 3_200, text = "ラララ"),
+    ),
+)
 private const val WARMUP_CLOSE_MS = 380L
 
 /** Explore is read from disk, or fetched, this long after launch, so it is ready when opened. */

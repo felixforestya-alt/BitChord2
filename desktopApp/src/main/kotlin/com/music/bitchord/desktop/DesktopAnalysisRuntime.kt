@@ -69,6 +69,12 @@ internal object DesktopAnalysisRuntime {
         System.load(unpack("/native/$fileName", fileName).toString())
     }
 
+    /** A native library that travels in the jar, unpacked; for one called through JNA rather than JNI. */
+    fun unpackNative(name: String): Path {
+        val fileName = System.mapLibraryName(name)
+        return unpack("/native/$fileName", fileName)
+    }
+
     /** The absolute path of a model, unpacked on first use. */
     fun modelPath(asset: String): String = unpack("/models/$asset", asset).toString()
 

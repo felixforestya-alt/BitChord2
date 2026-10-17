@@ -29,6 +29,12 @@ import okio.Path.Companion.toOkioPath
 import org.jetbrains.compose.resources.painterResource
 
 fun main() {
+    // Before the window, so skiko's first shader already goes through the disk cache.
+    DesktopShaderCache.install()
+    // The player's and Home's classes, loaded off the UI thread while the window comes up.
+    DesktopClassPreload.start()
+    // Lists build their next items between frames — see [DesktopPrefetch].
+    DesktopPrefetch.install()
     // Before any WebView exists, so the sign-in window can start over with an empty jar.
     DesktopWebCookies.install()
     DesktopWindowVisibility.install()

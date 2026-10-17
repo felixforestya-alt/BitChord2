@@ -395,8 +395,16 @@ internal fun DesktopMorphingPlayer(
                     .requiredSize(cardWidth, (cardHeight - JAM_FOOT * DesktopJamJoin.amount).coerceAtLeast(1.dp))
                     .graphicsLayer { alpha = (1f - morph.e * 2f).coerceIn(0f, 1f) },
             )
-            if (jamFoot != null && morph.e < 0.5f) {
-                Box(Modifier.fillMaxSize().graphicsLayer { alpha = (1f - morph.e * 2f).coerceIn(0f, 1f) }) { JamFoot(jamFoot) }
+            // Kept composed the whole way and only moved off once it has faded, as the card's own
+            // contents are: asked of the morph in composition, it recomposed all of this pane on
+            // every frame of the scroll.
+            if (jamFoot != null) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .offset { if (morph.e < 0.5f) IntOffset.Zero else IntOffset(OUT_OF_REACH, 0) }
+                        .graphicsLayer { alpha = (1f - morph.e * 2f).coerceIn(0f, 1f) },
+                ) { JamFoot(jamFoot) }
             }
             // The bar's, at the bar's own size, fading in over the second.
             bar(

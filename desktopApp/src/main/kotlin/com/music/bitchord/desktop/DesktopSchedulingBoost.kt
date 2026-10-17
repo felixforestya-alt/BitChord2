@@ -18,6 +18,51 @@ internal object DesktopSchedulingBoost {
     private interface Kernel32 : Library {
         fun GetCurrentProcess(): Pointer
         fun SetPriorityClass(process: Pointer, priorityClass: Int): Boolean
+        fun GetCurrentThread(): Pointer
+        fun SetProcessInformation(process: Pointer, infoClass: Int, info: Pointer, size: Int): Boolean
+        fun SetThreadInformation(thread: Pointer, infoClass: Int, info: Pointer, size: Int): Boolean
+    }
+
+    private val kernel: Kernel32? by lazy {
+        if (!DesktopPlatform.isWindows) null else runCatching { Native.load("kernel32", Kernel32::class.java) }.getOrNull()
+    }
+
+    /** PROCESS_/THREAD_POWER_THROTTLING_STATE: version 1, these mechanisms controlled, all off. */
+    private fun throttlingOff(controlMask: Int): Pointer = com.sun.jna.Memory(12).apply {
+        setInt(0, 1)
+        setInt(4, controlMask)
+        setInt(8, 0)
+    }
+
+    private const val PROCESS_POWER_THROTTLING = 4
+    private const val THREAD_POWER_THROTTLING = 3
+    private const val THROTTLE_EXECUTION_SPEED = 0x1
+    private const val THROTTLE_IGNORE_TIMER_RESOLUTION = 0x4
+
+    /**
+     * Out of Windows' power throttling (EcoQoS). A window that has sat still for a while looks
+     * like background work to Windows, which then runs its threads on the efficiency cores at low
+     * clocks: the first frames of an animation after a pause — the player opening, the home card
+     * morphing — came out late while the threads were moved back. Asked out of it, the app's
+     * threads stay where frames are made on time; when nothing moves they sleep all the same.
+     */
+    private fun noPowerThrottling() {
+        val kernel = kernel ?: return
+        runCatching {
+            val ok = kernel.SetProcessInformation(
+                kernel.GetCurrentProcess(), PROCESS_POWER_THROTTLING,
+                throttlingOff(THROTTLE_EXECUTION_SPEED or THROTTLE_IGNORE_TIMER_RESOLUTION), 12,
+            )
+            DesktopTrackLog.log("scheduling: power throttling ${if (ok) "off" else "unchanged"}")
+        }.onFailure { DesktopTrackLog.log("scheduling: power throttling unavailable: ${it.message}") }
+    }
+
+    /** The same, for the calling thread alone. */
+    private fun noThreadPowerThrottling() {
+        val kernel = kernel ?: return
+        runCatching {
+            kernel.SetThreadInformation(kernel.GetCurrentThread(), THREAD_POWER_THROTTLING, throttlingOff(THROTTLE_EXECUTION_SPEED), 12)
+        }
     }
 
     private interface Gdi32 : Library {
@@ -40,6 +85,7 @@ internal object DesktopSchedulingBoost {
             val kernel = Native.load("kernel32", Kernel32::class.java)
             kernel.SetPriorityClass(kernel.GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS)
         }.onFailure { DesktopTrackLog.log("scheduling: process priority unavailable: ${it.message}") }
+        noPowerThrottling()
     }
 
     /**
@@ -69,6 +115,7 @@ internal object DesktopSchedulingBoost {
             val avrt = Native.load("avrt", Avrt::class.java)
             avrt.AvSetMmThreadCharacteristicsW(WString("Games"), IntByReference(0))
         }.onFailure { DesktopTrackLog.log("scheduling: MMCSS unavailable: ${it.message}") }
+        noThreadPowerThrottling()
     }
 
     private val boosted = ThreadLocal.withInitial { false }

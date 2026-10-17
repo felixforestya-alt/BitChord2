@@ -131,3 +131,14 @@ elseif(MSVC)
     # The WinRT umbrella import library.
     target_link_libraries(bitchord_smtc PRIVATE windowsapp gdi32)
 endif()
+
+# The disk cache in front of Skia's HLSL compiler — see shadercache/shadercache.cpp. Windows only:
+# it is the Direct3D backend that compiles on the drawing thread.
+if(WIN32)
+    add_library(bitchord_shadercache SHARED ${CMAKE_CURRENT_SOURCE_DIR}/shadercache/shadercache.cpp)
+    set_target_properties(bitchord_shadercache PROPERTIES PREFIX "")
+    if(MINGW)
+        target_compile_options(bitchord_shadercache PRIVATE -O2)
+        target_link_options(bitchord_shadercache PRIVATE -static -static-libgcc -static-libstdc++)
+    endif()
+endif()

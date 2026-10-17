@@ -778,7 +778,7 @@ private fun HeroShelf(
         BoxWithConstraints {
             val cardWidth = heroCardWidth(maxWidth)
             ShelfRow(
-                state = rememberLazyListState(),
+                state = com.music.bitchord.ui.components.rememberShelfRowState(),
                 contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {

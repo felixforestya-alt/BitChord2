@@ -509,6 +509,12 @@ compose.desktop {
         // one copy of the many identical strings the YouTube responses are made of.
         jvmArgs("-XX:MinHeapFreeRatio=10", "-XX:MaxHeapFreeRatio=30", "-XX:+UseStringDeduplication")
         jvmArgs("-XX:ReservedCodeCacheSize=96m")
+        // JavaCPP (under the ffmpeg decoder) calls System.gc() whenever the whole process holds
+        // more than twice the heap limit — about a gigabyte here, which a 4K window reaches — and
+        // that full collection stopped the app for 20-60 ms every thirty seconds. Its own native
+        // buffers are freed explicitly, so its limits are not needed; and any System.gc() left
+        // (the tray trim) runs as a concurrent cycle instead of one long pause.
+        jvmArgs("-Dorg.bytedeco.javacpp.maxPhysicalBytes=0", "-Dorg.bytedeco.javacpp.maxBytes=0", "-XX:+ExplicitGCInvokesConcurrent")
         // Start small: left alone the JVM commits a 64th of the machine's memory up front — half
         // a gigabyte on a 32 GB PC — before the app has asked for any of it.
         jvmArgs("-Xms96m")

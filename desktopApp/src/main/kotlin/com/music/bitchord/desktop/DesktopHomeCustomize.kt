@@ -179,7 +179,8 @@ internal fun DesktopWaveCard(
     val light by androidx.compose.animation.animateColorAsState(palette.vivid, tween(700), label = "jamLight")
     val deep by androidx.compose.animation.animateColorAsState(palette.deep, tween(700), label = "jamDeep")
     val moving = playing && !paused
-    val phase by rememberInfiniteTransition(label = "wave").animateFloat(
+    // Read only while drawing, so the wave moves by redrawing alone and nothing recomposes for it.
+    val phase = rememberInfiniteTransition(label = "wave").animateFloat(
         0f, 1f, infiniteRepeatable(tween(if (moving) 2_600 else 9_000, easing = LinearEasing), RepeatMode.Restart), label = "wavePhase",
     )
     Box(
@@ -207,7 +208,7 @@ internal fun DesktopWaveCard(
                         val path = Path()
                         val amp = size.height * ((if (moving) 0.13f else 0.07f) + k * 0.035f)
                         val mid = size.height * (0.52f + k * 0.09f)
-                        val shift = (phase + k * 0.23f) * 2f * PI.toFloat()
+                        val shift = (phase.value + k * 0.23f) * 2f * PI.toFloat()
                         var x = 0f
                         path.moveTo(0f, mid)
                         while (x <= size.width) {
@@ -220,7 +221,7 @@ internal fun DesktopWaveCard(
                 .clickable(enabled = !starting, onClick = if (playing) onPlayPause else onPlay),
             contentAlignment = Alignment.CenterStart,
         ) {
-            DesktopJamRow(starting, playing, paused, current, phase, onPlayPause = if (playing) onPlayPause else onPlay, onSkip, onTune, Modifier)
+            DesktopJamRow(starting, playing, paused, current, { phase.value }, onPlayPause = if (playing) onPlayPause else onPlay, onSkip, onTune, Modifier)
         }
     }
 }
@@ -232,7 +233,8 @@ internal fun DesktopJamRow(
     playing: Boolean,
     paused: Boolean,
     current: com.music.bitchord.data.model.Song?,
-    phase: Float,
+    /** The wave's phase, read only while drawing. */
+    phase: () -> Float,
     onPlayPause: () -> Unit,
     onSkip: () -> Unit,
     onTune: () -> Unit,
@@ -308,13 +310,22 @@ private fun CardIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, labe
     }
 }
 
-/** A small moving level, four bars, in place of the play button while the jam plays. */
+/**
+ * A small moving level, four bars, in place of the play button while the jam plays. Drawn rather
+ * than laid out, so the bars follow [phase] by redrawing alone.
+ */
 @Composable
-private fun LevelBars(phase: Float, color: Color) {
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom, modifier = Modifier.height(22.dp)) {
+private fun LevelBars(phase: () -> Float, color: Color) {
+    androidx.compose.foundation.Canvas(Modifier.size(width = 4.dp * 4 + 3.dp * 3, height = 22.dp)) {
+        val bar = 4.dp.toPx()
+        val gap = 3.dp.toPx()
+        val corner = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+        val p = phase()
         for (i in 0 until 4) {
-            val h = 0.35f + 0.65f * ((sin((phase * 2f * PI.toFloat() * 3f) + i * 1.7f) + 1f) / 2f)
-            Box(Modifier.width(4.dp).height(22.dp * h).clip(RoundedCornerShape(2.dp)).background(color))
+            val h = 0.35f + 0.65f * ((sin((p * 2f * PI.toFloat() * 3f) + i * 1.7f) + 1f) / 2f)
+            // Whole pixels tall, as the laid-out bars were.
+            val height = (22.dp * h).roundToPx().toFloat()
+            drawRoundRect(color, topLeft = Offset(i * (bar + gap), size.height - height), size = androidx.compose.ui.geometry.Size(bar, height), cornerRadius = corner)
         }
     }
 }

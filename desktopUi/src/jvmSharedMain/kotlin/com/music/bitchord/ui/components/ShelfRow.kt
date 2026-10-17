@@ -4,11 +4,13 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyListPrefetchStrategy
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 
@@ -42,7 +44,7 @@ fun ShelfRow(
     contentPadding: PaddingValues,
     horizontalArrangement: Arrangement.Horizontal,
     modifier: Modifier = Modifier,
-    state: LazyListState = rememberLazyListState(),
+    state: LazyListState = rememberShelfRowState(),
     content: LazyListScope.() -> Unit,
 ) {
     LocalShelfRowChrome.current.Wrap(state) {
@@ -56,3 +58,16 @@ fun ShelfRow(
         )
     }
 }
+
+/**
+ * How many of a shelf's cards are built along with the shelf when the page builds it ahead of time.
+ * Compose's own default is two, and a row in a wide window shows a dozen: the rest were then built
+ * in the frame the shelf scrolled into view. Enough here for the widest window's row.
+ */
+private const val SHELF_ROW_PREFETCH = 12
+
+/** A shelf row's state, with its cards built ahead along with it — see [SHELF_ROW_PREFETCH]. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun rememberShelfRowState(): LazyListState =
+    rememberLazyListState(prefetchStrategy = remember { LazyListPrefetchStrategy(nestedPrefetchItemCount = SHELF_ROW_PREFETCH) })

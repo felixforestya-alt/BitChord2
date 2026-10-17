@@ -332,7 +332,6 @@ private fun PlaylistShelf(
                         label = stringResource(Res.string.import_spotify),
                         subtitle = stringResource(Res.string.import_spotify_subtitle),
                         onClick = onImportSpotifyPlaylist,
-                        logo = Res.drawable.spotify_logo,
                     )
                 }
             }

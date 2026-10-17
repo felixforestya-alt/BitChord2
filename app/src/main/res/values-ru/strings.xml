@@ -1296,7 +1296,7 @@
     <string name="song_cache_unlimited_subtitle">Без ограничений. Кэшированное аудио может расти, пока не заполнится память.</string>
     <string name="clear_song_cache_title">Очистить кэш треков?</string>
     <string name="clear_song_cache_warning">Все кэшированные треки будут удалены, а папка кэшированных треков опустеет. При следующем воспроизведении они снова будут загружаться потоком.</string>
-    <string name="import_spotify">Импорт из Spotify</string>
+    <string name="import_spotify">Импорт плейлиста</string>
     <string name="import_spotify_subtitle">Из ссылки на плейлист</string>
     <string name="local_playlist_subtitle">%1$d треков · На этом устройстве</string>
     <string name="lossless_output_permission_denied">Разрешение «Устройства поблизости» выключено</string>
@@ -1315,7 +1315,7 @@
     <string name="spotify_import_done">Импортирован «%1$s»</string>
     <string name="spotify_import_empty_playlist">В этом плейлисте нет треков</string>
     <string name="spotify_import_failed">Не удалось импортировать плейлист: %1$s</string>
-    <string name="spotify_import_fetching">Читаем плейлист Spotify…</string>
+    <string name="spotify_import_fetching">Читаем плейлист…</string>
     <string name="spotify_import_hint">open.spotify.com/playlist/…</string>
     <string name="spotify_import_invalid">Это не ссылка на плейлист Spotify.</string>
     <string name="spotify_import_local_fallback">Не удалось создать её на YouTube Music, поэтому «%1$s» сохранена на этом устройстве.</string>

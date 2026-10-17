@@ -3463,6 +3463,7 @@ fun BitChordDesktopApp() {
                 DesktopTrackLog.log("selftest wave $tuning: ${batch.size} tracks, e.g. ${batch.take(3).map { it.artist + " - " + it.title }}")
             }
             DesktopMyWave.setTuning(DesktopWaveTuning.ALL)
+            DesktopTrackLog.log("selftest analysis library available: ${DesktopAnalysisRuntime.available}")
             DesktopTrackLog.log("selftest done")
         }
     }
@@ -4939,6 +4940,10 @@ fun BitChordDesktopApp() {
                                         onPlayPause = ::togglePlayPauseFromUser,
                                         onSkip = ::playNext,
                                         onTune = { waveSettingsOpen = true },
+                                        // One with the "now playing" card while the jam plays — when there
+                                        // is that card above it.
+                                        merged = jamOn && animatedHome && selectedSong != null,
+                                        heroVisible = { if (heroAnchor.present) heroAnchor.visible else 1f },
                                         modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 12.dp),
                                     )
                                 }

@@ -166,8 +166,20 @@ internal fun DesktopWaveCard(
     onSkip: () -> Unit,
     onTune: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Whether the card joins the "now playing" card above it — while the jam plays, the two are one
+     * thing — and how much of that card is in view, so the join lets go as it scrolls away.
+     */
+    merged: Boolean = false,
+    heroVisible: () -> Float = { 1f },
 ) {
     val tuning by DesktopMyWave.tuning.collectAsState()
+    // A drop meeting a drop: drawn together with a little overshoot, pulled apart with a snap.
+    val join by androidx.compose.animation.core.animateFloatAsState(
+        if (merged) 1f else 0f,
+        androidx.compose.animation.core.spring(dampingRatio = if (merged) 0.5f else 0.75f, stiffness = 180f),
+        label = "jamJoin",
+    )
     val onlyNew by DesktopMyWave.onlyNew.collectAsState()
     val palette = rememberVividPalette(coverUrl)
     val light by androidx.compose.animation.animateColorAsState(palette.vivid, tween(700), label = "jamLight")
@@ -176,12 +188,44 @@ internal fun DesktopWaveCard(
     val phase by rememberInfiniteTransition(label = "wave").animateFloat(
         0f, 1f, infiniteRepeatable(tween(if (moving) 2_600 else 9_000, easing = LinearEasing), RepeatMode.Restart), label = "wavePhase",
     )
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                // Up to the card above, all the way once joined.
+                translationY = -JOIN_GAP.toPx() * (join * heroVisible()).coerceIn(0f, 1.1f)
+            }
+            .drawBehind {
+                val m = (join * heroVisible()).coerceIn(0f, 1f)
+                if (m < 0.02f) return@drawBehind
+                // The neck between the two: thin and pinched as they meet or part, the width of the
+                // card once they are one. Its top is the bottom of the card above.
+                val gap = JOIN_GAP.toPx() * (1f - (join * heroVisible()).coerceIn(0f, 1.1f)).coerceAtLeast(0f)
+                val top = -gap - 2f
+                val bottom = 2f
+                val cx = size.width / 2f
+                val wTop = size.width * (0.16f + 0.84f * m)
+                val wBottom = size.width * (0.26f + 0.74f * m)
+                val wWaist = minOf(wTop, wBottom) * (0.30f + 0.70f * m * m)
+                val h = bottom - top
+                val neck = Path().apply {
+                    moveTo(cx - wTop / 2f, top)
+                    lineTo(cx + wTop / 2f, top)
+                    cubicTo(cx + wWaist / 2f, top + h * 0.35f, cx + wWaist / 2f, top + h * 0.65f, cx + wBottom / 2f, bottom)
+                    lineTo(cx - wBottom / 2f, bottom)
+                    cubicTo(cx - wWaist / 2f, top + h * 0.65f, cx - wWaist / 2f, top + h * 0.35f, cx - wTop / 2f, top)
+                    close()
+                }
+                drawPath(neck, Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f), light.copy(alpha = 0.55f), deep.copy(alpha = 0.85f))))
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val corner = 26.dp * (1f - join.coerceIn(0f, 1f) * heroVisible().coerceIn(0f, 1f))
         Box(
             Modifier
                 .weight(1f)
                 .height(112.dp)
-                .clip(RoundedCornerShape(26.dp))
+                .clip(RoundedCornerShape(topStart = corner, topEnd = corner, bottomStart = 26.dp, bottomEnd = 26.dp))
                 .background(Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f), light.copy(alpha = 0.55f), deep.copy(alpha = 0.85f))))
                 .drawBehind {
                     // The wave: lines drifting across, in the light of the cover.
@@ -549,3 +593,6 @@ private fun TextAction(label: String, filled: Boolean, onClick: () -> Unit) {
             .padding(horizontal = 18.dp, vertical = 9.dp),
     )
 }
+
+/** The room between the "now playing" card and My Jam's: the header's foot and the card's own top. */
+private val JOIN_GAP = 26.dp

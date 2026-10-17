@@ -3482,6 +3482,25 @@ fun BitChordDesktopApp() {
             }
             snapshotFlow { sessionSettled }.first { it }
             delay(3_000)
+            if (System.getenv("BITCHORD_SELFTEST_SCROLL") == "1") {
+                snapshotFlow { homeState is UiState.Success }.first { it }
+                delay(2_000)
+                fun where(label: String) = DesktopTrackLog.log(
+                    "selftest scroll $label: first=${homeListState.firstVisibleItemIndex} offset=${homeListState.firstVisibleItemScrollOffset} items=${homeListState.layoutInfo.totalItemsCount}",
+                )
+                where("start")
+                repeat(12) { homeWheel.add(400f); delay(120) }
+                delay(1_200)
+                where("after down")
+                repeat(6) { homeWheel.add(-400f); delay(120) }
+                delay(1_200)
+                where("after up x6")
+                repeat(30) { homeWheel.add(-400f); delay(120) }
+                delay(1_500)
+                where("after up x30")
+                DesktopTrackLog.log("selftest done")
+                return@LaunchedEffect
+            }
             if (System.getenv("BITCHORD_SELFTEST_JAM") == "1") {
                 startWave()
                 DesktopTrackLog.log("selftest jam started")

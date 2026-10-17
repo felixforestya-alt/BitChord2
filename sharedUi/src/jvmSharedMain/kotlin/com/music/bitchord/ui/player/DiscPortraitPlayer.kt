@@ -330,7 +330,7 @@ internal fun DiscPortraitPlayer(
                                     .fillMaxSize()
                                     // On its side, no wider than reads as one block, so the like and
                                     // menu buttons stay beside the track rather than across the room.
-                                    .then(if (wide) Modifier.wrapContentWidth(Alignment.Start).widthIn(max = 520.dp) else Modifier)
+                                    .then(if (wide) Modifier.wrapContentWidth(Alignment.Start).widthIn(max = 470.dp) else Modifier)
                                     .padding(horizontal = if (wide) 8.dp else PLAYER_GUTTER),
                                 verticalArrangement = if (wide) Arrangement.Center else Arrangement.Bottom,
                             ) {
@@ -363,41 +363,50 @@ internal fun DiscPortraitPlayer(
                                         color = Color.White,
                                         fontFamily = androidx.compose.material3.MaterialTheme.typography.displayLarge.fontFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = if (wide) 34.sp else 46.sp,
+                                        fontSize = if (wide) 40.sp else 46.sp,
                                         letterSpacing = (-1.4).sp,
                                         maxLines = 1,
                                         style = androidx.compose.ui.text.TextStyle(
                                             shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 6f), 28f),
-                                            lineHeight = if (wide) 36.sp else 48.sp,
+                                            lineHeight = if (wide) 42.sp else 48.sp,
                                             lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
                                                 androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
                                                 androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
                                             ),
                                         ),
-                                        modifier = Modifier.padding(bottom = 14.dp),
+                                        modifier = Modifier.padding(bottom = if (wide) 10.dp else 8.dp),
                                     )
                                 }
                                 // The track, its artist and the line being sung, larger than the
                                 // app sets them; the like and menu buttons down by the artist,
                                 // clear of the title above and the line below.
                                 val here = LocalDensity.current
+                                // Upright the buttons hang just below the title, by the artist;
+                                // on its side, where the words are one short block, they stand
+                                // level with the track beside it.
+                                val drop = if (wide) 0.dp else CREDITS_BUTTONS_DROP
                                 androidx.compose.runtime.CompositionLocalProvider(
-                                    LocalDensity provides androidx.compose.ui.unit.Density(here.density * WORDS_SCALE, here.fontScale * WORDS_FONT_SCALE),
-                                    LocalCreditsButtonsPlacement provides CreditsButtonsPlacement(Alignment.Bottom, CREDITS_BUTTONS_DROP),
+                                    LocalDensity provides androidx.compose.ui.unit.Density(
+                                        here.density * (if (wide) WIDE_WORDS_SCALE else WORDS_SCALE),
+                                        here.fontScale * (if (wide) WIDE_WORDS_SCALE else WORDS_FONT_SCALE),
+                                    ),
+                                    LocalCreditsButtonsPlacement provides CreditsButtonsPlacement(
+                                        if (wide) Alignment.CenterVertically else Alignment.Bottom,
+                                        drop,
+                                    ),
                                 ) {
                                     Column {
                                         // Above the line below in touch as in drawing: the buttons
                                         // hang down beside the artist, over the gap, taking no room.
                                         Box(Modifier.zIndex(1f)) { credits() }
                                         if (lyricStrip != null) {
-                                            // Room for the buttons hanging below the artist, so the
-                                            // line being sung starts clear of them.
-                                            Spacer(Modifier.height(CREDITS_BUTTONS_DROP + 6.dp))
+                                            // Just clear of the buttons hanging below the artist.
+                                            Spacer(Modifier.height(if (wide) 8.dp else drop - 4.dp))
                                             lyricStrip()
                                         }
                                     }
                                 }
-                                Spacer(Modifier.height(18.dp))
+                                Spacer(Modifier.height(if (wide) 0.dp else 14.dp))
                             }
                             PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = if (wide) 4.dp else PANE_GUTTER)) {
                                 // The line being sung in the middle of the stretch, as on the desktop,
@@ -426,7 +435,7 @@ internal fun DiscPortraitPlayer(
                                     .border(0.5.dp, Color.White.copy(alpha = 0.14f), DECK_SHAPE)
                             }
                         }
-                        .padding(horizontal = PLAYER_GUTTER - 12.dp, vertical = 14.dp),
+                        .padding(horizontal = PLAYER_GUTTER - 12.dp, vertical = if (wide) 8.dp else 14.dp),
                 ) {
                     scrubber()
                     Spacer(Modifier.height(6.dp))
@@ -434,7 +443,13 @@ internal fun DiscPortraitPlayer(
                         // On its side the deck is low and wide: the transport and the actions on
                         // one line, and no volume — the phone's own keys have it.
                         androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f)) { transport() }
+                            // The transport a size down on its side, to keep the deck low.
+                            val deckDensity = LocalDensity.current
+                            androidx.compose.runtime.CompositionLocalProvider(
+                                LocalDensity provides androidx.compose.ui.unit.Density(deckDensity.density * 0.8f, deckDensity.fontScale),
+                            ) {
+                                Box(Modifier.weight(1f)) { transport() }
+                            }
                             Spacer(Modifier.width(24.dp))
                             Column(Modifier.weight(1f)) { actions() }
                         }
@@ -508,7 +523,10 @@ private const val WORDS_SCALE = 1.12f
 private const val WORDS_FONT_SCALE = 1.14f
 
 /** How far the like and menu buttons hang below the artist, to the right of the words. */
-private val CREDITS_BUTTONS_DROP = 22.dp
+private val CREDITS_BUTTONS_DROP = 16.dp
+
+/** On its side the track's words are larger still: there is width to spare for them. */
+private const val WIDE_WORDS_SCALE = 1.3f
 
 /** One revolution every this many seconds — a slow, legible spin rather than a blur. */
 private const val DISC_PERIOD_S = 3.2f

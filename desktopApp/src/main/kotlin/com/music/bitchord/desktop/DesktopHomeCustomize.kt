@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
@@ -180,6 +181,12 @@ internal fun DesktopWaveCard(
         androidx.compose.animation.core.spring(dampingRatio = if (merged) 0.5f else 0.75f, stiffness = 180f),
         label = "jamJoin",
     )
+    // Told to the card above, which squares its foot to meet this one.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { (join * heroVisible()).coerceIn(0f, 1f) }
+            .collect { DesktopJamJoin.amount = it }
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { DesktopJamJoin.amount = 0f } }
     val onlyNew by DesktopMyWave.onlyNew.collectAsState()
     val palette = rememberVividPalette(coverUrl)
     val light by androidx.compose.animation.animateColorAsState(palette.vivid, tween(700), label = "jamLight")
@@ -374,10 +381,35 @@ internal fun DesktopWaveSettingsDialog(
                 if (playlists.isEmpty()) {
                     Text(DesktopStrings["wave_no_playlists", "No playlists yet."], color = DesktopSecondary, style = MaterialTheme.typography.bodySmall)
                 }
-                Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        playlists.forEach { (id, title) ->
-                            Choice(title, playlist?.first == id) { DesktopMyWave.setPlaylist(id, title) }
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 260.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .verticalScroll(rememberScrollState())
+                        .padding(vertical = 4.dp),
+                ) {
+                    playlists.forEach { (id, title) ->
+                        val picked = playlist?.first == id
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { DesktopMyWave.setPlaylist(id, title) }
+                                .background(if (picked) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                title,
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (picked) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (picked) Icon(Icons.Rounded.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -592,6 +624,11 @@ private fun TextAction(label: String, filled: Boolean, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 9.dp),
     )
+}
+
+/** How far My Jam's card is joined to the "now playing" card above it, 0 to 1 — read by that card. */
+internal object DesktopJamJoin {
+    var amount by androidx.compose.runtime.mutableFloatStateOf(0f)
 }
 
 /** The room between the "now playing" card and My Jam's: the header's foot and the card's own top. */

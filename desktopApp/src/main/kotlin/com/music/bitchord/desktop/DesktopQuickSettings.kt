@@ -51,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -286,9 +287,20 @@ private fun PanelSwitch(text: String, checked: Boolean, onChange: (Boolean) -> U
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            // The hover wash reaches a little past the words on either side, as a capsule round
+            // them, while the words stay in line with the rest of the panel.
+            .layout { measurable, constraints ->
+                val extra = 10.dp.roundToPx()
+                val wide = constraints.copy(
+                    minWidth = constraints.minWidth + extra * 2,
+                    maxWidth = if (constraints.hasBoundedWidth) constraints.maxWidth + extra * 2 else constraints.maxWidth,
+                )
+                val placeable = measurable.measure(wide)
+                layout(placeable.width - extra * 2, placeable.height) { placeable.place(-extra, 0) }
+            }
+            .clip(RoundedCornerShape(12.dp))
             .clickable { onChange(!checked) }
-            .padding(vertical = 2.dp),
+            .padding(start = 10.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))

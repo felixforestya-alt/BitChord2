@@ -313,8 +313,17 @@ internal fun DesktopMorphingPlayer(
                     scaleX = grow * (1f - f * 0.04f)
                     scaleY = grow * (1f + f * 0.08f)
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, if (flow.value >= 0f) 0f else 1f)
-                    shadowElevation = (8f + (1f - morph.e) * 10f) * density.density
-                    shape = RoundedCornerShape(morph.cornerPx(density.density).toDp())
+                    // Joined to My Jam's card below it: no shadow cast onto it, and the bottom
+                    // corners squared off so the two read as one card.
+                    val joined = DesktopJamJoin.amount * (1f - morph.e)
+                    shadowElevation = (8f + (1f - morph.e) * 10f) * density.density * (1f - joined)
+                    val corner = morph.cornerPx(density.density)
+                    shape = RoundedCornerShape(
+                        topStart = corner.toDp(),
+                        topEnd = corner.toDp(),
+                        bottomStart = (corner * (1f - joined)).toDp(),
+                        bottomEnd = (corner * (1f - joined)).toDp(),
+                    )
                     clip = true
                 }
                 .desktopLiquidGlass(

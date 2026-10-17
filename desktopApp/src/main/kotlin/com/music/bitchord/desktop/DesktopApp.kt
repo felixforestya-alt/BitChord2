@@ -4935,7 +4935,9 @@ fun BitChordDesktopApp() {
                                         playing = jamOn,
                                         paused = !playback.isPlaying,
                                         current = selectedSong?.takeIf { jamOn },
-                                        coverUrl = selectedSong?.thumbnailUrl,
+                                        // The sleeve the card above shows, so the two match — a video's
+                                        // frame had the jam stay its colour after switching to the song.
+                                        coverUrl = selectedSong?.let(::withSleeve)?.thumbnailUrl,
                                         onPlay = ::startWave,
                                         onPlayPause = ::togglePlayPauseFromUser,
                                         onSkip = ::playNext,

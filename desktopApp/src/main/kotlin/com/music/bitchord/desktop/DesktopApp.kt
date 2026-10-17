@@ -168,13 +168,16 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -544,9 +547,10 @@ fun BitChordDesktopApp() {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    DesktopExternalLinks.open(update.downloadUrl ?: update.releaseUrl)
+                    val toDownload = update
                     availableUpdate = null
-                }) { Text(DesktopStrings["d_download", "Download"]) }
+                    scope.launch { DesktopUpdateChecker.downloadAndApply(toDownload) }
+                }) { Text(if (DesktopStrings.resolvedTag() == "ru") "Обновить" else DesktopStrings["update", "Update"]) }
             },
             dismissButton = {
                 TextButton(onClick = { availableUpdate = null }) {
@@ -7035,6 +7039,7 @@ private enum class DesktopSettingsSection {
     MISCELLANEOUS,
     LANGUAGE,
     ADVANCED,
+    UPDATES,
 }
 
 /**
@@ -7873,6 +7878,12 @@ private fun DesktopSettingsScreen(
                     )
                 }
             }
+            if (section == DesktopSettingsSection.UPDATES) item {
+                val groupTitle = if (DesktopStrings.resolvedTag() == "ru") "Обновление приложения" else DesktopStrings["updates", "Updates"]
+                SettingsGroup(groupTitle) {
+                    DesktopUpdateSettingsRow()
+                }
+            }
             }
             item {
                 DesktopSettingsFooter(onLicenses = onOpenLicenses)
@@ -7905,18 +7916,18 @@ private fun DesktopSettingsScreen(
 /** The line at the foot of the settings sheet, as Android has it. */
 @Composable
 private fun DesktopSettingsFooter(onLicenses: () -> Unit) {
-    val version = remember { System.getProperty("bitchord.version") ?: "1.8-beta1" }
+    val version = remember { DesktopUpdateChecker.currentVersion }
     val linkStyles = TextLinkStyles(
         style = SpanStyle(color = DesktopAccent, textDecoration = TextDecoration.Underline),
     )
     Text(
         text = buildAnnotatedString {
-            append("bitchord $version  ")
-            withLink(LinkAnnotation.Url("https://github.com/kushagrasinghx/BitChord", linkStyles)) {
+            append("BitChord $version  ")
+            withLink(LinkAnnotation.Url("https://github.com/felixforestya-alt/BitChord2", linkStyles)) {
                 append("GitHub")
             }
             append("  ")
-            withLink(LinkAnnotation.Url("https://github.com/kushagrasinghx", linkStyles)) {
+            withLink(LinkAnnotation.Url("https://github.com/felixforestya-alt", linkStyles)) {
                 append("Developer")
             }
             append("  ")
@@ -7934,6 +7945,204 @@ private fun DesktopSettingsFooter(onLicenses: () -> Unit) {
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
     )
+}
+
+/**
+ * Settings row that displays the current application version, checks for updates from GitHub,
+ * downloads portable packages or installers with progress indication, and seamlessly restarts.
+ */
+@Composable
+private fun DesktopUpdateSettingsRow() {
+    val updateState by DesktopUpdateChecker.state.collectAsState()
+    val scope = rememberCoroutineScope()
+    val isRussian = DesktopStrings.resolvedTag() == "ru"
+    val version = DesktopUpdateChecker.currentVersion
+
+    val title = if (isRussian) "Версия $version" else "Version $version"
+    val subtitle = when (val s = updateState) {
+        is DesktopUpdateChecker.UpdateState.Idle ->
+            if (isRussian) "Проверить наличие обновлений и установить"
+            else "Check for updates and install"
+        is DesktopUpdateChecker.UpdateState.Checking ->
+            if (isRussian) "Проверка обновлений…"
+            else "Checking for updates…"
+        is DesktopUpdateChecker.UpdateState.UpToDate ->
+            if (isRussian) "У вас установлена последняя версия ($version)"
+            else "You have the latest version ($version)"
+        is DesktopUpdateChecker.UpdateState.Available ->
+            if (isRussian) "Доступна новая версия: ${s.info.version}"
+            else "New version available: ${s.info.version}"
+        is DesktopUpdateChecker.UpdateState.Downloading -> {
+            val pct = if (s.progress >= 0f) "${(s.progress * 100).toInt()}%" else ""
+            val mb = if (s.totalBytes > 0) " (${s.downloadedBytes / (1024 * 1024)} / ${s.totalBytes / (1024 * 1024)} МБ)" else ""
+            if (isRussian) "Загрузка обновления… $pct$mb" else "Downloading update… $pct$mb"
+        }
+        is DesktopUpdateChecker.UpdateState.Extracting ->
+            if (isRussian) "Распаковка и подготовка файлов…"
+            else "Preparing update files…"
+        is DesktopUpdateChecker.UpdateState.ReadyToRestart ->
+            if (s.isDevMode) {
+                if (isRussian) "Обновление скачано в папку (режим разработки)"
+                else "Update downloaded to folder (dev mode)"
+            } else {
+                if (isRussian) "Обновление готово к установке!"
+                else "Update is ready to install!"
+            }
+        is DesktopUpdateChecker.UpdateState.Error ->
+            if (isRussian) "Ошибка: ${s.message}" else "Error: ${s.message}"
+    }
+
+    if (!settingsRowVisible(title, subtitle)) return
+
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(Modifier.weight(1f).padding(end = 16.dp)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (updateState) {
+                        is DesktopUpdateChecker.UpdateState.UpToDate,
+                        is DesktopUpdateChecker.UpdateState.Available,
+                        is DesktopUpdateChecker.UpdateState.ReadyToRestart -> DesktopAccent
+                        is DesktopUpdateChecker.UpdateState.Error -> MaterialTheme.colorScheme.error
+                        else -> DesktopSecondary
+                    },
+                )
+            }
+
+            when (val s = updateState) {
+                is DesktopUpdateChecker.UpdateState.Idle,
+                is DesktopUpdateChecker.UpdateState.UpToDate -> {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val found = DesktopUpdateChecker.checkForUpdates(force = true)
+                                if (found != null) {
+                                    DesktopUpdateChecker.downloadAndApply(found)
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DesktopAccent,
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Text(if (isRussian) "Обновить" else "Update")
+                    }
+                }
+                is DesktopUpdateChecker.UpdateState.Checking -> {
+                    FilledTonalButton(
+                        onClick = {},
+                        enabled = false,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = DesktopAccent,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isRussian) "Проверка…" else "Checking…")
+                    }
+                }
+                is DesktopUpdateChecker.UpdateState.Available -> {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                DesktopUpdateChecker.downloadAndApply(s.info)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DesktopAccent,
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Text(if (isRussian) "Обновить" else "Update")
+                    }
+                }
+                is DesktopUpdateChecker.UpdateState.Downloading -> {
+                    OutlinedButton(
+                        onClick = { DesktopUpdateChecker.cancelDownload() },
+                    ) {
+                        Text(if (isRussian) "Отмена" else "Cancel")
+                    }
+                }
+                is DesktopUpdateChecker.UpdateState.Extracting -> {
+                    FilledTonalButton(
+                        onClick = {},
+                        enabled = false,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = DesktopAccent,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (isRussian) "Распаковка…" else "Extracting…")
+                    }
+                }
+                is DesktopUpdateChecker.UpdateState.ReadyToRestart -> {
+                    Button(
+                        onClick = { DesktopUpdateChecker.applyAndRestart() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DesktopAccent,
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Text(
+                            if (s.isDevMode) {
+                                if (isRussian) "Открыть папку" else "Open folder"
+                            } else {
+                                if (isRussian) "Перезапустить" else "Restart"
+                            }
+                        )
+                    }
+                }
+                is DesktopUpdateChecker.UpdateState.Error -> {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val found = DesktopUpdateChecker.checkForUpdates(force = true)
+                                if (found != null) {
+                                    DesktopUpdateChecker.downloadAndApply(found)
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DesktopAccent,
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Text(if (isRussian) "Повторить" else "Retry")
+                    }
+                }
+            }
+        }
+
+        if (updateState is DesktopUpdateChecker.UpdateState.Downloading) {
+            val s = updateState as DesktopUpdateChecker.UpdateState.Downloading
+            Spacer(Modifier.height(10.dp))
+            if (s.progress >= 0f) {
+                LinearProgressIndicator(
+                    progress = { s.progress },
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                    color = DesktopAccent,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+            } else {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                    color = DesktopAccent,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+            }
+        }
+    }
 }
 
 /** Everything this build is assembled from, and the terms each part came under. A page of Settings. */

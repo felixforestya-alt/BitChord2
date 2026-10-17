@@ -813,8 +813,8 @@ fun LivingBackdrop(coverUrl: String?, covered: () -> Boolean, modifier: Modifier
                 val radius = size.maxDimension * (0.42f + 0.06f * sin(t * 0.3f + i))
                 drawCircle(
                     Brush.radialGradient(
-                        0f to colour.copy(alpha = 0.34f),
-                        0.6f to colour.copy(alpha = 0.10f),
+                        0f to colour.copy(alpha = 0.46f),
+                        0.6f to colour.copy(alpha = 0.15f),
                         1f to Color.Transparent,
                         center = Offset(cx, cy),
                         radius = radius,
@@ -825,7 +825,7 @@ fun LivingBackdrop(coverUrl: String?, covered: () -> Boolean, modifier: Modifier
                 )
             }
             // The veil that keeps the page readable, deepening toward the bottom bar.
-            drawRect(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.30f), 1f to Color.Black.copy(alpha = 0.70f)))
+            drawRect(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.20f), 1f to Color.Black.copy(alpha = 0.60f)))
         }
     }
 }

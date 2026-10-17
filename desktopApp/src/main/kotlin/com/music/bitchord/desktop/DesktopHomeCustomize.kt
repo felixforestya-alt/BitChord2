@@ -172,16 +172,9 @@ internal fun DesktopWaveCard(
     merged: Boolean = false,
     heroVisible: () -> Float = { 1f },
 ) {
-    // A drop taken into a drop: a little overshoot on the way in, a firm one on the way out.
-    val join by androidx.compose.animation.core.animateFloatAsState(
-        if (merged) 1f else 0f,
-        androidx.compose.animation.core.spring(dampingRatio = if (merged) 0.62f else 0.8f, stiffness = 200f),
-        label = "jamJoin",
-    )
-    androidx.compose.runtime.LaunchedEffect(Unit) {
-        androidx.compose.runtime.snapshotFlow { join.coerceIn(0f, 1.15f) }.collect { DesktopJamJoin.amount = it }
-    }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { DesktopJamJoin.amount = 0f } }
+    // How far it has joined is kept by the app, not here: this card is a row of the feed, unloaded
+    // when scrolled away, and the join reset with it — the card above then shrank and grew again
+    // under the wheel, and the page fought the scroll back up.
     val palette = rememberVividPalette(coverUrl)
     val light by androidx.compose.animation.animateColorAsState(palette.vivid, tween(700), label = "jamLight")
     val deep by androidx.compose.animation.animateColorAsState(palette.deep, tween(700), label = "jamDeep")

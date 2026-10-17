@@ -3388,7 +3388,18 @@ fun BitChordDesktopApp() {
             modifier = rowModifier,
         )
     }
-    val jamFoot = jamFootRow.takeIf { selectedSong?.radioName == DesktopMyWave.radioName || DesktopJamJoin.amount > 0.01f }
+    // Whether My Jam has joined the "now playing" card, eased — held here, where it lasts however far
+    // the feed is scrolled. A drop taken into a drop: a little overshoot in, a firm one out.
+    val jamJoined = selectedSong?.radioName == DesktopMyWave.radioName && animatedHome && waveShown
+    val jamJoin = androidx.compose.animation.core.animateFloatAsState(
+        if (jamJoined) 1f else 0f,
+        androidx.compose.animation.core.spring(dampingRatio = if (jamJoined) 0.62f else 0.8f, stiffness = 200f),
+        label = "jamJoin",
+    )
+    LaunchedEffect(Unit) {
+        snapshotFlow { jamJoin.value.coerceIn(0f, 1.15f) }.collect { DesktopJamJoin.amount = it }
+    }
+    val jamFoot = jamFootRow.takeIf { jamJoined || DesktopJamJoin.amount > 0.01f }
 
     /** The glass bar along the bottom of the window, for [current]. */
     @Composable

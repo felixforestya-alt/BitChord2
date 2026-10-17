@@ -223,6 +223,7 @@ fun SettingsScreen(
     val fullBleedArtwork by AppSettings.fullBleedArtwork.collectAsStateWithLifecycle()
     val legacyMeshGradient by AppSettings.legacyMeshGradient.collectAsStateWithLifecycle()
     val discPlayer by AppSettings.discPlayer.collectAsStateWithLifecycle()
+    val discHeading by AppSettings.discHeading.collectAsStateWithLifecycle()
     val syncedLyrics by AppSettings.syncedLyrics.collectAsStateWithLifecycle()
     val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
     val translationLanguage by AppSettings.translationLanguage.collectAsStateWithLifecycle()
@@ -878,6 +879,27 @@ fun SettingsScreen(
                     },
                     onClick = { AppSettings.setDiscPlayer(!discPlayer) },
                 )
+            }
+            if (discPlayer) {
+                val discHeadingTitle = stringResource(R.string.disc_heading)
+                row(discHeadingTitle, "now playing", "heading", "disc") {
+                    SettingsRow(
+                        icon = Icons.Rounded.Album,
+                        title = discHeadingTitle,
+                        subtitle = stringResource(R.string.disc_heading_subtitle),
+                        trailing = {
+                            Switch(
+                                checked = discHeading,
+                                onCheckedChange = AppSettings::setDiscHeading,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDiscHeading(!discHeading) },
+                    )
+                }
             }
             val legacyMeshGradientTitle = stringResource(R.string.legacy_mesh_gradient)
             row(legacyMeshGradientTitle, "background", "player") {

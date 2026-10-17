@@ -22,6 +22,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -164,26 +167,35 @@ internal fun DiscPortraitPlayer(
         lastIndex.intValue = trackIndex
     }
 
+    val showHeading by PlayerSettings.discHeading.collectAsStateWithLifecycle()
+
     // Clipped to the sheet: pulled down, the disc goes with it rather than hanging over the page.
     BoxWithConstraints(modifier.fillMaxSize().clipToBounds().background(Color.Black)) {
         val width = maxWidth
         val height = maxHeight
-        // On its side the phone takes the desktop's shape: the disc down the left, a little
-        // over half of it showing past the edge, and everything else beside it on the right.
+        // On its side the phone takes the desktop's shape: the disc down the left, and everything
+        // else in a column beside it.
         val wide = width > height
         val statusTop = with(density) { stableStatusBarInsets().getTop(this).toDp() }
-        // Where the disc's lower edge sits: two thirds of a screen-wide disc below the top.
+        // Where the front camera is: the hole in the display the disc's own hole is set over, so
+        // the camera reads as the middle of the CD. The cutout's band across the top (or down the
+        // side, on its side) is centred on the hole; with none, the status bar stands in for it.
+        val cutout = WindowInsets.displayCutout
+        val cutoutTop = with(density) { cutout.getTop(this).toDp() }
+        val cutoutLeft = with(density) { cutout.getLeft(this, androidx.compose.ui.unit.LayoutDirection.Ltr).toDp() }
+        // Upright: the disc's lower edge where it has always been, two thirds of a screen-wide disc
+        // below the top, and its middle on the camera — so it is as big as that makes it.
         val discBottom = statusTop + min(width * 0.94f, height * 0.5f) * 0.68f
-        // A bigger disc in that same stretch of screen: wider than the screen and higher up, so
-        // more of its print shows rather than more of the screen going to it.
-        val discSize = if (wide) min(height * 0.94f, width * 0.6f) else min(width * 1.22f, height * 0.62f)
-        val discCentreX = if (wide) width * 0.06f else width / 2
-        val discCentreY = if (wide) height / 2 else discBottom - discSize / 2
-        // Risen with a panel up: a band of disc across the top, the hub just under the edge. On
-        // its side the disc stays where it is and the panel takes the stage beside it.
+        val cameraY = if (cutoutTop > 0.dp) cutoutTop / 2 else statusTop / 2
+        val cameraX = if (cutoutLeft > 0.dp) cutoutLeft / 2 else width * 0.04f
+        val discSize = if (wide) height * 1.36f else (discBottom - cameraY) * 2
+        val discCentreX = if (wide) cameraX else width / 2
+        val discCentreY = if (wide) height / 2 else cameraY
+        // Risen with a panel up: a band of disc across the top. On its side the disc stays put and
+        // the panel takes the column beside it.
         val discRise = if (wide) 0.dp else discCentreY + discSize * 0.5f - (statusTop + PANEL_BAND)
-        // Where the words, the panels and the deck begin, on its side.
-        val stageStart = if (wide) width * 0.40f else 0.dp
+        // Where everything that is not the disc begins, on its side.
+        val stageStart = if (wide) discCentreX + discSize * 0.5f + 20.dp else 0.dp
 
         // ---- The room, and everything the player's sheets frost ---------------------------
         Box(
@@ -195,20 +207,20 @@ internal fun DiscPortraitPlayer(
             // The light and the soft cover under it change with the track and nothing else: one
             // cached layer, so a frame composites one picture rather than redrawing both.
             if ("room" !in off) Box(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
-            Box(
-                Modifier.fillMaxSize().drawBehind {
-                    drawRect(
-                        Brush.radialGradient(
-                            0f to glow.copy(alpha = 0.95f),
-                            0.55f to lerp(glow, deep, 0.55f),
-                            1f to deep,
-                            center = Offset(size.width * 0.5f, size.height * 0.30f),
-                            radius = size.maxDimension * 0.85f,
-                        ),
-                    )
-                },
-            )
-            DiscAmbientArtwork(cover, Modifier.fillMaxSize().graphicsLayer { alpha = 0.38f })
+                Box(
+                    Modifier.fillMaxSize().drawBehind {
+                        drawRect(
+                            Brush.radialGradient(
+                                0f to glow.copy(alpha = 0.95f),
+                                0.55f to lerp(glow, deep, 0.55f),
+                                1f to deep,
+                                center = Offset(size.width * (if (wide) 0.62f else 0.5f), size.height * (if (wide) 0.4f else 0.30f)),
+                                radius = size.maxDimension * 0.85f,
+                            ),
+                        )
+                    },
+                )
+                DiscAmbientArtwork(cover, Modifier.fillMaxSize().graphicsLayer { alpha = 0.38f })
             }
             if ("marquee" !in off) DiscGhostMarquee(
                 text = song.artist.ifBlank { song.title }.lowercase(),
@@ -230,17 +242,17 @@ internal fun DiscPortraitPlayer(
             if ("spheres" !in off) DiscWireSpheres(clock = { clock.floatValue }, tint = Color.White, modifier = Modifier.fillMaxSize())
             if ("scan" !in off) DiscScanlines(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen })
 
-            // The disc, always the song's cover. A new cover rolls in from the side. Faded out
-            // toward the top, so it passes under the status bar — and, as the sheet is pulled
-            // down, under the notification shade's edge — softly rather than cut.
-            val fadeTo = with(density) { (statusTop + DISC_FADE).toPx() }
+            // The disc, always the song's cover. A new cover rolls in from the side. Upright it
+            // fades out above the camera, so the sliver over it passes softly under the status bar
+            // and, as the sheet is pulled down, under the shade's edge.
+            val fadeTo = with(density) { cameraY.toPx() * 0.7f }
             if ("disc" !in off) Box(
                 Modifier
                     .fillMaxSize()
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithContent {
                         drawContent()
-                        if (!wide) {
+                        if (!wide && fadeTo > 0f) {
                             drawRect(
                                 Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fadeTo),
                                 blendMode = BlendMode.DstIn,
@@ -248,207 +260,221 @@ internal fun DiscPortraitPlayer(
                         }
                     },
             ) {
-            AnimatedContent(
-                targetState = cover,
-                transitionSpec = {
-                    val dir = if (forward.value) 1 else -1
-                    (slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { it * dir } + fadeIn(tween(500))) togetherWith
-                        (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { -it * dir } + fadeOut(tween(450)))
-                },
-                // Wider than the screen, so laid out unbounded and centred across it, rather than
-                // squeezed to the screen's width.
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .wrapContentSize(if (wide) Alignment.TopStart else Alignment.TopCenter, unbounded = true)
-                    .offset(x = if (wide) discCentreX - discSize / 2 else 0.dp, y = discCentreY - discSize / 2)
-                    .graphicsLayer {
-                        translationY = -discRise.toPx() * panelT
-                        val s = 1f - 0.12f * panelT
-                        scaleX = s
-                        scaleY = s
-                    }
-                    // With a panel up the disc is the way back to the player.
-                    .clickable(
-                        enabled = pane != PlayerPane.Main,
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onBackToMain,
-                    ),
-                label = "disc",
-            ) { art ->
-                SpinningDisc(
-                    artUrl = art,
-                    angle = { discAngle.floatValue },
-                    level = { AudioSpectrum.levelAt(System.nanoTime()).also { clock.floatValue } },
-                    glow = glow,
-                    modifier = Modifier.requiredSize(discSize),
-                )
-            }
+                AnimatedContent(
+                    targetState = cover,
+                    transitionSpec = {
+                        val dir = if (forward.value) 1 else -1
+                        (slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { it * dir } + fadeIn(tween(500))) togetherWith
+                            (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { -it * dir } + fadeOut(tween(450)))
+                    },
+                    // Bigger than the screen, so laid out unbounded and placed by its middle,
+                    // rather than squeezed to fit.
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentSize(Alignment.TopStart, unbounded = true)
+                        .offset(x = discCentreX - discSize / 2, y = discCentreY - discSize / 2)
+                        .graphicsLayer {
+                            translationY = -discRise.toPx() * panelT
+                            val s = 1f - 0.12f * panelT
+                            scaleX = s
+                            scaleY = s
+                        }
+                        // With a panel up the disc is the way back to the player.
+                        .clickable(
+                            enabled = pane != PlayerPane.Main,
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onBackToMain,
+                        ),
+                    label = "disc",
+                ) { art ->
+                    SpinningDisc(
+                        artUrl = art,
+                        angle = { discAngle.floatValue },
+                        level = { AudioSpectrum.levelAt(System.nanoTime()).also { clock.floatValue } },
+                        glow = glow,
+                        modifier = Modifier.requiredSize(discSize),
+                    )
+                }
             }
         }
 
         // ---- The words, the lyrics or the queue, and the deck ------------------------------
-        // A little larger than the app's own scale: the player is the one screen made to be
-        // looked at from arm's length.
+        // A little larger than the app's own scale upright, where the player is the one screen
+        // made to be looked at from arm's length; on its side a little smaller, to fit the height.
+        val uiScale = if (wide) WIDE_UI_SCALE else UI_SCALE
         androidx.compose.runtime.CompositionLocalProvider(
-            LocalDensity provides androidx.compose.ui.unit.Density(density.density * UI_SCALE, density.fontScale),
+            LocalDensity provides androidx.compose.ui.unit.Density(density.density * uiScale, density.fontScale),
         ) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing.union(stableStatusBarInsets()))
-                .padding(start = stageStart / UI_SCALE),
-        ) {
-            // The mark, top left, as on a broadcast ident — on its side, over the disc instead.
-            if (!wide) Text(
-                "BC².",
-                color = Color.White.copy(alpha = 0.85f),
-                fontWeight = FontWeight.Black,
-                fontSize = 20.sp,
-                letterSpacing = (-1).sp,
-                modifier = Modifier.padding(start = 20.dp, top = 10.dp).graphicsLayer { alpha = 1f - panelT },
-            )
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(top = if (wide) 0.dp else PANEL_BAND * panelT),
-            ) {
-                AnimatedContent(
-                    targetState = pane,
-                    transitionSpec = { fadeIn(tween(360, delayMillis = 80)) togetherWith fadeOut(tween(200)) },
-                    label = "discCentre",
-                ) { showing ->
-                    when (showing) {
-                        PlayerPane.Main -> Column(
-                            Modifier.fillMaxSize().padding(horizontal = PLAYER_GUTTER),
-                            verticalArrangement = Arrangement.Bottom,
-                        ) {
-                            if (caption != null) {
-                                // Where the session came from, as the desktop captions it: a small
-                                // "playing from" over the place itself, named in the phone's
-                                // language rather than the feed's English.
-                                val source = song.playbackSource?.takeIf { it.isNotBlank() }
-                                Column(
-                                    Modifier
-                                        .padding(bottom = 10.dp)
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            indication = null,
-                                            onClick = onOpenCaption,
-                                        ),
-                                ) {
+            val centre: @Composable (Modifier) -> Unit = { centreModifier ->
+                Box(centreModifier.padding(top = if (wide) 0.dp else PANEL_BAND * panelT)) {
+                    AnimatedContent(
+                        targetState = pane,
+                        transitionSpec = { fadeIn(tween(360, delayMillis = 80)) togetherWith fadeOut(tween(200)) },
+                        label = "discCentre",
+                    ) { showing ->
+                        when (showing) {
+                            PlayerPane.Main -> Column(
+                                Modifier.fillMaxSize().padding(horizontal = if (wide) 8.dp else PLAYER_GUTTER),
+                                verticalArrangement = if (wide) Arrangement.Center else Arrangement.Bottom,
+                            ) {
+                                if (caption != null) {
+                                    // Where the session came from, on one line: a small "from"
+                                    // and the place, named in the phone's language.
+                                    val source = song.playbackSource?.takeIf { it.isNotBlank() }
                                     Text(
-                                        if (source != null) playingFromLabel() else caption.uppercase(),
-                                        color = Color.White.copy(alpha = 0.6f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 2.sp,
+                                        if (source != null) {
+                                            androidx.compose.ui.text.buildAnnotatedString {
+                                                withStyle(
+                                                    androidx.compose.ui.text.SpanStyle(
+                                                        color = Color.White.copy(alpha = 0.6f),
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        letterSpacing = 2.sp,
+                                                    ),
+                                                ) { append(fromLabel()) }
+                                                append("  ")
+                                                append(localisedSource(source))
+                                            }
+                                        } else {
+                                            androidx.compose.ui.text.AnnotatedString(caption)
+                                        },
+                                        color = Color.White.copy(alpha = 0.92f),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier
+                                            .padding(bottom = 10.dp)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null,
+                                                onClick = onOpenCaption,
+                                            ),
                                     )
-                                    if (source != null) {
-                                        Text(
-                                            localisedSource(source),
-                                            color = Color.White.copy(alpha = 0.92f),
-                                            fontSize = 16.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                }
+                                // The desktop's heading, as big as the room allows — unless
+                                // Settings has it off.
+                                if (showHeading) {
+                                    Text(
+                                        nowPlayingHeading(),
+                                        color = Color.White,
+                                        fontFamily = androidx.compose.material3.MaterialTheme.typography.displayLarge.fontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = if (wide) 34.sp else 46.sp,
+                                        letterSpacing = (-1.4).sp,
+                                        maxLines = 1,
+                                        style = androidx.compose.ui.text.TextStyle(
+                                            shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 6f), 28f),
+                                            lineHeight = if (wide) 36.sp else 48.sp,
+                                            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                                                androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                                                androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+                                            ),
+                                        ),
+                                        modifier = Modifier.padding(bottom = 14.dp),
+                                    )
+                                }
+                                // The track, its artist and the line being sung, larger than the
+                                // app sets them; the like and menu buttons down by the artist,
+                                // clear of the title above and the line below.
+                                val here = LocalDensity.current
+                                androidx.compose.runtime.CompositionLocalProvider(
+                                    LocalDensity provides androidx.compose.ui.unit.Density(here.density * WORDS_SCALE, here.fontScale * WORDS_FONT_SCALE),
+                                    LocalCreditsButtonsPlacement provides CreditsButtonsPlacement(Alignment.Bottom, CREDITS_BUTTONS_DROP),
+                                ) {
+                                    Column {
+                                        credits()
+                                        if (lyricStrip != null) {
+                                            Spacer(Modifier.height(CREDITS_BUTTONS_DROP + 6.dp))
+                                            lyricStrip()
+                                        }
                                     }
                                 }
+                                Spacer(Modifier.height(if (lyricStrip != null) 18.dp else CREDITS_BUTTONS_DROP + 18.dp))
                             }
-                            // The desktop's heading, as big as the room allows.
-                            Text(
-                                nowPlayingHeading(),
-                                color = Color.White,
-                                fontFamily = androidx.compose.material3.MaterialTheme.typography.displayLarge.fontFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 46.sp,
-                                letterSpacing = (-1.4).sp,
-                                maxLines = 1,
-                                style = androidx.compose.ui.text.TextStyle(
-                                    shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 6f), 28f),
-                                    lineHeight = 48.sp,
-                                    lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
-                                        androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
-                                        androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
-                                    ),
-                                ),
-                                modifier = Modifier.padding(bottom = 14.dp),
-                            )
-                            // The track, its artist, the line being sung, and the like and menu
-                            // buttons beside them: larger than the app sets them, as the point of
-                            // the screen.
-                            val here = LocalDensity.current
-                            androidx.compose.runtime.CompositionLocalProvider(
-                                LocalDensity provides androidx.compose.ui.unit.Density(here.density * WORDS_SCALE, here.fontScale * WORDS_FONT_SCALE),
-                                // The like and menu buttons down by the artist, clear of the title
-                                // and of the line being sung below.
-                                LocalCreditsButtonsAlignment provides Alignment.Bottom,
-                            ) {
-                                Column {
-                                    credits()
-                                    if (lyricStrip != null) {
-                                        Spacer(Modifier.height(10.dp))
-                                        lyricStrip()
-                                    }
-                                }
+                            PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = if (wide) 4.dp else PANE_GUTTER)) {
+                                // The line being sung in the middle of the stretch, as on the desktop,
+                                // and the pane's toggles big enough to hit, clear of the deck.
+                                androidx.compose.runtime.CompositionLocalProvider(
+                                    LocalLyricsFocusFraction provides 0.42f,
+                                    LocalLyricsPaneControls provides LyricsPaneControls(scale = 1.3f, bottomGap = 14.dp),
+                                ) { lyricsPane() }
                             }
-                            Spacer(Modifier.height(18.dp))
+                            PlayerPane.Queue -> Box(Modifier.fillMaxSize().padding(horizontal = if (wide) 4.dp else PANE_GUTTER)) { queuePane() }
                         }
-                        PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = PANE_GUTTER)) {
-                            // The line being sung in the middle of the stretch, as on the desktop,
-                            // and the pane's toggles big enough to hit, clear of the deck.
-                            androidx.compose.runtime.CompositionLocalProvider(
-                                LocalLyricsFocusFraction provides 0.42f,
-                                LocalLyricsPaneControls provides LyricsPaneControls(scale = 1.3f, bottomGap = 14.dp),
-                            ) { lyricsPane() }
-                        }
-                        PlayerPane.Queue -> Box(Modifier.fillMaxSize().padding(horizontal = PANE_GUTTER)) { queuePane() }
                     }
                 }
             }
-            // The deck: every control the player has, on one pane of smoked glass. Plain
-            // translucency rather than a live blur — the room behind it moves on every frame,
-            // and a blur under it would be redone on every frame with it.
-            if ("deck" !in off) Column(
-                Modifier
-                    .padding(horizontal = 12.dp)
-                    .padding(bottom = 10.dp)
-                    .fillMaxWidth()
-                    .let { deck ->
-                        // Liquid glass, as the tab bar on the page is, where the phone can draw it;
-                        // smoked glass otherwise.
-                        if (glass != null) {
-                            glass.pane(deck, DECK_SHAPE)
-                        } else {
-                            deck.clip(DECK_SHAPE)
-                                .background(Color.Black.copy(alpha = 0.34f))
-                                .border(0.5.dp, Color.White.copy(alpha = 0.14f), DECK_SHAPE)
+            // The deck: every control the player has, on one pane of liquid glass where the phone
+            // can draw it, smoked glass otherwise.
+            val deck: @Composable (Modifier) -> Unit = { deckModifier ->
+                if ("deck" !in off) Column(
+                    deckModifier
+                        .let { d ->
+                            if (glass != null) {
+                                glass.pane(d, DECK_SHAPE)
+                            } else {
+                                d.clip(DECK_SHAPE)
+                                    .background(Color.Black.copy(alpha = 0.34f))
+                                    .border(0.5.dp, Color.White.copy(alpha = 0.14f), DECK_SHAPE)
+                            }
                         }
+                        .padding(horizontal = PLAYER_GUTTER - 12.dp, vertical = 14.dp),
+                ) {
+                    scrubber()
+                    Spacer(Modifier.height(6.dp))
+                    transport()
+                    // On its side there is no height to spare for the volume: the phone's own keys
+                    // have it.
+                    if (volume != null && pane == PlayerPane.Main && !wide) {
+                        Spacer(Modifier.height(8.dp))
+                        volume()
                     }
-                    .padding(horizontal = PLAYER_GUTTER - 12.dp, vertical = 14.dp),
-            ) {
-                scrubber()
-                Spacer(Modifier.height(6.dp))
-                transport()
-                if (volume != null && pane == PlayerPane.Main) {
-                    Spacer(Modifier.height(8.dp))
-                    volume()
+                    Spacer(Modifier.height(10.dp))
+                    actions()
                 }
-                Spacer(Modifier.height(10.dp))
-                actions()
             }
-        }
+            if (wide) {
+                // On its side: the words, the lyrics or the queue taking the height beside the
+                // disc, and the deck in a column of its own at the far end.
+                androidx.compose.foundation.layout.Row(
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing.union(stableStatusBarInsets()))
+                        .padding(start = stageStart / uiScale, top = 8.dp, bottom = 8.dp, end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    centre(Modifier.weight(1f).fillMaxSize())
+                    Spacer(Modifier.width(16.dp))
+                    deck(Modifier.width(WIDE_DECK_WIDTH))
+                }
+            } else {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing.union(stableStatusBarInsets())),
+                ) {
+                    // The mark, top left, as on a broadcast ident.
+                    Text(
+                        "BC².",
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontWeight = FontWeight.Black,
+                        fontSize = 20.sp,
+                        letterSpacing = (-1).sp,
+                        modifier = Modifier.padding(start = 20.dp, top = 10.dp).graphicsLayer { alpha = 1f - panelT },
+                    )
+                    centre(Modifier.fillMaxWidth().weight(1f))
+                    deck(Modifier.padding(horizontal = 12.dp).padding(bottom = 10.dp).fillMaxWidth())
+                }
+            }
         }
     }
 }
 
-/** "Playing from", in the phone's language. */
-private fun playingFromLabel(): String =
-    if (java.util.Locale.getDefault().language == "ru") "ИГРАЕТ ИЗ" else "PLAYING FROM"
+/** "From", in the phone's language. */
+private fun fromLabel(): String =
+    if (java.util.Locale.getDefault().language == "ru") "ИЗ" else "FROM"
 
 /** A source as the feed names it, in the phone's language where it is one of the feed's own. */
 private fun localisedSource(source: String): String =
@@ -458,12 +484,21 @@ private fun localisedSource(source: String): String =
 private fun nowPlayingHeading(): String =
     if (java.util.Locale.getDefault().language == "ru") "сейчас играет." else "now playing."
 
-/** How much larger than the app's own scale the player's words and deck are drawn. */
+/** How much larger than the app's own scale the player's words and deck are drawn, upright. */
 private const val UI_SCALE = 1.08f
+
+/** And on its side, smaller, to fit the height. */
+private const val WIDE_UI_SCALE = 0.92f
+
+/** The deck's width on its side. */
+private val WIDE_DECK_WIDTH = 340.dp
 
 /** And the track's own words and their buttons, larger again. */
 private const val WORDS_SCALE = 1.12f
 private const val WORDS_FONT_SCALE = 1.14f
+
+/** How far the like and menu buttons drop below the title, to sit beside the artist. */
+private val CREDITS_BUTTONS_DROP = 20.dp
 
 /** One revolution every this many seconds — a slow, legible spin rather than a blur. */
 private const val DISC_PERIOD_S = 3.2f
@@ -475,9 +510,6 @@ private val DECK_SHAPE = RoundedCornerShape(30.dp)
 
 /** Margin each side of the lyrics and the queue: the deck's own, so the three line up. */
 private val PANE_GUTTER = 22.dp
-
-/** How far below the status bar the disc has faded in fully. */
-private val DISC_FADE = 56.dp
 
 private val EASE_OUT_EXPO = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 

@@ -1,5 +1,6 @@
 package com.music.bitchord.ui.components
 
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.animateFloatAsState
@@ -155,9 +156,14 @@ fun FloatingBottomBar(
     selectedIndex: Int,
     onTabSelected: (Int) -> Unit,
     hazeState: HazeState,
+    /** The playing track's cover: without glass the bar wears its colour, as the desktop's does. */
+    coverUrl: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val pillShape = RoundedCornerShape(percent = 50)
+    val palette = com.music.bitchord.ui.player.rememberDiscPalette(coverUrl)
+    val tint by androidx.compose.animation.animateColorAsState(palette.vivid, label = "barTint")
+    val deep by androidx.compose.animation.animateColorAsState(palette.deep, label = "barDeep")
     val container = MaterialTheme.colorScheme.surface
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     val useGlass = LocalLiquidGlassEnabled.current && isGlassSupported()
@@ -228,6 +234,24 @@ fun FloatingBottomBar(
                         state = hazeState,
                         style = HazeMaterials.regular(container),
                     )
+                },
+            )
+            .then(
+                // BitChord²: over the frost, the colour of what is playing — the floating player's.
+                if (!useGlass && coverUrl != null) {
+                    Modifier.drawBehind {
+                        drawRect(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(
+                                    androidx.compose.ui.graphics.lerp(tint, Color.Black, 0.45f).copy(alpha = 0.85f),
+                                    androidx.compose.ui.graphics.lerp(tint, deep, 0.6f).copy(alpha = 0.70f),
+                                    Color(0xFF0C0C10).copy(alpha = 0.60f),
+                                ),
+                            ),
+                        )
+                    }
+                } else {
+                    Modifier
                 },
             )
             .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, pillShape)

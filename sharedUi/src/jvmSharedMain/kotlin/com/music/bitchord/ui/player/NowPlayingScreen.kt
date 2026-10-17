@@ -1778,7 +1778,8 @@ fun NowPlayingScreen(
                     isLoading = isLoading,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .padding(horizontal = 8.dp),
+                        // A breath below the bar rather than tucked against it.
+                        .padding(start = 8.dp, end = 8.dp, top = 6.dp),
                 )
             }
         }
@@ -2078,7 +2079,8 @@ fun NowPlayingScreen(
                     caption = if (hideSongStatus) null else playbackOriginText(song, playedBy),
                     onOpenCaption = openPlaybackOrigin,
                     credits = creditsContent,
-                    lyricStrip = lyricStripContent,
+                    // Only with lines to show: an empty strip left a gap where nothing ever came.
+                    lyricStrip = lyricStripContent?.takeIf { lyricsTranslation.displayedLyrics.isNotEmpty() },
                     scrubber = scrubberContent,
                     transport = { transportContent(false) },
                     volume = volumeContent,

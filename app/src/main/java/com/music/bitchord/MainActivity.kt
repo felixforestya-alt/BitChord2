@@ -4162,6 +4162,7 @@ private fun BitChordApp(
                         tabs = tabs,
                         selectedIndex = selectedTab,
                         hazeState = hazeState,
+                        coverUrl = player.song?.thumbnailUrl,
                         onTabSelected = onTabSelected,
                     )
                 }

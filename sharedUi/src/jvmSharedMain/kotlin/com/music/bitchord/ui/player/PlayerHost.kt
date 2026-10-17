@@ -181,6 +181,8 @@ interface PlayerSettingsSource {
     val legacyMeshGradient: StateFlow<Boolean>
     /** The disc player in portrait — see DiscPortraitPlayer. */
     val discPlayer: StateFlow<Boolean>
+    /** The disc player's "now playing." heading. */
+    val discHeading: StateFlow<Boolean>
     val lyricsBlur: StateFlow<Boolean>
     val lyricsOffsetMs: StateFlow<Int>
     val lyricsSourceOrder: StateFlow<List<LyricsSource>>

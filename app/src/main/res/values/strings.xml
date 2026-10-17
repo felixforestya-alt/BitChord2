@@ -338,6 +338,8 @@
     <string name="full_screen_cover_art">Full-screen cover art</string>
     <string name="legacy_mesh_gradient">Legacy mesh gradient</string>
     <string name="disc_player">Disc player</string>
+    <string name="disc_heading">"now playing." heading</string>
+    <string name="disc_heading_subtitle">The big heading over the track in the disc player</string>
     <string name="disc_player_subtitle">The cover spins on a CD at the top of the player, the room lit in its colours</string>
     <string name="legacy_mesh_gradient_subtitle">Brings back the drifting colour blobs behind the player from v1.5</string>
     <string name="animated_cover_art">Animated cover art</string>

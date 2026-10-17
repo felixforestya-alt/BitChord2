@@ -878,6 +878,8 @@
 
     <string name="legacy_mesh_gradient">Классический сетчатый градиент</string>
     <string name="disc_player">Диск-плеер</string>
+    <string name="disc_heading">Надпись «сейчас играет»</string>
+    <string name="disc_heading_subtitle">Крупный заголовок над треком в диск-плеере</string>
     <string name="disc_player_subtitle">Обложка крутится на диске вверху плеера, всё подсвечено её цветом</string>
 
     <string name="legacy_mesh_gradient_subtitle">Возвращает мягкие анимированные цветные пятна из v1.5</string>

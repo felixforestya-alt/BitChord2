@@ -423,7 +423,8 @@ internal fun LandscapeCredits(
     onOpenArtist: (browseId: String?, name: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier = modifier, verticalAlignment = LocalCreditsButtonsAlignment.current) {
+    val buttons = LocalCreditsButtonsPlacement.current
+    Row(modifier = modifier, verticalAlignment = buttons.alignment) {
         Crossfade(
             targetState = song.title to song.artist,
             animationSpec = tween(durationMillis = 300),
@@ -460,6 +461,7 @@ internal fun LandscapeCredits(
             }
         }
         Spacer(Modifier.width(10.dp))
+        Row(Modifier.offset(y = buttons.offset), verticalAlignment = Alignment.CenterVertically) {
         // Same gate as the portrait player's: no account to like against for a
         // guest, and no YouTube identity to rate a local file or a finished
         // download against either.
@@ -481,19 +483,26 @@ internal fun LandscapeCredits(
             contentDescription = stringResource(Res.string.more),
             onClick = onOpenMenu,
         )
+        }
     }
 }
+
+/**
+ * Where the like and menu buttons sit against the title and artist beside them: centred between
+ * the two, or — the disc player's, whose words are set large — dropped by [offset] below the
+ * title, beside the artist.
+ */
+internal data class CreditsButtonsPlacement(
+    val alignment: Alignment.Vertical = Alignment.CenterVertically,
+    val offset: androidx.compose.ui.unit.Dp = 0.dp,
+)
+
+internal val LocalCreditsButtonsPlacement = androidx.compose.runtime.staticCompositionLocalOf { CreditsButtonsPlacement() }
 
 /**
  * How big the lyrics pane's two toggles are drawn, and how far its bottom row stands off what is
  * under it — larger on the disc player, whose deck sits right below.
  */
-/**
- * Where the like and menu buttons sit against the title and artist beside them: centred between
- * the two, or down by the artist — the disc player's, whose words are set large.
- */
-internal val LocalCreditsButtonsAlignment = androidx.compose.runtime.staticCompositionLocalOf<Alignment.Vertical> { Alignment.CenterVertically }
-
 internal data class LyricsPaneControls(val scale: Float = 1f, val bottomGap: androidx.compose.ui.unit.Dp = 0.dp)
 
 internal val LocalLyricsPaneControls = androidx.compose.runtime.staticCompositionLocalOf { LyricsPaneControls() }

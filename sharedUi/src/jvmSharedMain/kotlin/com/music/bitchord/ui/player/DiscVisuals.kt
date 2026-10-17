@@ -15,6 +15,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.dp
 import coil3.SingletonImageLoader
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
@@ -246,7 +248,8 @@ internal fun SpinningDisc(
             drawCircle(Color.White.copy(alpha = 0.35f), radius = radius * 0.285f, style = Stroke(hair))
             drawCircle(Color(0xFF20242A).copy(alpha = 0.45f), radius = radius * 0.21f)
             drawCircle(Color.White.copy(alpha = 0.22f), radius = radius * 0.21f, style = Stroke(hair))
-            drawCircle(Color.Black, radius = radius * 0.125f, blendMode = BlendMode.Clear)
+            // The hole, black — where the phone's camera sits over it, it is part of the disc.
+            drawCircle(Color.Black, radius = radius * 0.125f)
             drawCircle(Color.White.copy(alpha = 0.45f), radius = radius * 0.125f, style = Stroke(hair * 1.4f))
             // The rim.
             drawCircle(Color.White.copy(alpha = 0.65f), radius = radius - hair, style = Stroke(hair * 1.5f))
@@ -305,15 +308,19 @@ private fun DrawScope.drawSquareCrop(image: ImageBitmap) {
  */
 @Composable
 internal fun DiscAmbientArtwork(url: String?, modifier: Modifier) {
-    val art = rememberDiscArtwork(url, 40)
+    // Smoothed by a real blur rather than by stretching a tiny thumbnail, which came out in
+    // blocks. The room this sits in is one cached layer (see [DiscPortraitPlayer]), so the blur
+    // is worked out when the cover changes, not on every frame.
+    val art = rememberDiscArtwork(url, 128)
     val shown by animateFloatAsState(if (art != null) 1f else 0f, tween(900), label = "discAmbient")
     Canvas(
-        modifier.graphicsLayer {
-            alpha *= shown
-            scaleX = 1.25f
-            scaleY = 1.25f
-            compositingStrategy = CompositingStrategy.ModulateAlpha
-        },
+        modifier
+            .graphicsLayer {
+                alpha *= shown
+                scaleX = 1.25f
+                scaleY = 1.25f
+            }
+            .blur(48.dp, androidx.compose.ui.draw.BlurredEdgeTreatment.Rectangle),
     ) {
         val image = art ?: return@Canvas
         // Cropped to the screen's shape, from the middle.
@@ -332,7 +339,7 @@ internal fun DiscAmbientArtwork(url: String?, modifier: Modifier) {
             srcOffset = IntOffset((image.width - srcW) / 2, (image.height - srcH) / 2),
             srcSize = IntSize(srcW, srcH),
             dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
-            filterQuality = FilterQuality.Low,
+            filterQuality = FilterQuality.High,
         )
     }
 }

@@ -1778,8 +1778,10 @@ fun NowPlayingScreen(
                     isLoading = isLoading,
                     modifier = Modifier
                         .align(Alignment.Center)
-                        // A breath below the bar rather than tucked against it.
-                        .padding(start = 8.dp, end = 8.dp, top = 6.dp),
+                        .padding(horizontal = 8.dp)
+                        // A breath below the bar rather than tucked against it — drawn lower,
+                        // not laid out lower, so the row it sits in does not cut it off.
+                        .offset(y = 5.dp),
                 )
             }
         }

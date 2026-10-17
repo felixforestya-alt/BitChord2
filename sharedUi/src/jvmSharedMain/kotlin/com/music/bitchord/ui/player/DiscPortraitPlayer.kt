@@ -64,6 +64,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.ui.theme.stableStatusBarInsets
@@ -246,6 +247,14 @@ internal fun DiscPortraitPlayer(
             // fades out above the camera, so the sliver over it passes softly under the status bar
             // and, as the sheet is pulled down, under the shade's edge.
             val fadeTo = with(density) { cameraY.toPx() * 0.7f }
+            // A shade behind the status bar, so its clock and icons read over the print.
+            if (!wide) Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(statusTop + 16.dp)
+                    .background(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.5f), 1f to Color.Transparent))
+                    .zIndex(1f),
+            )
             if ("disc" !in off) Box(
                 Modifier
                     .fillMaxSize()
@@ -319,29 +328,15 @@ internal fun DiscPortraitPlayer(
                                 verticalArrangement = if (wide) Arrangement.Center else Arrangement.Bottom,
                             ) {
                                 if (caption != null) {
-                                    // Where the session came from, on one line: a small "from"
-                                    // and the place, named in the phone's language.
+                                    // Where the session came from, on one line and in one type:
+                                    // "from" and the place, named in the phone's language.
                                     val source = song.playbackSource?.takeIf { it.isNotBlank() }
                                     Text(
-                                        if (source != null) {
-                                            androidx.compose.ui.text.buildAnnotatedString {
-                                                withStyle(
-                                                    androidx.compose.ui.text.SpanStyle(
-                                                        color = Color.White.copy(alpha = 0.6f),
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        letterSpacing = 2.sp,
-                                                    ),
-                                                ) { append(fromLabel()) }
-                                                append("  ")
-                                                append(localisedSource(source))
-                                            }
-                                        } else {
-                                            androidx.compose.ui.text.AnnotatedString(caption)
-                                        },
-                                        color = Color.White.copy(alpha = 0.92f),
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.SemiBold,
+                                        (if (source != null) "${fromLabel()} ${localisedSource(source)}" else caption).uppercase(),
+                                        color = Color.White.copy(alpha = 0.62f),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 2.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier
@@ -384,14 +379,16 @@ internal fun DiscPortraitPlayer(
                                     LocalCreditsButtonsPlacement provides CreditsButtonsPlacement(Alignment.Bottom, CREDITS_BUTTONS_DROP),
                                 ) {
                                     Column {
-                                        credits()
+                                        // Above the line below in touch as in drawing: the buttons
+                                        // hang down beside the artist, over the gap, taking no room.
+                                        Box(Modifier.zIndex(1f)) { credits() }
                                         if (lyricStrip != null) {
-                                            Spacer(Modifier.height(CREDITS_BUTTONS_DROP + 6.dp))
+                                            Spacer(Modifier.height(10.dp))
                                             lyricStrip()
                                         }
                                     }
                                 }
-                                Spacer(Modifier.height(if (lyricStrip != null) 18.dp else CREDITS_BUTTONS_DROP + 18.dp))
+                                Spacer(Modifier.height(18.dp))
                             }
                             PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = if (wide) 4.dp else PANE_GUTTER)) {
                                 // The line being sung in the middle of the stretch, as on the desktop,
@@ -497,8 +494,8 @@ private val WIDE_DECK_WIDTH = 340.dp
 private const val WORDS_SCALE = 1.12f
 private const val WORDS_FONT_SCALE = 1.14f
 
-/** How far the like and menu buttons drop below the title, to sit beside the artist. */
-private val CREDITS_BUTTONS_DROP = 20.dp
+/** How far the like and menu buttons hang below the artist, to the right of the words. */
+private val CREDITS_BUTTONS_DROP = 26.dp
 
 /** One revolution every this many seconds — a slow, legible spin rather than a blur. */
 private const val DISC_PERIOD_S = 3.2f

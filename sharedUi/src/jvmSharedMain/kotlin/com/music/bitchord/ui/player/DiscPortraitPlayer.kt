@@ -330,7 +330,6 @@ internal fun DiscPortraitPlayer(
                                     .fillMaxSize()
                                     // On its side, no wider than reads as one block, so the like and
                                     // menu buttons stay beside the track rather than across the room.
-                                    .then(if (wide) Modifier.wrapContentWidth(Alignment.Start).widthIn(max = 470.dp) else Modifier)
                                     .padding(horizontal = if (wide) 8.dp else PLAYER_GUTTER),
                                 verticalArrangement = if (wide) Arrangement.Center else Arrangement.Bottom,
                             ) {
@@ -363,12 +362,12 @@ internal fun DiscPortraitPlayer(
                                         color = Color.White,
                                         fontFamily = androidx.compose.material3.MaterialTheme.typography.displayLarge.fontFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = if (wide) 40.sp else 46.sp,
+                                        fontSize = if (wide) 48.sp else 46.sp,
                                         letterSpacing = (-1.4).sp,
                                         maxLines = 1,
                                         style = androidx.compose.ui.text.TextStyle(
                                             shadow = androidx.compose.ui.graphics.Shadow(Color.Black.copy(alpha = 0.45f), Offset(0f, 6f), 28f),
-                                            lineHeight = if (wide) 42.sp else 48.sp,
+                                            lineHeight = 48.sp,
                                             lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
                                                 androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
                                                 androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
@@ -384,29 +383,29 @@ internal fun DiscPortraitPlayer(
                                 // Upright the buttons hang just below the title, by the artist;
                                 // on its side, where the words are one short block, they stand
                                 // level with the track beside it.
-                                val drop = if (wide) 0.dp else CREDITS_BUTTONS_DROP
+                                val drop = CREDITS_BUTTONS_DROP
                                 androidx.compose.runtime.CompositionLocalProvider(
                                     LocalDensity provides androidx.compose.ui.unit.Density(
                                         here.density * (if (wide) WIDE_WORDS_SCALE else WORDS_SCALE),
                                         here.fontScale * (if (wide) WIDE_WORDS_SCALE else WORDS_FONT_SCALE),
                                     ),
                                     LocalCreditsButtonsPlacement provides CreditsButtonsPlacement(
-                                        if (wide) Alignment.CenterVertically else Alignment.Bottom,
-                                        drop,
+                                        offset = drop,
+                                        byArtist = true,
+                                        artistEnd = CREDITS_BUTTONS_WIDTH,
                                     ),
                                 ) {
                                     Column {
                                         // Above the line below in touch as in drawing: the buttons
                                         // hang down beside the artist, over the gap, taking no room.
                                         Box(Modifier.zIndex(1f)) { credits() }
-                                        if (lyricStrip != null) {
-                                            // Just clear of the buttons hanging below the artist.
-                                            Spacer(Modifier.height(if (wide) 8.dp else drop - 4.dp))
-                                            lyricStrip()
-                                        }
+                                        // Just clear of the buttons hanging below the artist —
+                                        // whether a line being sung comes next or the deck does.
+                                        Spacer(Modifier.height(drop + 4.dp))
+                                        if (lyricStrip != null) lyricStrip()
                                     }
                                 }
-                                Spacer(Modifier.height(if (wide) 0.dp else 14.dp))
+                                Spacer(Modifier.height(if (wide) 0.dp else 10.dp))
                             }
                             PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = if (wide) 4.dp else PANE_GUTTER)) {
                                 // The line being sung in the middle of the stretch, as on the desktop,
@@ -523,10 +522,13 @@ private const val WORDS_SCALE = 1.12f
 private const val WORDS_FONT_SCALE = 1.14f
 
 /** How far the like and menu buttons hang below the artist, to the right of the words. */
-private val CREDITS_BUTTONS_DROP = 16.dp
+private val CREDITS_BUTTONS_DROP = 20.dp
 
 /** On its side the track's words are larger still: there is width to spare for them. */
-private const val WIDE_WORDS_SCALE = 1.3f
+private const val WIDE_WORDS_SCALE = 1.5f
+
+/** How much of the artist's line the like and menu buttons take at its end. */
+private val CREDITS_BUTTONS_WIDTH = 100.dp
 
 /** One revolution every this many seconds — a slow, legible spin rather than a blur. */
 private const val DISC_PERIOD_S = 3.2f

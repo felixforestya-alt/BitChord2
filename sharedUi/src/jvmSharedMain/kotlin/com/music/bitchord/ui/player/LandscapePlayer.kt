@@ -424,11 +424,11 @@ internal fun LandscapeCredits(
     modifier: Modifier = Modifier,
 ) {
     val buttons = LocalCreditsButtonsPlacement.current
-    Row(modifier = modifier, verticalAlignment = buttons.alignment) {
+    val words: @Composable (Modifier, Modifier) -> Unit = { wordsModifier, artistModifier ->
         Crossfade(
             targetState = song.title to song.artist,
             animationSpec = tween(durationMillis = 300),
-            modifier = Modifier.weight(1f),
+            modifier = wordsModifier,
             label = "landscapeCredits",
         ) {
             Column {
@@ -457,33 +457,49 @@ internal fun LandscapeCredits(
                     // together reads as clutter, so the artist waits a beat.
                     startDelayMillis = if (titleOverflowing) MARQUEE_ARTIST_STAGGER_MS else 0L,
                     onOpenArtist = onOpenArtist,
+                    modifier = artistModifier,
                 )
             }
         }
-        Spacer(Modifier.width(10.dp))
-        Row(Modifier.offset(y = buttons.offset), verticalAlignment = Alignment.CenterVertically) {
-        // Same gate as the portrait player's: no account to like against for a
-        // guest, and no YouTube identity to rate a local file or a finished
-        // download against either.
-        if (signedIn && song.localUri == null) {
-            val liked = likeStatus == LikeStatus.LIKE
+    }
+    val glyphs: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Same gate as the portrait player's: no account to like against for a
+            // guest, and no YouTube identity to rate a local file or a finished
+            // download against either.
+            if (signedIn && song.localUri == null) {
+                val liked = likeStatus == LikeStatus.LIKE
+                CircleGlyph(
+                    icon = if (liked) BitChordIcons.HeartFilled else BitChordIcons.Heart,
+                    contentDescription = stringResource(
+                        if (liked) Res.string.remove_from_liked else Res.string.like,
+                    ),
+                    onClick = onToggleLike,
+                    active = liked,
+                    haptic = if (liked) Haptic.ToggleOff else Haptic.ToggleOn,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
             CircleGlyph(
-                icon = if (liked) BitChordIcons.HeartFilled else BitChordIcons.Heart,
-                contentDescription = stringResource(
-                    if (liked) Res.string.remove_from_liked else Res.string.like,
-                ),
-                onClick = onToggleLike,
-                active = liked,
-                haptic = if (liked) Haptic.ToggleOff else Haptic.ToggleOn,
+                icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
+                contentDescription = stringResource(Res.string.more),
+                onClick = onOpenMenu,
             )
-            Spacer(Modifier.width(8.dp))
         }
-        CircleGlyph(
-            icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
-            contentDescription = stringResource(Res.string.more),
-            onClick = onOpenMenu,
-        )
+    }
+    if (buttons.byArtist) {
+        // The title the whole width; the buttons at the end of the artist's line, hanging below
+        // it by [CreditsButtonsPlacement.offset], and taking only the artist's width.
+        Box(modifier) {
+            words(Modifier.fillMaxWidth(), Modifier.padding(end = buttons.artistEnd))
+            Box(Modifier.align(Alignment.BottomEnd).offset(y = buttons.offset)) { glyphs() }
         }
+        return
+    }
+    Row(modifier = modifier, verticalAlignment = buttons.alignment) {
+        words(Modifier.weight(1f), Modifier)
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.offset(y = buttons.offset)) { glyphs() }
     }
 }
 
@@ -495,6 +511,10 @@ internal fun LandscapeCredits(
 internal data class CreditsButtonsPlacement(
     val alignment: Alignment.Vertical = Alignment.CenterVertically,
     val offset: androidx.compose.ui.unit.Dp = 0.dp,
+    /** The buttons at the end of the artist's line, the title running the whole width over them. */
+    val byArtist: Boolean = false,
+    /** With [byArtist], the room the artist's line leaves them. */
+    val artistEnd: androidx.compose.ui.unit.Dp = 0.dp,
 )
 
 internal val LocalCreditsButtonsPlacement = androidx.compose.runtime.staticCompositionLocalOf { CreditsButtonsPlacement() }

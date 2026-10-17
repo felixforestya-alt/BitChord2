@@ -50,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -150,10 +151,10 @@ internal object DesktopHomeShelves {
 }
 
 /**
- * My Jam's card at the head of Home, lit in the colours of what is playing so it belongs with the
- * rest of the page. Before it plays, one press starts it; while it plays it says so — what track,
- * a moving level — and the press pauses it, with a skip beside. Next to it, the jam's settings and
- * the way into choosing what Home shows.
+ * My Jam's card at the head of Home, lit in the colours of what is playing. Before it plays, one
+ * press starts it. While it plays it joins the "now playing" card above: that card grows to take
+ * the jam's row along its foot — one card, one backdrop — and this one folds up into it. When the
+ * jam stops, the row leaves the card and this card unfolds again.
  */
 @Composable
 internal fun DesktopWaveCard(
@@ -167,27 +168,20 @@ internal fun DesktopWaveCard(
     onSkip: () -> Unit,
     onTune: () -> Unit,
     modifier: Modifier = Modifier,
-    /**
-     * Whether the card joins the "now playing" card above it — while the jam plays, the two are one
-     * thing — and how much of that card is in view, so the join lets go as it scrolls away.
-     */
+    /** Whether the jam has joined the card above, and how much of that card is in view. */
     merged: Boolean = false,
     heroVisible: () -> Float = { 1f },
 ) {
-    val tuning by DesktopMyWave.tuning.collectAsState()
-    // A drop meeting a drop: drawn together with a little overshoot, pulled apart with a snap.
+    // A drop taken into a drop: a little overshoot on the way in, a firm one on the way out.
     val join by androidx.compose.animation.core.animateFloatAsState(
         if (merged) 1f else 0f,
-        androidx.compose.animation.core.spring(dampingRatio = if (merged) 0.5f else 0.75f, stiffness = 180f),
+        androidx.compose.animation.core.spring(dampingRatio = if (merged) 0.62f else 0.8f, stiffness = 200f),
         label = "jamJoin",
     )
-    // Told to the card above, which squares its foot to meet this one.
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        androidx.compose.runtime.snapshotFlow { (join * heroVisible()).coerceIn(0f, 1f) }
-            .collect { DesktopJamJoin.amount = it }
+        androidx.compose.runtime.snapshotFlow { join.coerceIn(0f, 1.15f) }.collect { DesktopJamJoin.amount = it }
     }
     androidx.compose.runtime.DisposableEffect(Unit) { onDispose { DesktopJamJoin.amount = 0f } }
-    val onlyNew by DesktopMyWave.onlyNew.collectAsState()
     val palette = rememberVividPalette(coverUrl)
     val light by androidx.compose.animation.animateColorAsState(palette.vivid, tween(700), label = "jamLight")
     val deep by androidx.compose.animation.animateColorAsState(palette.deep, tween(700), label = "jamDeep")
@@ -195,54 +189,25 @@ internal fun DesktopWaveCard(
     val phase by rememberInfiniteTransition(label = "wave").animateFloat(
         0f, 1f, infiniteRepeatable(tween(if (moving) 2_600 else 9_000, easing = LinearEasing), RepeatMode.Restart), label = "wavePhase",
     )
-    Row(
-        modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                // Up to the card above, all the way once joined.
-                translationY = -JOIN_GAP.toPx() * (join * heroVisible()).coerceIn(0f, 1.1f)
+    Box(
+        Modifier
+            // Folds up into the card above as it joins: shorter by as much, from the top.
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                val k = (1f - DesktopJamJoin.amount).coerceIn(0f, 1f)
+                val h = (placeable.height * k).toInt()
+                layout(placeable.width, h) { placeable.place(0, h - placeable.height) }
             }
-            .drawBehind {
-                val m = (join * heroVisible()).coerceIn(0f, 1f)
-                if (m < 0.02f) return@drawBehind
-                // The neck between the two: thin and pinched as they meet or part, the width of the
-                // card once they are one. Its top is the bottom of the card above.
-                val gap = JOIN_GAP.toPx() * (1f - (join * heroVisible()).coerceIn(0f, 1.1f)).coerceAtLeast(0f)
-                val top = -gap - 2f
-                val bottom = 2f
-                val cx = size.width / 2f
-                val wTop = size.width * (0.16f + 0.84f * m)
-                val wBottom = size.width * (0.26f + 0.74f * m)
-                val wWaist = minOf(wTop, wBottom) * (0.30f + 0.70f * m * m)
-                val h = bottom - top
-                val neck = Path().apply {
-                    moveTo(cx - wTop / 2f, top)
-                    lineTo(cx + wTop / 2f, top)
-                    cubicTo(cx + wWaist / 2f, top + h * 0.35f, cx + wWaist / 2f, top + h * 0.65f, cx + wBottom / 2f, bottom)
-                    lineTo(cx - wBottom / 2f, bottom)
-                    cubicTo(cx - wWaist / 2f, top + h * 0.65f, cx - wWaist / 2f, top + h * 0.35f, cx - wTop / 2f, top)
-                    close()
-                }
-                drawPath(neck, Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f), light.copy(alpha = 0.55f), deep.copy(alpha = 0.85f))))
-            },
-        verticalAlignment = Alignment.CenterVertically,
+            .graphicsLayer { alpha = (1f - DesktopJamJoin.amount * 1.4f).coerceIn(0f, 1f) }
+            .then(modifier)
+            .fillMaxWidth(),
     ) {
-        val corner = 26.dp * (1f - join.coerceIn(0f, 1f) * heroVisible().coerceIn(0f, 1f))
         Box(
             Modifier
-                .weight(1f)
+                .fillMaxWidth()
                 .height(112.dp)
-                .onSizeChanged { DesktopJamJoin.cardHeightPx = it.height.toFloat() }
-                .clip(RoundedCornerShape(topStart = corner, topEnd = corner, bottomStart = 26.dp, bottomEnd = 26.dp))
-                .drawBehind {
-                    // Its own colour, which gives way to the shared backdrop as it joins.
-                    val own = 1f - (join * heroVisible()).coerceIn(0f, 1f)
-                    if (own > 0.01f) {
-                        drawRect(
-                            Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f * own), light.copy(alpha = 0.55f * own), deep.copy(alpha = 0.85f * own))),
-                        )
-                    }
-                }
+                .clip(RoundedCornerShape(26.dp))
+                .background(Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f), light.copy(alpha = 0.55f), deep.copy(alpha = 0.85f))))
                 .drawBehind {
                     // The wave: lines drifting across, in the light of the cover.
                     for (k in 0 until 3) {
@@ -262,70 +227,81 @@ internal fun DesktopWaveCard(
                 .clickable(enabled = !starting, onClick = if (playing) onPlayPause else onPlay),
             contentAlignment = Alignment.CenterStart,
         ) {
-            // Joined: the very backdrop the card above has, carried on from where it stops.
-            if (merged || join > 0.01f) {
-                DesktopHeroBackdrop(
-                    coverUrl = coverUrl,
-                    accent = light,
-                    modifier = Modifier
-                        .matchParentSize()
-                        .graphicsLayer { alpha = (join * heroVisible()).coerceIn(0f, 1f) },
-                    shiftUp = { DesktopJamJoin.heroHeightPx },
-                )
-            }
-            Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(56.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
-                    when {
-                        starting -> CircularProgressIndicator(Modifier.size(24.dp), color = Color.Black, strokeWidth = 2.5.dp)
-                        moving -> LevelBars(phase, Color.Black)
-                        else -> Icon(Icons.Rounded.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(32.dp))
-                    }
-                }
-                Spacer(Modifier.width(18.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            DesktopMyWave.radioName,
-                            color = Color.White,
-                            fontSize = 26.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = (-0.5).sp,
-                        )
-                        if (playing) {
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                (if (paused) DesktopStrings["jam_paused", "paused"] else DesktopStrings["jam_playing", "playing"]).uppercase(),
-                                color = Color.Black,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp,
-                                modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.9f)).padding(horizontal = 8.dp, vertical = 3.dp),
-                            )
-                        }
-                    }
-                    Text(
-                        if (playing && current != null) {
-                            "${current.artist} — ${current.title}"
-                        } else {
-                            listOfNotNull(
-                                tuning.label().takeIf { tuning != DesktopWaveTuning.ALL },
-                                DesktopStrings["wave_only_new", "Only new"].takeIf { onlyNew },
-                            ).ifEmpty { listOf(DesktopStrings["wave_subtitle", "Endless music picked for you"]) }.joinToString(" · ")
-                        },
-                        color = Color.White.copy(alpha = 0.85f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (playing) {
-                    CardIcon(Icons.Rounded.SkipNext, DesktopStrings["next", "Next"], onSkip)
-                    Spacer(Modifier.width(10.dp))
-                }
-                // The jam's own settings, on the jam itself.
-                CardIcon(Icons.Rounded.Tune, DesktopStrings["wave_settings", "Jam settings"], onTune)
+            DesktopJamRow(starting, playing, paused, current, phase, onPlayPause = if (playing) onPlayPause else onPlay, onSkip, onTune, Modifier)
+        }
+    }
+}
+
+/** The jam's controls and words: on its own card, or along the foot of the card it has joined. */
+@Composable
+internal fun DesktopJamRow(
+    starting: Boolean,
+    playing: Boolean,
+    paused: Boolean,
+    current: com.music.bitchord.data.model.Song?,
+    phase: Float,
+    onPlayPause: () -> Unit,
+    onSkip: () -> Unit,
+    onTune: () -> Unit,
+    modifier: Modifier,
+) {
+    val tuning by DesktopMyWave.tuning.collectAsState()
+    val onlyNew by DesktopMyWave.onlyNew.collectAsState()
+    val moving = playing && !paused
+    Row(modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(56.dp).clip(CircleShape).background(Color.White).clickable(enabled = !starting, onClick = onPlayPause),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                starting -> CircularProgressIndicator(Modifier.size(24.dp), color = Color.Black, strokeWidth = 2.5.dp)
+                moving -> LevelBars(phase, Color.Black)
+                else -> Icon(Icons.Rounded.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(32.dp))
             }
         }
+        Spacer(Modifier.width(18.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    DesktopMyWave.radioName,
+                    color = Color.White,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = (-0.5).sp,
+                )
+                if (playing) {
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        (if (paused) DesktopStrings["jam_paused", "paused"] else DesktopStrings["jam_playing", "playing"]).uppercase(),
+                        color = Color.Black,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.9f)).padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                }
+            }
+            Text(
+                if (playing && current != null) {
+                    "${current.artist} — ${current.title}"
+                } else {
+                    listOfNotNull(
+                        tuning.label().takeIf { tuning != DesktopWaveTuning.ALL },
+                        DesktopStrings["wave_only_new", "Only new"].takeIf { onlyNew },
+                    ).ifEmpty { listOf(DesktopStrings["wave_subtitle", "Endless music picked for you"]) }.joinToString(" · ")
+                },
+                color = Color.White.copy(alpha = 0.85f),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (playing) {
+            CardIcon(Icons.Rounded.SkipNext, DesktopStrings["next", "Next"], onSkip)
+            Spacer(Modifier.width(10.dp))
+        }
+        // The jam's own settings, on the jam itself.
+        CardIcon(Icons.Rounded.Tune, DesktopStrings["wave_settings", "Jam settings"], onTune)
     }
 }
 
@@ -648,13 +624,5 @@ private fun TextAction(label: String, filled: Boolean, onClick: () -> Unit) {
 /** How far My Jam's card is joined to the "now playing" card above it, 0 to 1 — read by that card. */
 internal object DesktopJamJoin {
     var amount by androidx.compose.runtime.mutableFloatStateOf(0f)
-
-    /** The jam card's height, for the card above to draw its backdrop down over both. */
-    var cardHeightPx by androidx.compose.runtime.mutableFloatStateOf(0f)
-
-    /** The card above's height, for the jam card to take up that backdrop where it leaves off. */
-    var heroHeightPx by androidx.compose.runtime.mutableFloatStateOf(0f)
 }
 
-/** The room between the "now playing" card and My Jam's: the header's foot and the card's own top. */
-private val JOIN_GAP = 26.dp

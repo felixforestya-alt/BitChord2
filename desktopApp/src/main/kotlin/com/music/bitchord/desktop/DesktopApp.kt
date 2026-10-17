@@ -1999,6 +1999,10 @@ fun BitChordDesktopApp() {
             // Whichever way round, the other one: a video for a song, a song for a video.
             isVideo = !current.looksLikeVideo(),
             isVideoOrigin = !current.looksLikeVideo(),
+            // Still the same place in the queue: the jam or station it came from goes with it —
+            // without, switching a jam track to its clip read as the jam having stopped.
+            radioName = current.radioName,
+            queueTier = current.queueTier,
             playbackSource = target.playbackSource ?: current.playbackSource,
             playbackSourceId = target.playbackSourceId ?: current.playbackSourceId,
             playbackSourceType = target.playbackSourceType ?: current.playbackSourceType,
@@ -3364,6 +3368,28 @@ fun BitChordDesktopApp() {
     val onHomeFeed = destination == DesktopDestination.LISTEN_NOW && overlays.settingsPage == null &&
         openedArtist == null && openedCollection == null
 
+    // My Jam's row along the foot of the "now playing" card, while the jam has joined it.
+    val jamFootRow = @Composable { rowModifier: Modifier ->
+        val phase by rememberInfiniteTransition(label = "jamFoot").animateFloat(
+            0f,
+            1f,
+            infiniteRepeatable(tween(2_600, easing = LinearEasing), RepeatMode.Restart),
+            label = "jamFootPhase",
+        )
+        DesktopJamRow(
+            starting = waveStarting,
+            playing = true,
+            paused = !playback.isPlaying,
+            current = selectedSong,
+            phase = phase,
+            onPlayPause = ::togglePlayPauseFromUser,
+            onSkip = ::playNext,
+            onTune = { waveSettingsOpen = true },
+            modifier = rowModifier,
+        )
+    }
+    val jamFoot = jamFootRow.takeIf { selectedSong?.radioName == DesktopMyWave.radioName || DesktopJamJoin.amount > 0.01f }
+
     /** The glass bar along the bottom of the window, for [current]. */
     @Composable
     fun nowPlayingBar(current: Song, compact: Boolean, framed: Boolean = true) {
@@ -3812,6 +3838,7 @@ fun BitChordDesktopApp() {
                                 extras = heroExtras(current),
                                 // A wheel turned over the card glides the feed it sits on.
                                 wheel = homeWheel,
+                                jamFoot = jamFoot,
                             ) { barModifier ->
                                 Box(barModifier) { nowPlayingBar(current, compact = false, framed = false) }
                             }
@@ -4963,6 +4990,7 @@ fun BitChordDesktopApp() {
                                     DesktopHomeHeader(
                                         song = current,
                                         heroAnchor = heroAnchor,
+                                        onCustomize = { homeCustomizeOpen = true },
                                         // At the bottom, the card is the feed's own and scrolls with it; at
                                         // the top, the floating player sits on its place.
                                         inlineCard = if (current != null && nowPlayingPlacement == DesktopNowPlayingPlacement.BOTTOM) {
@@ -4974,6 +5002,7 @@ fun BitChordDesktopApp() {
                                                     transport = { heroTransport(current) },
                                                     extras = heroExtras(current),
                                                     modifier = cardModifier,
+                                                    jamFoot = jamFoot,
                                                 )
                                             }
                                         } else {

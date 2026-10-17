@@ -1,5 +1,7 @@
 package com.music.bitchord.desktop
 
+import androidx.compose.material.icons.rounded.Tune
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -143,6 +145,8 @@ internal fun DesktopHomeHeader(
     heroAnchor: DesktopHeroAnchor?,
     /** The card drawn in the feed itself, scrolling with it — when the player is not the one floating over it. */
     inlineCard: (@Composable (Modifier) -> Unit)? = null,
+    /** Opens the choice of what Home shows — a button by the greeting, where Home is. */
+    onCustomize: (() -> Unit)? = null,
 ) {
     val palette = rememberVividPalette(song?.thumbnailUrl)
     val accent by animateColorAsState(if (song != null) palette.vivid else Color(0xFF7C6CFF), tween(1_200), label = "homeAccent")
@@ -170,8 +174,10 @@ internal fun DesktopHomeHeader(
                 translationY = (1f - entrance.value) * 30.dp.toPx()
             },
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             greeting(),
+            modifier = Modifier.weight(1f),
             style = TextStyle(
                 brush = Brush.linearGradient(
                     listOf(Color.White, lerpTo(accent, 0.25f), accent.hueShifted(40f, 1f), Color.White),
@@ -185,6 +191,21 @@ internal fun DesktopHomeHeader(
                 letterSpacing = (-1.2).sp,
             ),
         )
+        if (onCustomize != null) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.07f))
+                    .clickable(onClick = onCustomize)
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Tune, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(DesktopStrings["home_customize", "Customize Home"], color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        }
         Text(
             LocalDate.now().format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(appLocale()))
                 .replaceFirstChar { it.titlecase(appLocale()) },
@@ -198,7 +219,12 @@ internal fun DesktopHomeHeader(
                 Modifier
                     .padding(top = 20.dp)
                     .fillMaxWidth()
-                    .height(HERO_HEIGHT)
+                    // Taller by My Jam's row while the jam has joined the card.
+                    .layout { measurable, constraints ->
+                        val h = (HERO_HEIGHT.toPx() + JAM_FOOT.toPx() * DesktopJamJoin.amount).roundToInt()
+                        val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(constraints.maxWidth, h))
+                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                    }
                     .onGloballyPositioned { layout ->
                         val at = layout.positionInWindow()
                         heroAnchor.left = at.x
@@ -253,6 +279,8 @@ internal fun DesktopMorphingPlayer(
     extras: DesktopHeroExtras,
     /** The feed's wheel, for a wheel turned over the card. */
     wheel: DesktopSmoothWheel,
+    /** My Jam's row, drawn along the card's foot while the jam has joined it — see [DesktopJamJoin]. */
+    jamFoot: (@Composable (Modifier) -> Unit)? = null,
     bar: @Composable (Modifier) -> Unit,
 ) {
     val palette = rememberVividPalette(song.thumbnailUrl)
@@ -313,23 +341,12 @@ internal fun DesktopMorphingPlayer(
                     scaleX = grow * (1f - f * 0.04f)
                     scaleY = grow * (1f + f * 0.08f)
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, if (flow.value >= 0f) 0f else 1f)
-                    // Joined to My Jam's card below it: no shadow cast onto it, and the bottom
-                    // corners squared off so the two read as one card.
-                    val joined = DesktopJamJoin.amount * (1f - morph.e)
-                    shadowElevation = (8f + (1f - morph.e) * 10f) * density.density * (1f - joined)
-                    val corner = morph.cornerPx(density.density)
-                    shape = RoundedCornerShape(
-                        topStart = corner.toDp(),
-                        topEnd = corner.toDp(),
-                        bottomStart = (corner * (1f - joined)).toDp(),
-                        bottomEnd = (corner * (1f - joined)).toDp(),
-                    )
+                    shadowElevation = (8f + (1f - morph.e) * 10f) * density.density
+                    shape = RoundedCornerShape(morph.cornerPx(density.density).toDp())
                     clip = true
                 }
                 .desktopLiquidGlass(
                     26.dp,
-                    // The bright rim ran along the seam with My Jam's card: gone while they are one.
-                    rimLight = 0.75f * (1f - DesktopJamJoin.amount),
                     tint = Color.Black.copy(alpha = 0.46f),
                     blurRadius = 8.dp,
                     // Halfway it is most a lens: it bends and magnifies what is under it hardest while
@@ -374,9 +391,13 @@ internal fun DesktopMorphingPlayer(
                     // clicks meant for the bar over it.
                     .offset { if (morph.e < 0.5f) IntOffset.Zero else IntOffset(OUT_OF_REACH, 0) }
                     .wrapContentSize(Alignment.TopStart, unbounded = true)
-                    .requiredSize(cardWidth, cardHeight)
+                    // The card's own height: the room the jam's row has taken below is the row's.
+                    .requiredSize(cardWidth, (cardHeight - JAM_FOOT * DesktopJamJoin.amount).coerceAtLeast(1.dp))
                     .graphicsLayer { alpha = (1f - morph.e * 2f).coerceIn(0f, 1f) },
             )
+            if (jamFoot != null && morph.e < 0.5f) {
+                Box(Modifier.fillMaxSize().graphicsLayer { alpha = (1f - morph.e * 2f).coerceIn(0f, 1f) }) { JamFoot(jamFoot) }
+            }
             // The bar's, at the bar's own size, fading in over the second.
             bar(
                 Modifier
@@ -447,59 +468,32 @@ internal fun DesktopHeroCard(
     transport: @Composable () -> Unit,
     extras: DesktopHeroExtras,
     modifier: Modifier = Modifier,
+    /** My Jam's row, drawn along the card's foot while the jam has joined it — see [DesktopJamJoin]. */
+    jamFoot: (@Composable (Modifier) -> Unit)? = null,
 ) {
     val palette = rememberVividPalette(song.thumbnailUrl)
     val accent by animateColorAsState(palette.vivid, tween(1_200), label = "heroAccent")
     Box(
         modifier
             .graphicsLayer {
-                // Joined to My Jam's card below: no shadow onto it, and a square foot to meet it.
-                val joined = DesktopJamJoin.amount
-                shadowElevation = 18.dp.toPx() * (1f - joined)
-                val foot = 26.dp * (1f - joined)
-                this.shape = RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp, bottomStart = foot, bottomEnd = foot)
+                shadowElevation = 18.dp.toPx()
+                this.shape = RoundedCornerShape(26.dp)
                 clip = true
             },
     ) {
         HeroBackground(song, accent, Modifier.fillMaxSize())
-        HeroContent(song, isPlaying, onOpenPlayer, transport, extras, accent, Modifier.fillMaxSize())
+        // The card's own contents keep their height; the jam's row, when it has joined, is below.
+        HeroContent(song, isPlaying, onOpenPlayer, transport, extras, accent, Modifier.fillMaxWidth().height(HERO_HEIGHT))
+        jamFoot?.let { JamFoot(it) }
     }
 }
 
 @Composable
-private fun HeroBackground(song: Song, accent: Color, modifier: Modifier) =
-    DesktopHeroBackdrop(
-        song.thumbnailUrl,
-        accent,
-        // The card's own height, for My Jam's card to carry the backdrop on from its foot.
-        modifier.onSizeChanged { DesktopJamJoin.heroHeightPx = it.height.toFloat() },
-        extendBelow = { DesktopJamJoin.amount * DesktopJamJoin.cardHeightPx },
-    )
-
-/**
- * The home card's backdrop: the cover blurred, in a wash of its colour. Laid out [extendBelow] px
- * taller than the card and [shiftUp] px higher, so that with My Jam's card joined beneath, the two
- * draw one backdrop between them — the top of it here, the rest there — with no seam.
- */
-@Composable
-internal fun DesktopHeroBackdrop(
-    coverUrl: String?,
-    accent: Color,
-    modifier: Modifier,
-    extendBelow: () -> Float = { 0f },
-    shiftUp: () -> Float = { 0f },
-) {
+private fun HeroBackground(song: Song, accent: Color, modifier: Modifier) {
     // Blurred once and stretched — a live blur here was redone on every frame of the morph.
-    val art = rememberBlurredArtwork(coverUrl, edge = 64, sigma = 4f)
+    val art = rememberBlurredArtwork(song.thumbnailUrl, edge = 64, sigma = 4f)
     Box(
-        modifier.layout { measurable, constraints ->
-            val extra = extendBelow().roundToInt().coerceAtLeast(0)
-            val up = shiftUp().roundToInt().coerceAtLeast(0)
-            val w = constraints.maxWidth
-            val h = constraints.maxHeight
-            val placeable = measurable.measure(androidx.compose.ui.unit.Constraints.fixed(w, (h + extra + up).coerceAtLeast(1)))
-            layout(w, h) { placeable.place(0, -up) }
-        }.background(Brush.linearGradient(listOf(accent.hueShifted(0f, 0.45f), accent.hueShifted(-30f, 0.16f), Color(0xFF0C0C10))))) {
+        modifier.background(Brush.linearGradient(listOf(accent.hueShifted(0f, 0.45f), accent.hueShifted(-30f, 0.16f), Color(0xFF0C0C10))))) {
         Canvas(
             Modifier.fillMaxSize().graphicsLayer {
                 alpha = 0.55f
@@ -984,3 +978,22 @@ private val EASE_OUT_EXPO = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 
 /** The visualisers drawn round the disc, which the home card, having no disc, leaves out. */
 private val DISC_ONLY_VISUALIZERS = setOf(DesktopVisualizerStyle.RING, DesktopVisualizerStyle.PARTICLES)
+
+/** How tall My Jam's row is inside the "now playing" card once joined. */
+internal val JAM_FOOT = 96.dp
+
+/** My Jam's row along the foot of the card it has joined, sliding up into place as it joins. */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.JamFoot(row: @Composable (Modifier) -> Unit) {
+    row(
+        Modifier
+            .align(Alignment.BottomStart)
+            .fillMaxWidth()
+            .height(JAM_FOOT)
+            .graphicsLayer {
+                val m = DesktopJamJoin.amount.coerceIn(0f, 1f)
+                alpha = m
+                translationY = (1f - m) * JAM_FOOT.toPx() * 0.6f
+            },
+    )
+}

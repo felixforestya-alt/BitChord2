@@ -63,6 +63,12 @@ internal object DesktopAutoplay {
         seedSong: Song,
         limit: Int = MAX_QUEUED_AUTOPLAY,
     ): Result<List<Song>> {
+        // My Wave carries on as itself, across its own seeds and tuning, rather than turning
+        // into an ordinary station on whatever track it reached.
+        if (seedSong.radioName == DesktopMyWave.radioName) {
+            val wave = runCatching { DesktopMyWave.more(existing, limit) }.getOrDefault(emptyList())
+            if (wave.isNotEmpty()) return Result.success(wave)
+        }
         val seed = youtubeSeedFor(seedSong)
         if (seed == null) {
             DesktopTrackLog.log("autoplay: no YouTube match to seed a station on for '${seedSong.title}'")

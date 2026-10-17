@@ -3,6 +3,7 @@ package com.music.bitchord.data
 import com.music.bitchord.data.DebugLog as Log
 import com.music.bitchord.data.innertube.Innertube
 import com.music.bitchord.data.innertube.InnertubeParser
+import com.music.bitchord.data.innertube.RadioTuning
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.model.AccountChannel
 import com.music.bitchord.data.model.isExactArtistMatch
@@ -553,6 +554,17 @@ object YtMusicRepository {
      */
     suspend fun radio(videoId: String): Result<List<Song>> = call("radio:$videoId") {
         InnertubeParser.parseWatchQueue(Innertube.next(videoId))
+    }
+
+    /** The station around [videoId] and the ways it can be tuned, from one request. */
+    suspend fun radioWithTuner(videoId: String): Result<Pair<List<Song>, List<RadioTuning>>> = call("radio+tuner:$videoId") {
+        val root = Innertube.next(videoId)
+        InnertubeParser.parseWatchQueue(root) to InnertubeParser.parseRadioTuner(root)
+    }
+
+    /** The station around [videoId] tuned by [tuning]. */
+    suspend fun radioTuned(videoId: String, tuning: RadioTuning): Result<List<Song>> = call("radio:${tuning.playlistId}") {
+        InnertubeParser.parseWatchQueue(Innertube.nextTuned(videoId, tuning.playlistId, tuning.params))
     }
 
     /**

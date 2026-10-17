@@ -35,6 +35,9 @@ import java.util.Locale
  * is stable (search, home) and a recursive scan where it is not (playlists,
  * library) — see [collectSongsDeep].
  */
+/** One way of tuning a radio station — see [InnertubeParser.parseRadioTuner]. */
+data class RadioTuning(val label: String, val playlistId: String, val params: String?)
+
 object InnertubeParser {
 
     // ---- Search -------------------------------------------------------------
@@ -1121,6 +1124,21 @@ object InnertubeParser {
         }.distinctBy { it.key }
 
     /** Tracks of a watch queue (`next` response) — the AutoPlay radio mix. */
+    /**
+     * The radio tuner YouTube Music shows above a station's queue — "All", "Popular", "Deep
+     * cuts", "Party", the station's genres — each the same station tuned another way: a watch
+     * playlist id and params to ask `next` for. Chips that are not tunings (save, sign-in
+     * prompts) carry no watch endpoint and are left out.
+     */
+    fun parseRadioTuner(root: JsonElement): List<RadioTuning> =
+        collectRenderers(root, "chipCloudChipRenderer").mapNotNull { chip ->
+            val label = chip.o("text").runs().trim()
+            val watch = chip.o("navigationEndpoint").o("queueUpdateCommand").o("fetchContentsCommand").o("watchEndpoint")
+            val playlistId = watch.s("playlistId") ?: return@mapNotNull null
+            if (label.isBlank()) return@mapNotNull null
+            RadioTuning(label = label, playlistId = playlistId, params = watch.s("params"))
+        }.distinctBy { it.playlistId }
+
     fun parseWatchQueue(root: JsonElement): List<Song> {
         val out = LinkedHashMap<String, Song>()
         collectRenderers(root, "playlistPanelVideoRenderer").forEach { renderer ->

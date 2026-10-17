@@ -568,6 +568,12 @@ fun BitChordDesktopApp() {
     var searchLoading by remember { mutableStateOf(false) }
     var searchError by remember { mutableStateOf<String?>(null) }
     var homeState by remember { mutableStateOf<UiState<List<HomeShelf>>>(UiState.Loading) }
+    // Home as shown: the feed less the shelves the listener has taken off it.
+    val hiddenHomeShelves by DesktopHomeShelves.hidden.collectAsState()
+    val visibleHomeState = remember(homeState, hiddenHomeShelves) {
+        (homeState as? UiState.Success)?.let { UiState.Success(DesktopHomeShelves.visible(it.data)) } ?: homeState
+    }
+    val waveShown by DesktopMyWave.shown.collectAsState()
     // The home feed is paged: `FEmusic_home` answers with a couple of shelves and a token, and
     // everything else arrives by following it.
     var homeContinuation by remember { mutableStateOf<String?>(null) }
@@ -594,6 +600,8 @@ fun BitChordDesktopApp() {
     /** What the Spotify grid is waiting on, or why it is empty; null once its playlists are in. */
     var spotifyLibraryStatus by remember { mutableStateOf<String?>(null) }
     var spotifyImportOpen by remember { mutableStateOf(false) }
+    var waveSettingsOpen by remember { mutableStateOf(false) }
+    var homeCustomizeOpen by remember { mutableStateOf(false) }
     /** Where the one back button in the top bar goes: every place visited, oldest first. */
     val navHistory = remember { mutableStateListOf<DesktopNavEntry>() }
     /** Set while [goBack] puts a place back, so that move is not itself recorded as a visit. */
@@ -1072,6 +1080,42 @@ fun BitChordDesktopApp() {
 
     /** Puts a track at the end of what the listener queued — not the end of the queue. */
     fun addToQueue(song: Song) = enqueue(song, next = false)
+
+    // Whether My Wave is being put together, for the card's spinner.
+    var waveStarting by remember { mutableStateOf(false) }
+
+    /** Plays My Wave — see [DesktopMyWave] — from the account's likes and what was played lately. */
+    fun startWave() {
+        if (waveStarting || partyTrackChangeBlocked()) return
+        waveStarting = true
+        scope.launch {
+            try {
+                val liked = (libraryState as? UiState.Success)?.data?.likedSongs.orEmpty()
+                val remote = if (youtubeSignedIn) DesktopSearchClient.history().getOrNull().orEmpty() else emptyList()
+                // Signed out there is no account to read: what was played here, and failing that
+                // the feed's own picks.
+                val played = (remote + history).distinctBy { it.videoId }.ifEmpty {
+                    (homeState as? UiState.Success)?.data.orEmpty()
+                        .flatMap { it.items }.filter { it.videoId != null }.map { it.toSong() }
+                }
+                val batch = DesktopMyWave.start(liked, played)
+                if (batch.isEmpty()) {
+                    DesktopTrackLog.log("wave: nothing to start a wave from")
+                    return@launch
+                }
+                if (partyTrackChangeBlocked()) return@launch
+                val station = batch.mapIndexed { i, song ->
+                    if (i == 0) canonicalSong(song).asQueueEntry(QueueTier.CONTEXT).copy(radioName = DesktopMyWave.radioName) else song
+                }
+                liveQueue = DesktopQueue(station, 0)
+                preShuffleOrder = emptyList()
+                playCurrent()
+                DesktopTrackLog.log("wave: started with ${station.size} tracks")
+            } finally {
+                waveStarting = false
+            }
+        }
+    }
 
     /** Starts the station YouTube Music builds around one track. */
     fun startRadio(song: Song) {
@@ -3358,6 +3402,27 @@ fun BitChordDesktopApp() {
         onOpenQueue = { overlays.toggleSidePanel(DesktopSidePanel.QUEUE) },
     )
 
+    // Checks the playlist import and My Wave against the live services: BITCHORD_SELFTEST=1.
+    if (System.getenv("BITCHORD_SELFTEST") == "1") {
+        LaunchedEffect(Unit) {
+            System.getenv("BITCHORD_SELFTEST_IMPORT").orEmpty().split('|').filter(String::isNotBlank).forEach { link ->
+                runCatching { DesktopPlaylistImport.fetch(link) }
+                    .onSuccess { (name, tracks) -> DesktopTrackLog.log("selftest import ok: ${DesktopPlaylistImport.detect(link)} '$name' ${tracks.size} tracks, first ${tracks.take(2)}") }
+                    .onFailure { DesktopTrackLog.log("selftest import failed: ${DesktopPlaylistImport.detect(link)}: ${it.message}") }
+            }
+            snapshotFlow { sessionSettled }.first { it }
+            delay(3_000)
+            DesktopWaveTuning.entries.forEach { tuning ->
+                DesktopMyWave.setTuning(tuning)
+                val liked = (libraryState as? UiState.Success)?.data?.likedSongs.orEmpty()
+                val batch = DesktopMyWave.start(liked, history)
+                DesktopTrackLog.log("selftest wave $tuning: ${batch.size} tracks, e.g. ${batch.take(3).map { it.artist + " - " + it.title }}")
+            }
+            DesktopMyWave.setTuning(DesktopWaveTuning.ALL)
+            DesktopTrackLog.log("selftest done")
+        }
+    }
+
     // A walk through the app's heaviest moments, timed frame by frame — see [DesktopFrameProfiler].
     if (DesktopFrameProfiler.enabled) {
         LaunchedEffect(Unit) {
@@ -4185,6 +4250,16 @@ fun BitChordDesktopApp() {
                         )
                     }
 
+                    if (waveSettingsOpen) {
+                        DesktopWaveSettingsDialog(onRestart = ::startWave, onDismiss = { waveSettingsOpen = false })
+                    }
+                    if (homeCustomizeOpen) {
+                        DesktopHomeCustomizeDialog(
+                            shelfTitles = (homeState as? UiState.Success)?.data.orEmpty().map { it.title },
+                            onDismiss = { homeCustomizeOpen = false },
+                        )
+                    }
+
                     if (spotifyImportOpen) {
                         DesktopSpotifyImportDialog(
                             signedIn = youtubeSignedIn,
@@ -4764,7 +4839,7 @@ fun BitChordDesktopApp() {
                             contentPadding = contentPadding,
                         )
                         destination == DesktopDestination.LISTEN_NOW -> HomeScreen(
-                            state = homeState,
+                            state = visibleHomeState,
                             listState = homeListState,
                             onItemClick = { item, shelfTitle -> openShelfItem(item, shelfTitle) },
                             onRetry = ::loadHome,
@@ -4781,6 +4856,20 @@ fun BitChordDesktopApp() {
                             loadingMore = homeLoadingMore,
                             recentlyPlayedLoading = homeRecentsLoading,
                             leadHero = false,
+                            lead = if (waveShown) {
+                                {
+                                    DesktopWaveCard(
+                                        starting = waveStarting,
+                                        playing = playback.isPlaying && selectedSong?.radioName == DesktopMyWave.radioName,
+                                        onPlay = ::startWave,
+                                        onTune = { waveSettingsOpen = true },
+                                        onCustomizeHome = { homeCustomizeOpen = true },
+                                        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 12.dp),
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                             header = if (animatedHome && DesktopFrameProfiler.on("header")) {
                                 {
                                     val current = selectedSong

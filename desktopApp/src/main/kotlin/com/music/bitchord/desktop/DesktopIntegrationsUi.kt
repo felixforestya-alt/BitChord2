@@ -326,21 +326,21 @@ internal fun DesktopSpotifyImportDialog(
     var unmatched by remember { mutableStateOf<List<SpotifyImportTrack>?>(null) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-    val title = DesktopStrings["spotify_import_title", "Import Spotify playlist"]
+    val title = DesktopStrings["playlist_import_title", "Import a playlist"]
 
     fun start() {
         if (working) return
-        val id = SpotifyImporter.extractPlaylistId(link) ?: run {
-            status = DesktopStrings["spotify_import_invalid", "That isn't a Spotify playlist link."]
+        val service = DesktopPlaylistImport.detect(link) ?: run {
+            status = DesktopStrings["import_unknown", "That link isn't from a service the import knows."]
             failed = true
             return
         }
         working = true
         failed = false
-        status = DesktopStrings["spotify_import_fetching", "Reading the Spotify playlist…"]
+        status = DesktopStrings.format("import_fetching", service.title, fallback = "Reading from %1\$s…")
         scope.launch {
             try {
-                val (name, tracks) = SpotifyImporter.fetchPlaylistTracks(id)
+                val (name, tracks) = DesktopPlaylistImport.fetch(link)
                 val (songs, missed) = SpotifyImporter.resolveToSongs(tracks) { done, total ->
                     status = DesktopStrings.format("spotify_import_matching", done, total, fallback = "Matching songs %1\$d of %2\$d")
                 }
@@ -357,7 +357,7 @@ internal fun DesktopSpotifyImportDialog(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                DesktopTrackLog.log("spotify import failed: ${failure.message}")
+                DesktopTrackLog.log("playlist import failed: ${failure.message}")
                 status = DesktopStrings.format(
                     "spotify_import_failed",
                     failure.message.orEmpty(),
@@ -375,14 +375,10 @@ internal fun DesktopSpotifyImportDialog(
         if (missed == null) {
             DialogHeading(
                 title = title,
-                message = if (signedIn) {
-                    DesktopStrings["spotify_import_description", "Paste a public playlist link. Songs are matched on YouTube Music."]
-                } else {
-                    DesktopStrings[
-                        "spotify_import_description_local",
-                        "Paste a public playlist link. Songs are matched on YouTube Music and saved on this device.",
-                    ]
-                },
+                message = DesktopStrings[
+                    "playlist_import_description",
+                    "A public playlist or album link from Spotify, Yandex Music, Apple Music, Deezer or SoundCloud, or a track list with one \"Artist — Title\" per line (for VK and anything else). Songs are matched on YouTube Music.",
+                ] + if (signedIn) "" else " " + DesktopStrings["playlist_import_local", "Saved on this device."],
             )
             DialogField(
                 value = link,
@@ -391,9 +387,10 @@ internal fun DesktopSpotifyImportDialog(
                     if (failed) status = null
                     failed = false
                 },
-                placeholder = DesktopStrings["spotify_import_hint", "open.spotify.com/playlist/…"],
+                placeholder = DesktopStrings["playlist_import_hint", "Link or track list"],
                 enabled = !working,
                 onSubmit = ::start,
+                singleLine = false,
                 modifier = Modifier.focusRequester(focus),
             )
             status?.let {
@@ -466,6 +463,7 @@ private fun DialogField(
     isPassword: Boolean = false,
     imeAction: ImeAction = ImeAction.Done,
     onSubmit: () -> Unit = {},
+    singleLine: Boolean = true,
 ) {
     Row(
         Modifier
@@ -484,7 +482,8 @@ private fun DialogField(
                 value = value,
                 onValueChange = onValueChange,
                 enabled = enabled,
-                singleLine = true,
+                singleLine = singleLine,
+                maxLines = if (singleLine) 1 else 8,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.White),
                 cursorBrush = SolidColor(DesktopAccent),
                 visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,

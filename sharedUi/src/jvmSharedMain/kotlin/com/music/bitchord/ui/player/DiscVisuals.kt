@@ -15,7 +15,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -176,21 +175,36 @@ internal fun SpinningDisc(
 ) {
     val art = rememberDiscArtwork(artUrl, 1080)
     Box(modifier) {
-        // The shadow it casts, and the glow of the colour it is lit by.
-        Canvas(Modifier.fillMaxSize().graphicsLayer { scaleX = 1.06f; scaleY = 1.06f }) {
-            val beat = level()
+        // The shadow it casts: still, so drawn once into a layer of its own and reused.
+        Canvas(
+            Modifier.fillMaxSize().graphicsLayer {
+                scaleX = 1.06f
+                scaleY = 1.06f
+                compositingStrategy = CompositingStrategy.Offscreen
+            },
+        ) {
             drawCircle(
                 Brush.radialGradient(0.70f to Color.Black.copy(alpha = 0.55f), 1f to Color.Transparent),
                 radius = size.minDimension / 2,
                 center = center + Offset(size.width * 0.02f, size.height * 0.03f),
             )
+        }
+        // The glow of the colour it is lit by, breathing with the music: only the ring it
+        // shows in is drawn, not the whole disc's worth of transparent gradient inside it.
+        Canvas(Modifier.fillMaxSize().graphicsLayer { scaleX = 1.06f; scaleY = 1.06f }) {
+            val beat = level()
+            val radius = size.minDimension / 2
+            val ring = radius * 0.2f
             drawCircle(
                 Brush.radialGradient(
                     0.80f to glow.copy(alpha = 0.0f),
                     0.93f to glow.copy(alpha = 0.18f + beat * 0.35f),
                     1f to Color.Transparent,
+                    center = center,
+                    radius = radius,
                 ),
-                radius = size.minDimension / 2,
+                radius = radius - ring / 2,
+                style = Stroke(ring),
             )
         }
         // The disc itself, turning. Its picture is recorded once into its own layer; the turn is
@@ -254,8 +268,9 @@ internal fun SpinningDisc(
             // The rim.
             drawCircle(Color.White.copy(alpha = 0.65f), radius = radius - hair, style = Stroke(hair * 1.5f))
         }
-        // The reflection, fixed in the room while the disc turns under it.
-        Canvas(Modifier.fillMaxSize()) {
+        // The reflection, fixed in the room while the disc turns under it. Still too, so drawn
+        // once into a layer of its own: its clipped gradients are not redone on every turn.
+        Canvas(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
             val radius = size.minDimension / 2f
             val disc = Path().apply { addOval(Rect(center, radius)) }
             val hole = Path().apply { addOval(Rect(center, radius * 0.125f)) }
@@ -309,18 +324,28 @@ private fun DrawScope.drawSquareCrop(image: ImageBitmap) {
 @Composable
 internal fun DiscAmbientArtwork(url: String?, modifier: Modifier) {
     // Smoothed by a real blur rather than by stretching a tiny thumbnail, which came out in
-    // blocks. The room this sits in is one cached layer (see [DiscPortraitPlayer]), so the blur
-    // is worked out when the cover changes, not on every frame.
-    val art = rememberDiscArtwork(url, 128)
+    // blocks — but the blur is done once, on the thumbnail itself, when the cover changes: a blur
+    // effect on the screen-sized layer was worked out again on every frame the room was redrawn,
+    // as it is all the way through the sheet opening. Stretched, the blurred thumbnail is smooth.
+    val context = LocalPlatformContext.current
+    val art by produceState<ImageBitmap?>(null, url) {
+        if (url == null) return@produceState
+        val request = ImageRequest.Builder(context)
+            .data(url.artworkAt(AMBIENT_PX) ?: url)
+            .size(AMBIENT_PX)
+            .forPixelAccess()
+            .build()
+        val bitmap = (SingletonImageLoader.get(context).execute(request) as? SuccessResult)?.image?.toImageBitmap()
+            ?: return@produceState
+        value = withContext(Dispatchers.Default) { blurredCopy(bitmap, AMBIENT_BLUR_RADIUS) }
+    }
     val shown by animateFloatAsState(if (art != null) 1f else 0f, tween(900), label = "discAmbient")
     Canvas(
-        modifier
-            .graphicsLayer {
-                alpha *= shown
-                scaleX = 1.25f
-                scaleY = 1.25f
-            }
-            .blur(48.dp, androidx.compose.ui.draw.BlurredEdgeTreatment.Rectangle),
+        modifier.graphicsLayer {
+            alpha *= shown
+            scaleX = 1.25f
+            scaleY = 1.25f
+        },
     ) {
         val image = art ?: return@Canvas
         // Cropped to the screen's shape, from the middle.
@@ -341,6 +366,52 @@ internal fun DiscAmbientArtwork(url: String?, modifier: Modifier) {
             dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
             filterQuality = FilterQuality.High,
         )
+    }
+}
+
+/** The thumbnail the room's backdrop is blurred from, and how far it is blurred, in its pixels. */
+private const val AMBIENT_PX = 128
+private const val AMBIENT_BLUR_RADIUS = 6
+
+/**
+ * [source] blurred: three box blurs each way, near enough a gaussian, the edges held — so the
+ * stretched result has no dark rim. Small enough (a thumbnail) to be done in a moment.
+ */
+private fun blurredCopy(source: ImageBitmap, radius: Int): ImageBitmap {
+    val w = source.width
+    val h = source.height
+    val pixels = IntArray(w * h)
+    source.readPixels(pixels)
+    val channels = Array(4) { c -> FloatArray(w * h) { i -> ((pixels[i] ushr (c * 8)) and 0xFF).toFloat() } }
+    val scratch = FloatArray(maxOf(w, h))
+    for (channel in channels) repeat(3) {
+        for (y in 0 until h) boxBlurLine(channel, y * w, 1, w, radius, scratch)
+        for (x in 0 until w) boxBlurLine(channel, x, w, h, radius, scratch)
+    }
+    val out = ImageBitmap(w, h)
+    val canvas = androidx.compose.ui.graphics.Canvas(out)
+    val paint = androidx.compose.ui.graphics.Paint()
+    for (y in 0 until h) for (x in 0 until w) {
+        val i = y * w + x
+        paint.color = Color(
+            red = channels[2][i].roundToInt().coerceIn(0, 255),
+            green = channels[1][i].roundToInt().coerceIn(0, 255),
+            blue = channels[0][i].roundToInt().coerceIn(0, 255),
+        )
+        canvas.drawRect(x.toFloat(), y.toFloat(), x + 1f, y + 1f, paint)
+    }
+    return out
+}
+
+/** One row or column of [data] averaged over a window of [radius] each side, its ends held. */
+private fun boxBlurLine(data: FloatArray, start: Int, step: Int, count: Int, radius: Int, scratch: FloatArray) {
+    for (i in 0 until count) scratch[i] = data[start + i * step]
+    var sum = 0f
+    for (k in -radius..radius) sum += scratch[k.coerceIn(0, count - 1)]
+    val span = 2 * radius + 1
+    for (i in 0 until count) {
+        data[start + i * step] = sum / span
+        sum += scratch[(i + radius + 1).coerceAtMost(count - 1)] - scratch[(i - radius).coerceAtLeast(0)]
     }
 }
 

@@ -79,6 +79,10 @@ internal class ShadowNode(
 
     private val paint = Paint()
 
+    // Vendored change: what the shadow was last recorded for — see HighlightNode's. A shadow
+    // re-recorded on every draw had its whole blurred, offscreen layer rendered again each frame.
+    private var recordedFor: Any? = null
+
     override fun ContentDrawScope.draw() {
         val shadow = shadow() ?: return drawContent()
 
@@ -97,10 +101,12 @@ internal class ShadowNode(
             )
             val outline = shapeProvider.shape.createOutline(size, layoutDirection, density)
 
-            configurePaint(shadow)
-
             shadowLayer.alpha = shadow.alpha
             shadowLayer.blendMode = shadow.blendMode
+            val key = listOf(shadowSize, outline, shadow, density.density, layoutDirection)
+            if (key != recordedFor) {
+            recordedFor = key
+            configurePaint(shadow)
             shadowLayer.record(shadowSize) {
                 translate(radius * 2f + offsetX, radius * 2f + offsetY) {
                     val canvas = drawContext.canvas
@@ -109,6 +115,7 @@ internal class ShadowNode(
                     canvas.drawOutline(outline, ShadowMaskPaint)
                     canvas.translate(offsetX, offsetY)
                 }
+            }
             }
 
             translate(-radius * 2f, -radius * 2f) {
@@ -133,6 +140,7 @@ internal class ShadowNode(
             graphicsContext.releaseGraphicsLayer(layer)
             shadowLayer = null
         }
+        recordedFor = null
     }
 
     private fun DrawScope.configurePaint(shadow: Shadow) {

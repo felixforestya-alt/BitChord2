@@ -279,7 +279,17 @@ private class DrawBackdropNode(
     private val layoutLayerBlock: GraphicsLayerScope.() -> Unit = {
         clip = true
         shape = shapeProvider.shape
-        compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+        // Vendored change: a rounded rectangle is clipped by the renderer itself, edges smooth,
+        // with no buffer of its own; only another shape needs the surface drawn offscreen to be
+        // cut cleanly. Upstream always went offscreen — a whole surface's worth of pixels drawn
+        // twice on every frame the glass changed.
+        val outline = shapeProvider.shape.createOutline(size, androidx.compose.ui.unit.LayoutDirection.Ltr, this)
+        compositingStrategy =
+            if (outline is androidx.compose.ui.graphics.Outline.Rounded || outline is androidx.compose.ui.graphics.Outline.Rectangle) {
+                androidx.compose.ui.graphics.CompositingStrategy.Auto
+            } else {
+                androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+            }
     }
 
     private var layoutCoordinates: LayoutCoordinates? by mutableStateOf(null, neverEqualPolicy())

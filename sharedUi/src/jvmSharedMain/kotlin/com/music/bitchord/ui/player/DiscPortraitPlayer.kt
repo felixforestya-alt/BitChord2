@@ -160,7 +160,7 @@ internal fun DiscPortraitPlayer(
     )
     val density = LocalDensity.current
     val off = remember { discLayersOff() }
-    val glass = PlayerPlatform.host.rememberPlayerGlass()
+    val glass = PlayerPlatform.host.rememberPlayerGlass().takeIf { "glass" !in off }
     // Which way the disc moved last: forward through the queue it leaves to the left and the next
     // one comes in from the right, as a swipe forward does; back, the other way.
     val lastIndex = remember { androidx.compose.runtime.mutableIntStateOf(trackIndex) }
@@ -245,10 +245,6 @@ internal fun DiscPortraitPlayer(
             if ("spheres" !in off) DiscWireSpheres(clock = { clock.floatValue }, tint = Color.White, modifier = Modifier.fillMaxSize())
             if ("scan" !in off) DiscScanlines(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen })
 
-            // The disc, always the song's cover. A new cover rolls in from the side. Upright it
-            // fades out above the camera, so the sliver over it passes softly under the status bar
-            // and, as the sheet is pulled down, under the shade's edge.
-            val fadeTo = with(density) { cameraY.toPx() * 0.7f }
             // A shade behind the status bar, so its clock and icons read over the print.
             if (!wide) Box(
                 Modifier
@@ -257,19 +253,30 @@ internal fun DiscPortraitPlayer(
                     .background(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.5f), 1f to Color.Transparent))
                     .zIndex(1f),
             )
+            // The disc, always the song's cover. A new cover rolls in from the side. Upright it
+            // fades out above the camera, so the sliver over it passes softly under the status bar
+            // and, as the sheet is pulled down, under the shade's edge. The fade's layer is only as
+            // tall as the disc reaches (and its glow a little past), not the whole screen.
+            val fadeTo = with(density) { cameraY.toPx() * 0.7f }
             if ("disc" !in off) Box(
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                    .drawWithContent {
-                        drawContent()
-                        if (!wide && fadeTo > 0f) {
-                            drawRect(
-                                Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fadeTo),
-                                blendMode = BlendMode.DstIn,
-                            )
+                if (wide) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .height(discBottom + DISC_FADE_MARGIN)
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            if (fadeTo > 0f) {
+                                drawRect(
+                                    Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fadeTo),
+                                    size = androidx.compose.ui.geometry.Size(size.width, fadeTo),
+                                    blendMode = BlendMode.DstIn,
+                                )
+                            }
                         }
-                    },
+                },
             ) {
                 AnimatedContent(
                     targetState = cover,
@@ -543,6 +550,9 @@ private const val WORDS_FONT_SCALE = 1.14f
 
 /** How far the like and menu buttons hang below the artist, to the right of the words. */
 private val CREDITS_BUTTONS_DROP = 20.dp
+
+/** How far past the disc's edge its fade layer reaches, for the glow around it. */
+private val DISC_FADE_MARGIN = 40.dp
 
 /** On its side the track's words are larger still: there is width to spare for them. */
 private const val WIDE_WORDS_SCALE = 1.38f

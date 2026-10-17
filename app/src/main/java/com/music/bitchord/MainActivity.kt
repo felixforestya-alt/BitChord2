@@ -518,6 +518,10 @@ private fun BitChordApp(
     // player's cover reports itself here, the sheet its offset, and the player
     // flies its artwork between them — see [PlayerDock].
     val playerDock = remember { PlayerDock() }
+    // BitChord²: what moves on the page stands still while the player covers it — see [PageCover].
+    LaunchedEffect(playerDock) {
+        androidx.compose.runtime.snapshotFlow { playerDock.openFraction() >= 0.99f }.collect { com.music.bitchord.ui.components.PageCover.covered = it }
+    }
     // Who moves the player sheet when the app does rather than M3: a tap's
     // open, the pull up from the mini player, and every close — see
     // [PlayerSheetMotion].
@@ -3229,6 +3233,7 @@ private fun BitChordApp(
                                         onSkip = { controller?.seekToNextMediaItem() },
                                         onTune = { jamSettingsOpen = true },
                                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
+                                        visible = { playerDock.openFraction() < 0.99f },
                                     )
                                 }
                             } else {

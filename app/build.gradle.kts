@@ -190,6 +190,17 @@ android {
             applicationIdSuffix = ".benchmark"
             matchingFallbacks += listOf("release")
         }
+        /*
+         * BitChord²: the release build — R8, the baseline profile, a non-debuggable runtime —
+         * under the app's own package and signed with the debug key, so it installs straight
+         * over a debug build of the fork and keeps the listener's sign-in and settings.
+         * `./gradlew assembleProdFast`.
+         */
+        create("fast") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

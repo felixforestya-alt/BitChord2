@@ -45,6 +45,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -98,15 +99,35 @@ internal fun JamCard(
     onSkip: () -> Unit,
     onTune: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Whether the card can be seen at all: with the player over it, the wave stands still. */
+    visible: () -> Boolean = { true },
 ) {
     val palette = rememberDiscPalette(coverUrl)
     val light by animateColorAsState(palette.vivid, tween(700), label = "jamLight")
     val deep by animateColorAsState(palette.deep, tween(700), label = "jamDeep")
     val moving = playing && !paused
     // Read only while drawing, so the wave moves by redrawing alone and nothing recomposes for it.
-    val phase = rememberInfiniteTransition(label = "jam").animateFloat(
-        0f, 1f, infiniteRepeatable(tween(if (moving) 2_600 else 9_000, easing = LinearEasing), RepeatMode.Restart), label = "jamPhase",
-    )
+    // Its own clock rather than an infinite transition: every frame of the wave redraws the whole
+    // page under the glass bars, so it is kept to what shows — still while the player covers the
+    // page, and at half the display's rate while it only drifts, a slow nine-second sway in which
+    // the steps do not show.
+    val phase = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(moving) {
+        val periodNanos = if (moving) 2_600_000_000f else 9_000_000_000f
+        var last = androidx.compose.runtime.withFrameNanos { it }
+        while (true) {
+            if (!visible()) {
+                kotlinx.coroutines.delay(250)
+                last = androidx.compose.runtime.withFrameNanos { it }
+                continue
+            }
+            androidx.compose.runtime.withFrameNanos { now ->
+                phase.floatValue = (phase.floatValue + (now - last) / periodNanos) % 1f
+                last = now
+            }
+            if (!moving) kotlinx.coroutines.delay(DRIFT_FRAME_MS)
+        }
+    }
     val tuning by MyJam.tuning.collectAsStateWithLifecycle()
     val onlyNew by MyJam.onlyNew.collectAsStateWithLifecycle()
     Box(
@@ -212,6 +233,9 @@ private fun CardIcon(icon: ImageVector, label: String, onClick: () -> Unit) {
         Icon(icon, label, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
+
+/** Between frames of the wave while it only drifts — see [JamCard]. */
+private const val DRIFT_FRAME_MS = 28L
 
 /** A small moving level, four bars, drawn so they follow [phase] by redrawing alone. */
 @Composable

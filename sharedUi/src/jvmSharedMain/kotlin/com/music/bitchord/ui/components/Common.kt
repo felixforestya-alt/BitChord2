@@ -1,5 +1,6 @@
 package com.music.bitchord.ui.components
 
+import kotlinx.coroutines.flow.first
 import com.music.bitchord.ui.LocalPullToRefreshEnabled
 import com.music.bitchord.ui.AppUiHost
 import com.music.bitchord.ui.AppUi
@@ -682,26 +683,45 @@ fun Modifier.hangIntoGutter(outset: Dp): Modifier = layout { measurable, constra
 /** The accent a current song's title takes in lists that mark it with [SearchPlayingBars]. */
 val PlayingAccent = Color(0xFFFB4A62)
 
+/**
+ * Whether the page is covered — the player open over it. Whatever moves on the page by itself
+ * (the playing bars, Home's light) stands still meanwhile: nobody can see it, and every frame of
+ * it redrew the whole page under the player. Set by the app; BitChord²'s.
+ */
+object PageCover {
+    var covered by androidx.compose.runtime.mutableStateOf(false)
+}
+
+/**
+ * Milliseconds of animation time, running on the frame clock while the page is in view and
+ * standing still while [PageCover] says it is covered.
+ */
+@Composable
+fun rememberPageClockMillis(): androidx.compose.runtime.State<Float> {
+    val clock = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    LaunchedEffect(Unit) {
+        var last = androidx.compose.runtime.withFrameNanos { it }
+        while (true) {
+            if (PageCover.covered) {
+                androidx.compose.runtime.snapshotFlow { PageCover.covered }.first { !it }
+                last = androidx.compose.runtime.withFrameNanos { it }
+                continue
+            }
+            androidx.compose.runtime.withFrameNanos { now ->
+                clock.floatValue += (now - last) / 1_000_000f
+                last = now
+            }
+        }
+    }
+    return clock
+}
+
 @Composable
 fun SearchPlayingBars(modifier: Modifier = Modifier) {
-    val heights = listOf(0.38f, 0.78f, 0.52f).mapIndexed { index, minimum ->
-        val transition = rememberInfiniteTransition(label = "search playing bar $index")
-        val height by transition.animateFloat(
-            initialValue = minimum,
-            targetValue = 1f - (index * 0.12f),
-            animationSpec = infiniteRepeatable(
-                animation = keyframes {
-                    durationMillis = 520 + index * 130
-                    minimum at 0
-                    1f at (260 + index * 50)
-                    minimum at durationMillis
-                },
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "search bar height $index",
-        )
-        height
-    }
+    // Three bars rising and falling, each on its own beat. Worked out and drawn in the draw
+    // phase from one clock: as three animated heights laid out as boxes, every frame of them
+    // recomposed and re-measured the row they sat in.
+    val clock = rememberPageClockMillis()
     // The plate is a fixed square so only the bars move, never the box around them.
     Box(
         modifier = modifier
@@ -710,23 +730,36 @@ fun SearchPlayingBars(modifier: Modifier = Modifier) {
             .background(Color.Black.copy(alpha = 0.52f)),
         contentAlignment = Alignment.Center,
     ) {
-        Row(
-            modifier = Modifier.height(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            heights.forEach { height ->
-                Box(
-                    Modifier
-                        .width(3.dp)
-                        .height(14.dp * height)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(Color.White),
+        androidx.compose.foundation.Canvas(Modifier.size(width = 3.dp * 3 + 2.dp * 2, height = 14.dp)) {
+            val bar = 3.dp.toPx()
+            val gap = 2.dp.toPx()
+            val corner = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+            val t = clock.value
+            PLAYING_BAR_MINIMUMS.forEachIndexed { index, minimum ->
+                // The keyframes the bars had: from [minimum] up to full at the peak and back,
+                // over [duration], played forward then in reverse.
+                val duration = 520f + index * 130f
+                val peak = 260f + index * 50f
+                val cycle = t % (duration * 2f)
+                val at = if (cycle < duration) cycle else duration * 2f - cycle
+                val h = if (at <= peak) {
+                    minimum + (1f - minimum) * (at / peak)
+                } else {
+                    1f - (1f - minimum) * ((at - peak) / (duration - peak))
+                }
+                val height = (14.dp * h).roundToPx().toFloat()
+                drawRoundRect(
+                    Color.White,
+                    topLeft = androidx.compose.ui.geometry.Offset(index * (bar + gap), size.height - height),
+                    size = androidx.compose.ui.geometry.Size(bar, height),
+                    cornerRadius = corner,
                 )
             }
         }
     }
 }
+
+private val PLAYING_BAR_MINIMUMS = floatArrayOf(0.38f, 0.78f, 0.52f)
 
 /**
  * The mark on a row whose track is already on disk.

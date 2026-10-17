@@ -3461,7 +3461,14 @@ private fun BitChordApp(
                                 )
                             },
                         )
-                        else -> LibraryScreen(
+                        else -> Box(Modifier.fillMaxSize()) {
+                            // BitChord²: lit by what is playing, as Home and Explore are.
+                            LivingBackdrop(
+                                coverUrl = player.song?.thumbnailUrl,
+                                covered = { playerDock.openFraction() >= 0.99f },
+                                modifier = Modifier.matchParentSize(),
+                            )
+                            LibraryScreen(
                             signedIn = signedIn,
                             state = libraryState,
                             listState = libraryListState,
@@ -3495,6 +3502,7 @@ private fun BitChordApp(
                             links = libraryLinks(),
                             deviceItems = libraryDeviceItems(downloadedReleases) + localPlaylistItems,
                         )
+                        }
                     }
                 }
 

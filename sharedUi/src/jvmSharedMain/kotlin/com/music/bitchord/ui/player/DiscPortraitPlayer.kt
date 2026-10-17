@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.displayCutout
@@ -324,7 +326,12 @@ internal fun DiscPortraitPlayer(
                     ) { showing ->
                         when (showing) {
                             PlayerPane.Main -> Column(
-                                Modifier.fillMaxSize().padding(horizontal = if (wide) 8.dp else PLAYER_GUTTER),
+                                Modifier
+                                    .fillMaxSize()
+                                    // On its side, no wider than reads as one block, so the like and
+                                    // menu buttons stay beside the track rather than across the room.
+                                    .then(if (wide) Modifier.wrapContentWidth(Alignment.Start).widthIn(max = 520.dp) else Modifier)
+                                    .padding(horizontal = if (wide) 8.dp else PLAYER_GUTTER),
                                 verticalArrangement = if (wide) Arrangement.Center else Arrangement.Bottom,
                             ) {
                                 if (caption != null) {
@@ -383,7 +390,9 @@ internal fun DiscPortraitPlayer(
                                         // hang down beside the artist, over the gap, taking no room.
                                         Box(Modifier.zIndex(1f)) { credits() }
                                         if (lyricStrip != null) {
-                                            Spacer(Modifier.height(10.dp))
+                                            // Room for the buttons hanging below the artist, so the
+                                            // line being sung starts clear of them.
+                                            Spacer(Modifier.height(CREDITS_BUTTONS_DROP + 6.dp))
                                             lyricStrip()
                                         }
                                     }
@@ -421,30 +430,37 @@ internal fun DiscPortraitPlayer(
                 ) {
                     scrubber()
                     Spacer(Modifier.height(6.dp))
-                    transport()
-                    // On its side there is no height to spare for the volume: the phone's own keys
-                    // have it.
-                    if (volume != null && pane == PlayerPane.Main && !wide) {
-                        Spacer(Modifier.height(8.dp))
-                        volume()
+                    if (wide) {
+                        // On its side the deck is low and wide: the transport and the actions on
+                        // one line, and no volume — the phone's own keys have it.
+                        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) { transport() }
+                            Spacer(Modifier.width(24.dp))
+                            Column(Modifier.weight(1f)) { actions() }
+                        }
+                    } else {
+                        transport()
+                        if (volume != null && pane == PlayerPane.Main) {
+                            Spacer(Modifier.height(8.dp))
+                            volume()
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        actions()
                     }
-                    Spacer(Modifier.height(10.dp))
-                    actions()
                 }
             }
             if (wide) {
-                // On its side: the words, the lyrics or the queue taking the height beside the
-                // disc, and the deck in a column of its own at the far end.
-                androidx.compose.foundation.layout.Row(
+                // On its side: the words, the lyrics or the queue in the space beside the disc,
+                // and the deck low and wide along the foot of it.
+                Column(
                     Modifier
                         .fillMaxSize()
                         .windowInsetsPadding(WindowInsets.safeDrawing.union(stableStatusBarInsets()))
-                        .padding(start = stageStart / uiScale, top = 8.dp, bottom = 8.dp, end = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                        .padding(start = stageStart / uiScale, top = 6.dp, bottom = 8.dp, end = 12.dp),
                 ) {
-                    centre(Modifier.weight(1f).fillMaxSize())
-                    Spacer(Modifier.width(16.dp))
-                    deck(Modifier.width(WIDE_DECK_WIDTH))
+                    centre(Modifier.weight(1f).fillMaxWidth())
+                    Spacer(Modifier.height(8.dp))
+                    deck(Modifier.fillMaxWidth())
                 }
             } else {
                 Column(
@@ -485,17 +501,14 @@ private fun nowPlayingHeading(): String =
 private const val UI_SCALE = 1.08f
 
 /** And on its side, smaller, to fit the height. */
-private const val WIDE_UI_SCALE = 0.92f
-
-/** The deck's width on its side. */
-private val WIDE_DECK_WIDTH = 340.dp
+private const val WIDE_UI_SCALE = 0.9f
 
 /** And the track's own words and their buttons, larger again. */
 private const val WORDS_SCALE = 1.12f
 private const val WORDS_FONT_SCALE = 1.14f
 
 /** How far the like and menu buttons hang below the artist, to the right of the words. */
-private val CREDITS_BUTTONS_DROP = 20.dp
+private val CREDITS_BUTTONS_DROP = 22.dp
 
 /** One revolution every this many seconds — a slow, legible spin rather than a blur. */
 private const val DISC_PERIOD_S = 3.2f

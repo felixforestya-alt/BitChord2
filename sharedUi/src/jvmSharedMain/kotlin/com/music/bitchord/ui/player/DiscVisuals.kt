@@ -6,6 +6,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -435,20 +436,36 @@ internal fun DiscVisualizer(
 ) {
     if (style == DiscVisualizerStyle.NONE) return
     val particles = remember { ParticleField(140) }
-    Canvas(modifier) {
+    // Drawn at half the screen's resolution and stretched: every style here is soft light, and
+    // a quarter of the pixels is what lets a phone's GPU keep it up at the display's rate.
+    BoxWithConstraints(modifier) {
+    Canvas(
+        Modifier
+            .size(maxWidth / VIS_SCALE, maxHeight / VIS_SCALE)
+            .graphicsLayer {
+                scaleX = VIS_SCALE
+                scaleY = VIS_SCALE
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                compositingStrategy = CompositingStrategy.Offscreen
+            },
+    ) {
         val t = clock()
         val bands = AudioSpectrum.bandsAt(System.nanoTime())
         val energy = energyOf(bands)
         when (style) {
             DiscVisualizerStyle.AURORA -> aurora(t, energy, accent)
-            DiscVisualizerStyle.RING -> ring(t, bands, energy, accent, disc())
+            DiscVisualizerStyle.RING -> ring(t, bands, energy, accent, disc().let { (c, r) -> c / VIS_SCALE to r / VIS_SCALE })
             DiscVisualizerStyle.WAVES -> waves(t, energy, accent)
-            DiscVisualizerStyle.PARTICLES -> particles.step(this, t, energy, accent, disc())
+            DiscVisualizerStyle.PARTICLES -> particles.step(this, t, energy, accent, disc().let { (c, r) -> c / VIS_SCALE to r / VIS_SCALE })
             DiscVisualizerStyle.SPECTRUM -> spectrum(bands, accent)
             DiscVisualizerStyle.NONE -> Unit
         }
     }
+    }
 }
+
+/** How much smaller than the screen the visualiser is drawn — see [DiscVisualizer]. */
+private const val VIS_SCALE = 2f
 
 /** The marquee's text, drawn once at half size into a bitmap. */
 private fun marqueeStrip(layout: TextLayoutResult, color: Color): ImageBitmap {

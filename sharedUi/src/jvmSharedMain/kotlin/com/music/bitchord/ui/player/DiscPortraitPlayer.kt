@@ -47,6 +47,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
@@ -145,12 +146,14 @@ internal fun DiscPortraitPlayer(
         label = "discPanel",
     )
     val density = LocalDensity.current
+    val off = remember { discLayersOff() }
 
     BoxWithConstraints(modifier.fillMaxSize().background(Color.Black)) {
         val width = maxWidth
         val height = maxHeight
         val statusTop = with(density) { stableStatusBarInsets().getTop(this).toDp() }
-        val discSize = min(width * 1.08f, height * 0.56f)
+        // Across the screen with a margin, not past it: the whole circle across, cut only by the top.
+        val discSize = min(width * 0.94f, height * 0.5f)
         // The disc's centre a third of its radius below the top of the screen: the lower two
         // thirds of it in view, cut by the top edge as the desktop's is by the left.
         val discCentreY = statusTop + discSize * 0.18f
@@ -158,7 +161,10 @@ internal fun DiscPortraitPlayer(
         val discRise = discCentreY + discSize * 0.5f - (statusTop + PANEL_BAND)
 
         // ---- The room, and everything the player's sheets frost ---------------------------
-        Box(Modifier.fillMaxSize().then(hazeSource)) {
+        Box(Modifier.fillMaxSize().then(if ("haze" in off) Modifier else hazeSource)) {
+            // The light and the soft cover under it change with the track and nothing else: one
+            // cached layer, so a frame composites one picture rather than redrawing both.
+            if ("room" !in off) Box(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
             Box(
                 Modifier.fillMaxSize().drawBehind {
                     drawRect(
@@ -173,13 +179,14 @@ internal fun DiscPortraitPlayer(
                 },
             )
             DiscAmbientArtwork(cover, Modifier.fillMaxSize().graphicsLayer { alpha = 0.38f })
-            DiscGhostMarquee(
+            }
+            if ("marquee" !in off) DiscGhostMarquee(
                 text = song.artist.ifBlank { song.title }.lowercase(),
                 color = ink.copy(alpha = 0.30f),
                 clock = { clock.floatValue },
                 modifier = Modifier.fillMaxSize(),
             )
-            DiscVisualizer(
+            if ("vis" !in off) DiscVisualizer(
                 style = DiscVisualizerStyle.AURORA,
                 clock = { clock.floatValue },
                 accent = glow,
@@ -190,11 +197,11 @@ internal fun DiscPortraitPlayer(
                 },
                 modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 1f - panelT * 0.45f },
             )
-            DiscWireSpheres(clock = { clock.floatValue }, tint = Color.White, modifier = Modifier.fillMaxSize())
-            DiscScanlines(Modifier.fillMaxSize())
+            if ("spheres" !in off) DiscWireSpheres(clock = { clock.floatValue }, tint = Color.White, modifier = Modifier.fillMaxSize())
+            if ("scan" !in off) DiscScanlines(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen })
 
             // The disc, always the song's cover. A new cover rolls in from the side.
-            AnimatedContent(
+            if ("disc" !in off) AnimatedContent(
                 targetState = cover,
                 transitionSpec = {
                     (slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { -it } + fadeIn(tween(500))) togetherWith
@@ -291,7 +298,7 @@ internal fun DiscPortraitPlayer(
             // The deck: every control the player has, on one pane of smoked glass. Plain
             // translucency rather than a live blur — the room behind it moves on every frame,
             // and a blur under it would be redone on every frame with it.
-            Column(
+            if ("deck" !in off) Column(
                 Modifier
                     .padding(horizontal = 12.dp)
                     .padding(bottom = 10.dp)
@@ -324,3 +331,12 @@ private val PANEL_BAND = 84.dp
 private val DECK_SHAPE = RoundedCornerShape(30.dp)
 
 private val EASE_OUT_EXPO = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+
+/**
+ * Layers of the disc player switched off for measuring, from the `debug.bc2.off` system property
+ * (`adb shell setprop debug.bc2.off vis,marquee`): empty — everything on — anywhere else.
+ */
+private fun discLayersOff(): Set<String> = runCatching {
+    Class.forName("android.os.SystemProperties").getMethod("get", String::class.java)
+        .invoke(null, "debug.bc2.off") as String
+}.getOrDefault("").split(',').map(String::trim).filter(String::isNotEmpty).toSet()

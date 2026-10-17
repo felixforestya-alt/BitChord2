@@ -3660,6 +3660,9 @@ fun BitChordDesktopApp() {
             }
             if (System.getenv("BITCHORD_PROFILE_SHORT") == "1") {
                 repeat(4) { cycle("short$it") }
+                // As if minimised: what the memory trim hands back — see [DesktopMemoryTrim].
+                DesktopMemoryTrim.simulateHidden()
+                kotlinx.coroutines.delay(9_000)
                 DesktopTrackLog.log("profile done")
                 return@LaunchedEffect
             }
@@ -3700,10 +3703,10 @@ fun BitChordDesktopApp() {
             if (header <= 0) return@snap null
             when {
                 delta > 0f && first == 0 && header - offset > 1 -> (header - offset).toFloat()
-                // Up, only the last stretch: with the card already mostly back in view. Taken from
-                // further down — as soon as any of the header showed, or from the row under it —
-                // one notch threw the page to the very top while a track was playing.
-                delta < 0f && first == 0 && offset > 0 && offset < header * 0.4f -> -offset.toFloat()
+                delta < 0f && first == 0 && offset > 0 -> -offset.toFloat()
+                // Just past the header: back up to it in one stroke. The jam's row (item 1) is folded
+                // into the card while the jam plays, so then the first shelf is the one under it.
+                delta < 0f && offset == 0 && (first == 1 || (first == 2 && DesktopJamJoin.amount >= 0.99f)) -> -header.toFloat()
                 else -> null
             }
         }

@@ -12,7 +12,7 @@ import java.util.prefs.Preferences
 
 /** Small OS-backed store for desktop state; no Android Context is required. */
 class DesktopPersistence {
-    internal val preferences = Preferences.userRoot().node("com.music.bitchord.desktop")
+    internal val preferences = Preferences.userRoot().node(desktopPreferencesNode())
     private val sourceJson = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -358,3 +358,11 @@ private fun DesktopPlaylist.toPreferenceLine(): String = listOf(
         })
     },
 ).joinToString("#")
+
+/**
+ * Where the app keeps its preferences. A separate node from BITCHORD_PREFS_NODE gives a run a
+ * profile of its own — no accounts, history or settings of the listener's — which is how the
+ * measuring runs keep away from the real one.
+ */
+internal fun desktopPreferencesNode(): String =
+    System.getenv("BITCHORD_PREFS_NODE")?.takeIf { it.isNotBlank() } ?: "com.music.bitchord.desktop"

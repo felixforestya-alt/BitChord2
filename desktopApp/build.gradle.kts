@@ -498,7 +498,7 @@ compose.desktop {
         }.get()
         mainClass = composeMainClass
         jvmArgs("-Xmx512m")
-        jvmArgs("-XX:+UseG1GC", "-XX:G1PeriodicGCInterval=300000", "-XX:G1PeriodicGCSystemLoadThreshold=0")
+        jvmArgs("-XX:+UseG1GC", "-XX:G1PeriodicGCInterval=60000", "-XX:G1PeriodicGCSystemLoadThreshold=0")
         // Short collector pauses, so a collection lands between frames instead of dropping one
         // in the middle of an animation.
         jvmArgs("-XX:MaxGCPauseMillis=6")
@@ -507,7 +507,7 @@ compose.desktop {
         jvmArgs("-XX:+ForceTimeHighResolution")
         // Hand memory the heap no longer needs back to Windows rather than sitting on it, and keep
         // one copy of the many identical strings the YouTube responses are made of.
-        jvmArgs("-XX:MinHeapFreeRatio=15", "-XX:MaxHeapFreeRatio=60", "-XX:+UseStringDeduplication")
+        jvmArgs("-XX:MinHeapFreeRatio=10", "-XX:MaxHeapFreeRatio=30", "-XX:+UseStringDeduplication")
         jvmArgs("-XX:ReservedCodeCacheSize=96m")
         // Start small: left alone the JVM commits a 64th of the machine's memory up front — half
         // a gigabyte on a 32 GB PC — before the app has asked for any of it.

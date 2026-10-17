@@ -136,6 +136,8 @@ internal fun DesktopPlayerSheet(
             withFrameNanos { }
             DesktopTrackLog.log("player: priming for $primeKey")
             DesktopPlayerWarmup.heat(PRIME_HEAT_MS)
+            // Slow the first time, when every shader is still to be made; quick after.
+            val primeSlower = if (primedOnce) 1 else PRIME_SLOWER
             try {
                 run {
                     primeOffset.snapTo(heightPx)
@@ -144,10 +146,14 @@ internal fun DesktopPlayerSheet(
                     priming = true
                     val play: suspend () -> Unit = {
                         kotlinx.coroutines.coroutineScope {
-                            launch { primeOffset.animateTo(0f, tween(SHEET_OPEN_MS, easing = FastOutSlowInEasing)) }
+                            // Played slower than the real thing: every new kind of draw costs the GPU
+                            // a shader compile on the frame it first appears, and at full speed
+                            // several landed on one frame — a hitch of a hundred milliseconds or more
+                            // on the page behind. Drawn out, they come a few to a frame.
+                            launch { primeOffset.animateTo(0f, tween(SHEET_OPEN_MS * primeSlower, easing = FastOutSlowInEasing)) }
                             // Counts the frames, for the two pixels below.
                             val sweep = launch { while (true) withFrameNanos { primeFrame++ } }
-                            primeEntrance.animateTo(1f, tween(PLAYER_ENTRANCE_MS, easing = PLAYER_ENTRANCE_EASING))
+                            primeEntrance.animateTo(1f, tween(PLAYER_ENTRANCE_MS * primeSlower, easing = PLAYER_ENTRANCE_EASING))
                             // And held there a few frames: the frame the entrance ends on is the
                             // first with everything opaque and in place, and ending the priming
                             // there, that was never drawn.
@@ -156,6 +162,8 @@ internal fun DesktopPlayerSheet(
                         }
                     }
                     if (DesktopFrameProfiler.enabled) DesktopFrameProfiler.measure("priming", 160, play) else play()
+                // Shaders are made once a launch: later primings (a new track's cover) need not crawl.
+                primedOnce = true
                 }
             } finally {
                 priming = false
@@ -325,6 +333,10 @@ internal const val PLAYER_ENTRANCE_MS = 1_100
 internal val PLAYER_ENTRANCE_EASING = androidx.compose.animation.core.CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 
 private const val PRIME_HOLD_FRAMES = 6
+private const val PRIME_SLOWER = 4
+
+/** Whether the player has been primed once this launch — see [PRIME_SLOWER]. */
+@Volatile private var primedOnce = false
 private const val PRIME_HEAT_MS = 300L
 private const val PRIME_DELAY_MS = 1_500L
 

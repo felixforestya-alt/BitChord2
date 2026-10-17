@@ -495,7 +495,7 @@ private const val WORDS_SCALE = 1.12f
 private const val WORDS_FONT_SCALE = 1.14f
 
 /** How far the like and menu buttons hang below the artist, to the right of the words. */
-private val CREDITS_BUTTONS_DROP = 26.dp
+private val CREDITS_BUTTONS_DROP = 20.dp
 
 /** One revolution every this many seconds — a slow, legible spin rather than a blur. */
 private const val DISC_PERIOD_S = 3.2f

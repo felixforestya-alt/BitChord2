@@ -3484,20 +3484,34 @@ fun BitChordDesktopApp() {
             delay(3_000)
             if (System.getenv("BITCHORD_SELFTEST_SCROLL") == "1") {
                 snapshotFlow { homeState is UiState.Success }.first { it }
-                delay(2_000)
+                delay(3_000)
                 fun where(label: String) = DesktopTrackLog.log(
-                    "selftest scroll $label: first=${homeListState.firstVisibleItemIndex} offset=${homeListState.firstVisibleItemScrollOffset} items=${homeListState.layoutInfo.totalItemsCount}",
+                    "selftest scroll $label: first=${homeListState.firstVisibleItemIndex} offset=${homeListState.firstVisibleItemScrollOffset} " +
+                        "song=${selectedSong != null} signedIn=$youtubeSignedIn hero=${heroAnchor.present} item0=${homeListState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == 0 }?.size}",
                 )
+                // Real wheel events, through the window as a mouse sends them, so every handler
+                // on the way — the page's, the card's, the scrollbar — has its say.
+                val target = java.awt.Window.getWindows().filterIsInstance<androidx.compose.ui.awt.ComposeWindow>().firstOrNull()
+                fun notch(down: Boolean) {
+                    val window = target ?: return
+                    val component = generateSequence(listOf<java.awt.Component>(window)) { level ->
+                        level.flatMap { (it as? java.awt.Container)?.components?.toList().orEmpty() }.ifEmpty { null }
+                    }.flatten().lastOrNull { it.isShowing && it.width > 400 && it.height > 400 } ?: window
+                    javax.swing.SwingUtilities.invokeLater {
+                        component.dispatchEvent(
+                            java.awt.event.MouseWheelEvent(
+                                component, java.awt.event.MouseEvent.MOUSE_WHEEL, System.currentTimeMillis(), 0,
+                                (component.width * 0.55).toInt(), (component.height * 0.6).toInt(), 0, false,
+                                java.awt.event.MouseWheelEvent.WHEEL_UNIT_SCROLL, 3, if (down) 1 else -1,
+                            ),
+                        )
+                    }
+                }
                 where("start")
-                repeat(12) { homeWheel.add(400f); delay(120) }
-                delay(1_200)
-                where("after down")
-                repeat(6) { homeWheel.add(-400f); delay(120) }
-                delay(1_200)
-                where("after up x6")
-                repeat(30) { homeWheel.add(-400f); delay(120) }
-                delay(1_500)
-                where("after up x30")
+                repeat(14) { notch(true); delay(250); where("down ${it + 1}") }
+                delay(3_000)
+                where("rest")
+                repeat(18) { notch(false); delay(250); where("up ${it + 1}") }
                 DesktopTrackLog.log("selftest done")
                 return@LaunchedEffect
             }
@@ -3675,8 +3689,10 @@ fun BitChordDesktopApp() {
             if (header <= 0) return@snap null
             when {
                 delta > 0f && first == 0 && header - offset > 1 -> (header - offset).toFloat()
-                delta < 0f && first == 0 && offset > 0 -> -offset.toFloat()
-                delta < 0f && first == 1 && offset == 0 -> -header.toFloat()
+                // Up, only the last stretch: with the card already mostly back in view. Taken from
+                // further down — as soon as any of the header showed, or from the row under it —
+                // one notch threw the page to the very top while a track was playing.
+                delta < 0f && first == 0 && offset > 0 && offset < header * 0.4f -> -offset.toFloat()
                 else -> null
             }
         }

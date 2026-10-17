@@ -754,3 +754,71 @@ private fun DrawScope.spectrum(bands: FloatArray, accent: Color) {
     drawPath(ridge, Color.White.copy(alpha = 0.22f), style = Stroke(width = 12f, cap = StrokeCap.Round), blendMode = BlendMode.Screen)
     drawPath(ridge, Color.White.copy(alpha = 0.9f), style = Stroke(width = 2.4f, cap = StrokeCap.Round))
 }
+
+/**
+ * Colour that moves behind Home: soft lights in the playing cover's hues drifting slowly under a
+ * dark veil, so the page stays readable and feels alive — BitChord²'s, as the desktop has it.
+ * Redrawn about twenty times a second at half the screen's resolution: it moves slowly, it is
+ * behind everything, and on a phone it should cost next to nothing. Still while [covered] — the
+ * player over it — and nothing drawn at all with no track.
+ */
+@Composable
+fun LivingBackdrop(coverUrl: String?, covered: () -> Boolean, modifier: Modifier = Modifier) {
+    val palette = rememberDiscPalette(coverUrl)
+    val accent by androidx.compose.animation.animateColorAsState(
+        if (coverUrl != null) palette.vivid else Color(0xFF5B4BFF),
+        tween(2_000),
+        label = "livingAccent",
+    )
+    val shown by animateFloatAsState(if (coverUrl != null) 1f else 0f, tween(900), label = "livingShown")
+    val time = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        var last = System.nanoTime()
+        while (true) {
+            kotlinx.coroutines.delay(50)
+            val now = System.nanoTime()
+            if (!covered()) time.floatValue += (now - last) / 1_000_000_000f
+            last = now
+        }
+    }
+    if (shown <= 0f) return
+    BoxWithConstraints(modifier.graphicsLayer { alpha = shown }) {
+        Canvas(
+            Modifier
+                .size(maxWidth / VIS_SCALE, maxHeight / VIS_SCALE)
+                .graphicsLayer {
+                    scaleX = VIS_SCALE
+                    scaleY = VIS_SCALE
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                    compositingStrategy = CompositingStrategy.Offscreen
+                },
+        ) {
+            val t = time.floatValue
+            val lights = listOf(
+                accent.discHueShifted(0f, 0.85f),
+                accent.discHueShifted(45f, 0.7f),
+                accent.discHueShifted(-50f, 0.65f),
+                accent.discHueShifted(170f, 0.45f),
+            )
+            lights.forEachIndexed { i, colour ->
+                val cx = size.width * (0.5f + 0.42f * sin(t * (0.045f + i * 0.011f) + i * 1.9f))
+                val cy = size.height * (0.3f + 0.34f * cos(t * (0.037f + i * 0.009f) + i * 2.6f))
+                val radius = size.maxDimension * (0.42f + 0.06f * sin(t * 0.3f + i))
+                drawCircle(
+                    Brush.radialGradient(
+                        0f to colour.copy(alpha = 0.34f),
+                        0.6f to colour.copy(alpha = 0.10f),
+                        1f to Color.Transparent,
+                        center = Offset(cx, cy),
+                        radius = radius,
+                    ),
+                    radius = radius,
+                    center = Offset(cx, cy),
+                    blendMode = BlendMode.Screen,
+                )
+            }
+            // The veil that keeps the page readable, deepening toward the bottom bar.
+            drawRect(Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.30f), 1f to Color.Black.copy(alpha = 0.70f)))
+        }
+    }
+}

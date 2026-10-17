@@ -276,6 +276,8 @@ import com.music.bitchord.ui.icons.BitChordIcons
 import androidx.media3.common.Player
 import com.music.bitchord.data.YtMusicRepository
 import com.music.bitchord.bc2.HomeCustomizeSheet
+import com.music.bitchord.bc2.Bc2ExploreScreen
+import com.music.bitchord.ui.player.LivingBackdrop
 import com.music.bitchord.bc2.HomeShelves
 import com.music.bitchord.bc2.JamCard
 import com.music.bitchord.bc2.JamSeeds
@@ -1058,6 +1060,8 @@ private fun BitChordApp(
 
     val homeListState = rememberLazyListState()
     val exploreListState = rememberLazyListState()
+    // BitChord²'s Explore is a grid — see [Bc2ExploreScreen].
+    val exploreGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     val moodGenreListState = rememberLazyListState()
     val libraryListState = rememberLazyListState()
     val historyListState = rememberLazyListState()
@@ -3162,7 +3166,14 @@ private fun BitChordApp(
                             contentPadding = listPadding,
                         )
                     } else when (key.removePrefix(TAB_KEY).toIntOrNull() ?: selectedTab) {
-                        TAB_HOME -> HomeScreen(
+                        TAB_HOME -> Box(Modifier.fillMaxSize()) {
+                        // BitChord²: Home lit by what is playing, as the desktop's is.
+                        LivingBackdrop(
+                            coverUrl = player.song?.thumbnailUrl,
+                            covered = { playerDock.openFraction() >= 0.99f },
+                            modifier = Modifier.matchParentSize(),
+                        )
+                        HomeScreen(
                             state = visibleHome,
                             listState = homeListState,
                             currentSong = player.song,
@@ -3198,6 +3209,7 @@ private fun BitChordApp(
                             onLoadMore = viewModel::loadMoreHome,
                             loadingMore = homeLoadingMore,
                             recentlyPlayedLoading = homeRecentlyPlayedLoading,
+                            onCustomize = { homeCustomizeOpen = true },
                             lead = if (jamShown) {
                                 {
                                     val jamPlaying = MyJam.isJam(player.song?.radioName)
@@ -3211,7 +3223,6 @@ private fun BitChordApp(
                                         onPlayPause = togglePlayPause,
                                         onSkip = { controller?.seekToNextMediaItem() },
                                         onTune = { jamSettingsOpen = true },
-                                        onCustomizeHome = { homeCustomizeOpen = true },
                                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
                                     )
                                 }
@@ -3219,6 +3230,7 @@ private fun BitChordApp(
                                 null
                             },
                         )
+                        }
                         TAB_EXPLORE -> selectedMoodGenre?.let { category ->
                             MoodGenrePlaylistsScreen(
                                 title = category.title,
@@ -3251,9 +3263,9 @@ private fun BitChordApp(
                                 onRetry = { viewModel.openMoodGenre(category) },
                                 contentPadding = listPadding,
                             )
-                        } ?: ExploreScreen(
+                        } ?: Bc2ExploreScreen(
                             state = exploreState,
-                            listState = exploreListState,
+                            gridState = exploreGridState,
                             onCategoryClick = viewModel::openMoodGenre,
                             onRetry = viewModel::loadExplore,
                             refreshing = MainViewModel.Feed.EXPLORE in refreshing,

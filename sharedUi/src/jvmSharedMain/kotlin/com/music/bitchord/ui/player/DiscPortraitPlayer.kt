@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,6 +45,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -148,15 +153,17 @@ internal fun DiscPortraitPlayer(
     val density = LocalDensity.current
     val off = remember { discLayersOff() }
 
-    BoxWithConstraints(modifier.fillMaxSize().background(Color.Black)) {
+    // Clipped to the sheet: pulled down, the disc goes with it rather than hanging over the page.
+    BoxWithConstraints(modifier.fillMaxSize().clipToBounds().background(Color.Black)) {
         val width = maxWidth
         val height = maxHeight
         val statusTop = with(density) { stableStatusBarInsets().getTop(this).toDp() }
-        // Across the screen with a margin, not past it: the whole circle across, cut only by the top.
-        val discSize = min(width * 0.94f, height * 0.5f)
-        // The disc's centre a third of its radius below the top of the screen: the lower two
-        // thirds of it in view, cut by the top edge as the desktop's is by the left.
-        val discCentreY = statusTop + discSize * 0.18f
+        // Where the disc's lower edge sits: two thirds of a screen-wide disc below the top.
+        val discBottom = statusTop + min(width * 0.94f, height * 0.5f) * 0.68f
+        // A bigger disc in that same stretch of screen: wider than the screen and higher up, so
+        // more of its print shows rather than more of the screen going to it.
+        val discSize = min(width * 1.22f, height * 0.62f)
+        val discCentreY = discBottom - discSize / 2
         // Risen with a panel up: a band of disc across the top, the hub just under the edge.
         val discRise = discCentreY + discSize * 0.5f - (statusTop + PANEL_BAND)
 
@@ -200,15 +207,34 @@ internal fun DiscPortraitPlayer(
             if ("spheres" !in off) DiscWireSpheres(clock = { clock.floatValue }, tint = Color.White, modifier = Modifier.fillMaxSize())
             if ("scan" !in off) DiscScanlines(Modifier.fillMaxSize().graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen })
 
-            // The disc, always the song's cover. A new cover rolls in from the side.
-            if ("disc" !in off) AnimatedContent(
+            // The disc, always the song's cover. A new cover rolls in from the side. Faded out
+            // toward the top, so it passes under the status bar — and, as the sheet is pulled
+            // down, under the notification shade's edge — softly rather than cut.
+            val fadeTo = with(density) { (statusTop + DISC_FADE).toPx() }
+            if ("disc" !in off) Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(
+                            Brush.verticalGradient(0f to Color.Transparent, 1f to Color.Black, startY = 0f, endY = fadeTo),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    },
+            ) {
+            AnimatedContent(
                 targetState = cover,
                 transitionSpec = {
                     (slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { -it } + fadeIn(tween(500))) togetherWith
                         (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { it } + fadeOut(tween(450)))
                 },
+                // Wider than the screen, so laid out unbounded and centred across it, rather than
+                // squeezed to the screen's width.
                 modifier = Modifier
-                    .offset(x = (width - discSize) / 2, y = discCentreY - discSize / 2)
+                    .fillMaxWidth()
+                    .wrapContentSize(Alignment.TopCenter, unbounded = true)
+                    .offset(y = discCentreY - discSize / 2)
                     .graphicsLayer {
                         translationY = -discRise.toPx() * panelT
                         val s = 1f - 0.12f * panelT
@@ -229,8 +255,9 @@ internal fun DiscPortraitPlayer(
                     angle = { discAngle.floatValue },
                     level = { AudioSpectrum.levelAt(System.nanoTime()).also { clock.floatValue } },
                     glow = glow,
-                    modifier = Modifier.size(discSize),
+                    modifier = Modifier.requiredSize(discSize),
                 )
+            }
             }
         }
 
@@ -290,8 +317,8 @@ internal fun DiscPortraitPlayer(
                             }
                             Spacer(Modifier.height(18.dp))
                         }
-                        PlayerPane.Lyrics -> Box(Modifier.fillMaxSize()) { lyricsPane() }
-                        PlayerPane.Queue -> Box(Modifier.fillMaxSize().padding(horizontal = 8.dp)) { queuePane() }
+                        PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = PANE_GUTTER)) { lyricsPane() }
+                        PlayerPane.Queue -> Box(Modifier.fillMaxSize().padding(horizontal = PANE_GUTTER)) { queuePane() }
                     }
                 }
             }
@@ -329,6 +356,12 @@ private const val DISC_PERIOD_S = 3.2f
 private val PANEL_BAND = 84.dp
 
 private val DECK_SHAPE = RoundedCornerShape(30.dp)
+
+/** Margin each side of the lyrics and the queue: the deck's own, so the three line up. */
+private val PANE_GUTTER = 22.dp
+
+/** How far below the status bar the disc has faded in fully. */
+private val DISC_FADE = 56.dp
 
 private val EASE_OUT_EXPO = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 

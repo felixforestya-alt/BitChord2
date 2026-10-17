@@ -36,7 +36,6 @@ import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -85,7 +84,7 @@ import kotlin.math.sin
 /**
  * My Jam's card at the head of Home, lit in the colours of what is playing: before it plays, one
  * press starts it; while it plays, it shows what the jam is on, skips, and pauses. The jam's own
- * settings are on the card, and Home's beside them.
+ * settings are on the card; Home's are by Home's heading.
  */
 @Composable
 internal fun JamCard(
@@ -98,7 +97,6 @@ internal fun JamCard(
     onPlayPause: () -> Unit,
     onSkip: () -> Unit,
     onTune: () -> Unit,
-    onCustomizeHome: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val palette = rememberDiscPalette(coverUrl)
@@ -114,7 +112,7 @@ internal fun JamCard(
     Box(
         modifier
             .fillMaxWidth()
-            .height(96.dp)
+            .height(124.dp)
             .clip(RoundedCornerShape(26.dp))
             .background(Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f), light.copy(alpha = 0.55f), deep.copy(alpha = 0.85f))))
             .drawBehind {
@@ -137,25 +135,25 @@ internal fun JamCard(
             .clickable(enabled = !starting, onClick = if (playing) onPlayPause else onPlay),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Row(Modifier.padding(start = 18.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(start = 20.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
-                    .size(52.dp)
+                    .size(64.dp)
                     .clip(CircleShape)
                     .background(Color.White)
                     .clickable(enabled = !starting, onClick = if (playing) onPlayPause else onPlay),
                 contentAlignment = Alignment.Center,
             ) {
                 when {
-                    starting -> CircularProgressIndicator(Modifier.size(22.dp), color = Color.Black, strokeWidth = 2.5.dp)
+                    starting -> CircularProgressIndicator(Modifier.size(26.dp), color = Color.Black, strokeWidth = 2.5.dp)
                     moving -> LevelBars({ phase.value }, Color.Black)
-                    else -> Icon(Icons.Rounded.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(30.dp))
+                    else -> Icon(Icons.Rounded.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(38.dp))
                 }
             }
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(16.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(MyJam.radioName, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp, maxLines = 1)
+                    Text(MyJam.radioName, color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp, maxLines = 1)
                     if (playing) {
                         Spacer(Modifier.width(8.dp))
                         Text(
@@ -178,14 +176,13 @@ internal fun JamCard(
                         ).ifEmpty { listOf(bc2("Бесконечная музыка для тебя", "Endless music picked for you")) }.joinToString(" · ")
                     },
                     color = Color.White.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
             if (playing) CardIcon(Icons.Rounded.SkipNext, bc2("Дальше", "Next"), onSkip)
             CardIcon(Icons.Rounded.Tune, bc2("Настройки джема", "Jam settings"), onTune)
-            CardIcon(Icons.Rounded.ViewAgenda, bc2("Настроить главную", "Customize Home"), onCustomizeHome)
         }
     }
 }
@@ -193,18 +190,18 @@ internal fun JamCard(
 @Composable
 private fun CardIcon(icon: ImageVector, label: String, onClick: () -> Unit) {
     Box(
-        Modifier.padding(start = 6.dp).size(38.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f)).clickable(onClick = onClick),
+        Modifier.padding(start = 8.dp).size(46.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f)).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, label, tint = Color.White, modifier = Modifier.size(20.dp))
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
 
 /** A small moving level, four bars, drawn so they follow [phase] by redrawing alone. */
 @Composable
 private fun LevelBars(phase: () -> Float, color: Color) {
-    Canvas(Modifier.size(width = 4.dp * 4 + 3.dp * 3, height = 22.dp)) {
-        val bar = 4.dp.toPx()
+    Canvas(Modifier.size(width = 5.dp * 4 + 3.dp * 3, height = 26.dp)) {
+        val bar = 5.dp.toPx()
         val gap = 3.dp.toPx()
         val corner = CornerRadius(2.dp.toPx())
         val p = phase()

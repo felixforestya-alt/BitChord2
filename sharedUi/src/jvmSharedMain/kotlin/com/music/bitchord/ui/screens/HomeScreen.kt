@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.rounded.Dashboard
 import com.music.bitchord.ui.components.longPressMenuClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -151,6 +152,8 @@ fun HomeScreen(
     header: (@Composable () -> Unit)? = null,
     /** Right under the heading, above the shelves — BitChord²'s My Jam. */
     lead: (@Composable () -> Unit)? = null,
+    /** Opens Home's own settings, from a button beside the heading — BitChord²'s. */
+    onCustomize: (() -> Unit)? = null,
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
 
@@ -175,7 +178,7 @@ fun HomeScreen(
             },
         ) {
             if (title != null) {
-                item { HomeTitle(title) }
+                item { HomeTitle(title, onCustomize = onCustomize) }
             }
             if (header != null) {
                 item(key = "header") { header() }
@@ -516,7 +519,7 @@ fun CompactTrackRow(
  * system font scale.
  */
 @Composable
-private fun HomeTitle(title: String, modifier: Modifier = Modifier) {
+private fun HomeTitle(title: String, modifier: Modifier = Modifier, onCustomize: (() -> Unit)? = null) {
     val style = MaterialTheme.typography.displayLarge
     val logoHeight = with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() }
     Column(modifier = modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
@@ -529,11 +532,32 @@ private fun HomeTitle(title: String, modifier: Modifier = Modifier) {
                 .height(logoHeight)
                 .aspectRatio(LOGO_ASPECT),
         )
-        Text(
-            text = title,
-            style = style,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
+        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                style = style,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
+            )
+            if (onCustomize != null) {
+                // Home's settings by its heading, as the desktop has them by its greeting.
+                androidx.compose.foundation.layout.Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.10f))
+                        .clickable(onClick = onCustomize),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Rounded.Dashboard,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

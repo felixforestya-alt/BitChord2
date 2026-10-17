@@ -149,6 +149,8 @@ fun HomeScreen(
     isPlaying: Boolean = false,
     /** Scrolls in at the head of the feed, above everything — the desktop's greeting. */
     header: (@Composable () -> Unit)? = null,
+    /** Right under the heading, above the shelves — BitChord²'s My Jam. */
+    lead: (@Composable () -> Unit)? = null,
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
 
@@ -177,6 +179,9 @@ fun HomeScreen(
             }
             if (header != null) {
                 item(key = "header") { header() }
+            }
+            if (lead != null) {
+                item(key = "lead") { lead() }
             }
             if (!signedIn && onSignIn != null) {
                 item {

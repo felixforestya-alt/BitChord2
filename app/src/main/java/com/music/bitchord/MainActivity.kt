@@ -275,6 +275,12 @@ import com.music.bitchord.ui.components.FieldConfig
 import com.music.bitchord.ui.icons.BitChordIcons
 import androidx.media3.common.Player
 import com.music.bitchord.data.YtMusicRepository
+import com.music.bitchord.bc2.HomeCustomizeSheet
+import com.music.bitchord.bc2.HomeShelves
+import com.music.bitchord.bc2.JamCard
+import com.music.bitchord.bc2.JamSeeds
+import com.music.bitchord.bc2.JamSettingsSheet
+import com.music.bitchord.bc2.MyJam
 import com.music.bitchord.ui.player.NowPlayingScreen
 import com.music.bitchord.ui.player.PlayerSheetMotion
 import androidx.compose.ui.geometry.Offset
@@ -713,6 +719,13 @@ private fun BitChordApp(
     )
 
     val homeState by viewModel.home.collectAsStateWithLifecycle()
+    // Home as the listener arranged it: their order, without the shelves they took off.
+    val hiddenShelves by HomeShelves.hidden.collectAsStateWithLifecycle()
+    val shelfOrder by HomeShelves.order.collectAsStateWithLifecycle()
+    val jamShown by MyJam.shown.collectAsStateWithLifecycle()
+    val visibleHome = remember(homeState, hiddenShelves, shelfOrder) {
+        (homeState as? UiState.Success)?.let { UiState.Success(HomeShelves.visible(it.data)) } ?: homeState
+    }
     val homeLoadingMore by viewModel.homeLoadingMore.collectAsStateWithLifecycle()
     val homeRecentlyPlayedLoading by viewModel.homeRecentlyPlayedLoading.collectAsStateWithLifecycle()
 
@@ -1566,6 +1579,75 @@ private fun BitChordApp(
                 ).show()
             }
         }
+    }
+    // ---- BitChord²: My Jam, and Home's own settings — see [MyJam], [HomeShelves] ----------------
+    var jamStarting by remember { mutableStateOf(false) }
+    var jamSettingsOpen by remember { mutableStateOf(false) }
+    var homeCustomizeOpen by remember { mutableStateOf(false) }
+    /**
+     * Starts My Jam: its first tracks from the listener's likes, history or a playlist, as the jam
+     * is set to, in place of the queue — loaded before the player is touched, as [startRadio] is,
+     * so a failed request leaves what was playing alone. AutoPlay grows it from there.
+     */
+    val startJam: () -> Unit = start@{
+        if (jamStarting || controller == null || refusedByHost()) return@start
+        jamStarting = true
+        val request = ++playRequestGeneration
+        scope.launch {
+            try {
+                val liked = (viewModel.library.value as? UiState.Success)?.data?.likedSongs.orEmpty()
+                val history = (viewModel.history.value as? UiState.Success)?.data
+                    ?: YtMusicRepository.history().getOrNull().orEmpty()
+                // Signed out there is no account to read: the feed's own picks, then.
+                val played = history.ifEmpty {
+                    (viewModel.home.value as? UiState.Success)?.data.orEmpty()
+                        .flatMap { it.items }.mapNotNull { item ->
+                            item.videoId?.let { id ->
+                                Song(
+                                    videoId = id,
+                                    title = item.title,
+                                    artist = InnertubeParser.artistFromSubtitle(item.subtitle),
+                                    thumbnailUrl = item.thumbnailUrl,
+                                )
+                            }
+                        }
+                }
+                val fromPlaylist = if (MyJam.seeds.value == JamSeeds.PLAYLIST) {
+                    MyJam.playlist.value?.first?.let { YtMusicRepository.playlistEntries(it).getOrNull() }.orEmpty()
+                } else {
+                    emptyList()
+                }
+                val batch = MyJam.start(liked, played, fromPlaylist)
+                val activeController = controller
+                if (request != playRequestGeneration || activeController == null) return@launch
+                if (batch.isEmpty()) {
+                    Toast.makeText(context, R.string.couldnt_load_tracks, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val station = batch.mapIndexed { i, song ->
+                    if (i == 0) song.copy(queueTier = QueueTier.CONTEXT, radioName = MyJam.radioName, playbackSource = MyJam.radioName) else song
+                }
+                activeController.beginRadioQueue()
+                activeRadioSeed = null
+                activeController.playSongs(station, 0)
+                activeController.commitRadioQueue()
+            } finally {
+                jamStarting = false
+            }
+        }
+    }
+    if (jamSettingsOpen) {
+        JamSettingsSheet(
+            playlists = playlists.map { it.browseId to it.title },
+            onRestart = startJam,
+            onDismiss = { jamSettingsOpen = false },
+        )
+    }
+    if (homeCustomizeOpen) {
+        HomeCustomizeSheet(
+            shelfTitles = (homeState as? UiState.Success)?.data?.map { it.title }.orEmpty(),
+            onDismiss = { homeCustomizeOpen = false },
+        )
     }
     val addToQueue: (Song) -> Unit = { song ->
         scope.launch {
@@ -3081,7 +3163,7 @@ private fun BitChordApp(
                         )
                     } else when (key.removePrefix(TAB_KEY).toIntOrNull() ?: selectedTab) {
                         TAB_HOME -> HomeScreen(
-                            state = homeState,
+                            state = visibleHome,
                             listState = homeListState,
                             currentSong = player.song,
                             isPlaying = player.isPlaying,
@@ -3116,6 +3198,26 @@ private fun BitChordApp(
                             onLoadMore = viewModel::loadMoreHome,
                             loadingMore = homeLoadingMore,
                             recentlyPlayedLoading = homeRecentlyPlayedLoading,
+                            lead = if (jamShown) {
+                                {
+                                    val jamPlaying = MyJam.isJam(player.song?.radioName)
+                                    JamCard(
+                                        starting = jamStarting,
+                                        playing = jamPlaying,
+                                        paused = jamPlaying && !player.isPlaying,
+                                        current = player.song.takeIf { jamPlaying },
+                                        coverUrl = player.song?.thumbnailUrl,
+                                        onPlay = startJam,
+                                        onPlayPause = togglePlayPause,
+                                        onSkip = { controller?.seekToNextMediaItem() },
+                                        onTune = { jamSettingsOpen = true },
+                                        onCustomizeHome = { homeCustomizeOpen = true },
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                         )
                         TAB_EXPLORE -> selectedMoodGenre?.let { category ->
                             MoodGenrePlaylistsScreen(

@@ -78,7 +78,7 @@ import kotlin.random.Random
 internal enum class DiscVisualizerStyle { AURORA, RING, WAVES, PARTICLES, SPECTRUM, NONE }
 
 /** A cover's colour as the room is lit by it: a light, a shadow, and an ink. */
-internal class DiscPalette(val vivid: Color, val deep: Color, val ink: Color) {
+class DiscPalette(val vivid: Color, val deep: Color, val ink: Color) {
     companion object {
         val Default = DiscPalette(Color(0xFF6E7488), Color(0xFF0B0C10), Color(0xFF050608))
     }
@@ -107,7 +107,7 @@ internal fun rememberDiscArtwork(url: String?, px: Int, pixelAccess: Boolean = f
  * it has its colour from the first frame rather than fading from grey.
  */
 @Composable
-internal fun rememberDiscPalette(url: String?): DiscPalette {
+fun rememberDiscPalette(url: String?): DiscPalette {
     val context = LocalPlatformContext.current
     val palette by produceState(url?.let(PALETTES::get) ?: DiscPalette.Default, url) {
         if (url == null || PALETTES.containsKey(url)) return@produceState

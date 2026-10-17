@@ -1,5 +1,6 @@
 package com.music.bitchord.playback
 
+import com.music.bitchord.bc2.MyJam
 import com.music.bitchord.data.YtMusicRepository
 import com.music.bitchord.data.listentogether.ListenTogether
 import com.music.bitchord.data.model.SearchFilter
@@ -101,6 +102,12 @@ suspend fun loadAutoplayTracks(
     seedSong: Song,
     limit: Int = MAX_QUEUED_AUTOPLAY,
 ): Result<List<Song>> {
+    // My Jam grows from its own seeds, not the station of the last track — see [MyJam]. A jam
+    // whose seeds this process no longer has carries on as the plain station, still named for it.
+    if (MyJam.isJam(seedSong.radioName)) {
+        val jam = MyJam.more(existing, limit)
+        if (jam.isNotEmpty()) return Result.success(jam.map { it.asQueueEntry(QueueTier.AUTOPLAY) })
+    }
     val seed = youtubeSeedFor(seedSong) ?: return Result.success(emptyList())
     val related = YtMusicRepository.radio(seed).getOrElse { return Result.failure(it) }
     val extra = QueueBuilder.extend(existing, related, limit)

@@ -120,7 +120,10 @@ android {
         }
         create("prod") {
             dimension = "env"
-            // Matches defaultConfig — this is the package already shipped/installed.
+            // BitChord², the fork: a package of its own, so it installs beside the original
+            // BitChord rather than over it.
+            applicationId = "com.felixforestya.bitchord2"
+            resValue("string", "app_name", "BitChord²")
         }
     }
 

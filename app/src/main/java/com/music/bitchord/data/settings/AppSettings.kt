@@ -492,6 +492,9 @@ object AppSettings {
      */
     val legacyMeshGradient = MutableStateFlow(false)
 
+    /** BitChord²'s disc player: the cover spinning on a CD at the top of the screen. */
+    val discPlayer = MutableStateFlow(true)
+
     /** Restores the expanded player to the surface the listener left open. */
     val lastPlayerScreen = MutableStateFlow(LastPlayerScreen.MAIN)
 
@@ -886,6 +889,7 @@ object AppSettings {
         signatureApiUrl.value = normalizeSignatureApiUrl(prefs.getString(KEY_SIGNATURE_API_URL, "").orEmpty())
         fullBleedArtwork.value = prefs.getBoolean(KEY_FULL_BLEED_ARTWORK, true)
         legacyMeshGradient.value = prefs.getBoolean(KEY_LEGACY_MESH_GRADIENT, false)
+        discPlayer.value = prefs.getBoolean(KEY_DISC_PLAYER, true)
         lastPlayerScreen.value = runCatching {
             LastPlayerScreen.valueOf(
                 prefs.getString(KEY_LAST_PLAYER_SCREEN, null) ?: LastPlayerScreen.MAIN.name,
@@ -1469,6 +1473,11 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_LEGACY_MESH_GRADIENT, value).apply()
     }
 
+    fun setDiscPlayer(value: Boolean) {
+        discPlayer.value = value
+        prefs.edit().putBoolean(KEY_DISC_PLAYER, value).apply()
+    }
+
     fun setLastPlayerScreen(value: LastPlayerScreen) {
         if (lastPlayerScreen.value == value) return
         lastPlayerScreen.value = value
@@ -2042,6 +2051,7 @@ object AppSettings {
     private const val KEY_SIGNATURE_API_URL = "signature_api_url"
     private const val KEY_FULL_BLEED_ARTWORK = "full_bleed_artwork"
     private const val KEY_LEGACY_MESH_GRADIENT = "legacy_mesh_gradient"
+    private const val KEY_DISC_PLAYER = "disc_player"
     private const val KEY_LAST_PLAYER_SCREEN = "last_player_screen"
     private const val KEY_SYNCED_LYRICS = "synced_lyrics"
     private const val KEY_LYRICS_SOURCES = "lyrics_sources"

@@ -1,5 +1,6 @@
 package com.music.bitchord.playback.audio
 
+import com.music.bitchord.ui.player.AudioSpectrum
 import android.util.Log
 import com.music.bitchord.BuildConfig
 import com.music.bitchord.playback.EqualizerProcessor
@@ -84,10 +85,15 @@ class DspChain(
         // see; the loudness stage's limiter is what catches whatever survives.
         loudness.holdLimiter = equalizer.isShaping
         loudness.process(block)
+        // What is about to be heard, for the disc player's visualiser — only while it is up.
+        if (AudioSpectrum.wanted) {
+            AudioSpectrum.feed(block.samples, block.sampleCount, block.channelCount, currentSampleRate, OUTPUT_LATENCY_NANOS)
+        }
     }
 
     @Suppress("DEPRECATION")
     override fun flush() {
+        AudioSpectrum.reset()
         spatial.flush()
         equalizer.flush()
         transition.flush()
@@ -104,5 +110,11 @@ class DspChain(
 
     companion object {
         private const val TAG = "DspChain"
+
+        /**
+         * How long a block takes from here to the speaker: the sink's track buffer, roughly. The
+         * visualiser shows each block this much later, in step with what is heard.
+         */
+        private const val OUTPUT_LATENCY_NANOS = 180_000_000L
     }
 }

@@ -275,8 +275,11 @@ internal fun DiscPortraitPlayer(
                     targetState = cover,
                     transitionSpec = {
                         val dir = if (forward.value) 1 else -1
-                        (slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { it * dir } + fadeIn(tween(500))) togetherWith
-                            (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { -it * dir } + fadeOut(tween(450)))
+                        ((slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { it * dir } + fadeIn(tween(500))) togetherWith
+                            (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { -it * dir } + fadeOut(tween(450))))
+                            // Not cut to the disc's own square on the way: it slides across the
+                            // room, fading, rather than out of a window with hard edges.
+                            .using(androidx.compose.animation.SizeTransform(clip = false))
                     },
                     // Bigger than the screen, so laid out unbounded and placed by its middle,
                     // rather than squeezed to fit.
@@ -362,7 +365,7 @@ internal fun DiscPortraitPlayer(
                                         color = Color.White,
                                         fontFamily = androidx.compose.material3.MaterialTheme.typography.displayLarge.fontFamily,
                                         fontWeight = FontWeight.Bold,
-                                        fontSize = if (wide) 48.sp else 46.sp,
+                                        fontSize = if (wide) 42.sp else 46.sp,
                                         letterSpacing = (-1.4).sp,
                                         maxLines = 1,
                                         style = androidx.compose.ui.text.TextStyle(
@@ -405,17 +408,32 @@ internal fun DiscPortraitPlayer(
                                         if (lyricStrip != null) lyricStrip()
                                     }
                                 }
-                                Spacer(Modifier.height(if (wide) 0.dp else 10.dp))
+                                // A clear breath between the words and the deck below them.
+                                Spacer(Modifier.height(if (wide) 18.dp else 24.dp))
                             }
                             PlayerPane.Lyrics -> Box(Modifier.fillMaxSize().padding(horizontal = if (wide) 4.dp else PANE_GUTTER)) {
                                 // The line being sung in the middle of the stretch, as on the desktop,
-                                // and the pane's toggles big enough to hit, clear of the deck.
+                                // and the pane's toggles big enough to hit, clear of the deck. On its
+                                // side, set larger: there is width for it.
+                                val paneDensity = LocalDensity.current
                                 androidx.compose.runtime.CompositionLocalProvider(
                                     LocalLyricsFocusFraction provides 0.42f,
                                     LocalLyricsPaneControls provides LyricsPaneControls(scale = 1.3f, bottomGap = 14.dp),
+                                    LocalDensity provides androidx.compose.ui.unit.Density(
+                                        paneDensity.density * (if (wide) WIDE_PANE_SCALE else 1f),
+                                        paneDensity.fontScale * (if (wide) WIDE_PANE_SCALE else 1f),
+                                    ),
                                 ) { lyricsPane() }
                             }
-                            PlayerPane.Queue -> Box(Modifier.fillMaxSize().padding(horizontal = if (wide) 4.dp else PANE_GUTTER)) { queuePane() }
+                            PlayerPane.Queue -> Box(Modifier.fillMaxSize().padding(horizontal = if (wide) 4.dp else PANE_GUTTER)) {
+                                val paneDensity = LocalDensity.current
+                                androidx.compose.runtime.CompositionLocalProvider(
+                                    LocalDensity provides androidx.compose.ui.unit.Density(
+                                        paneDensity.density * (if (wide) WIDE_PANE_SCALE else 1f),
+                                        paneDensity.fontScale * (if (wide) WIDE_PANE_SCALE else 1f),
+                                    ),
+                                ) { queuePane() }
+                            }
                         }
                     }
                 }
@@ -525,7 +543,10 @@ private const val WORDS_FONT_SCALE = 1.14f
 private val CREDITS_BUTTONS_DROP = 20.dp
 
 /** On its side the track's words are larger still: there is width to spare for them. */
-private const val WIDE_WORDS_SCALE = 1.5f
+private const val WIDE_WORDS_SCALE = 1.38f
+
+/** And the lyrics and the queue on its side, larger than the deck beside them. */
+private const val WIDE_PANE_SCALE = 1.25f
 
 /** How much of the artist's line the like and menu buttons take at its end. */
 private val CREDITS_BUTTONS_WIDTH = 100.dp

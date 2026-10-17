@@ -432,7 +432,10 @@ object YtMusicRepository {
                 ?.filterIsInstance<SearchResult.Track>()
                 ?.map { it.song }
                 .orEmpty()
-            TrackMatcher.best(candidates, target)?.let { match ->
+            TrackMatcher.best(candidates, target)?.let { found ->
+                // A video search's rows are not all marked as videos; this one is, by where it came
+                // from — unmarked, the player treated the clip as a song and never showed it.
+                val match = found.copy(isVideo = true, isVideoOrigin = true)
                 Log.d(TAG, "video switch: '${song.title}' -> '${match.title}' ($query)")
                 videoVersionCache[song.videoId] = match
                 return match

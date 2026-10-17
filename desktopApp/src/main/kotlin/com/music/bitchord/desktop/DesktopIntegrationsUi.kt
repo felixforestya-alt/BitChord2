@@ -351,7 +351,13 @@ internal fun DesktopSpotifyImportDialog(
                 if (missed.isEmpty() && note == null) {
                     onDismiss()
                 } else {
-                    status = note
+                    // Where it went, so a playlist opened behind this dialog is not a mystery.
+                    status = note ?: DesktopStrings.format(
+                        "import_done",
+                        name,
+                        songs.size,
+                        fallback = "Saved \"%1\$s\" with %2\$d songs. It is open behind this window and in the sidebar's playlists.",
+                    )
                     unmatched = missed
                 }
             } catch (cancelled: CancellationException) {

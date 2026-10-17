@@ -293,7 +293,7 @@
     <string name="d_bar_tinted_subtitle">Плавающая панель плеера, сверху или снизу, окрашивается в цвет текущей обложки. Выключено — прозрачное стекло</string>
     <string name="my_wave">Моя волна</string>
     <string name="wave_subtitle">Бесконечная музыка под ваш вкус</string>
-    <string name="wave_settings">Настроить волну</string>
+    <string name="wave_settings">Настроить джем</string>
     <string name="home_customize">Настроить главную</string>
     <string name="wave_only_new">Только новое</string>
     <string name="wave_only_new_hint">Без треков, которые вы лайкали или слушали недавно</string>
@@ -327,4 +327,9 @@
     <string name="import_soundcloud_link">Это не ссылка на плейлист или трек SoundCloud.</string>
     <string name="import_yandex_link">Это не ссылка на плейлист или альбом Яндекс Музыки.</string>
     <string name="import_yandex_region">Яндекс Музыка не отвечает из вашей сети (вне некоторых стран она закрыта). Выключите VPN и попробуйте снова.</string>
+    <string name="import_done">Сохранено: «%1$s», треков: %2$d. Плейлист открыт за этим окном и есть в сайдбаре.</string>
+    <string name="home_order_reset">Исходный порядок</string>
+    <string name="my_jam">Мой джем</string>
+    <string name="jam_playing">играет</string>
+    <string name="jam_paused">пауза</string>
 </resources>

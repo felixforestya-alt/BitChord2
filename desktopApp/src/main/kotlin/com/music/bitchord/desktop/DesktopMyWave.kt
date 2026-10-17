@@ -38,7 +38,7 @@ internal object DesktopMyWave {
     private val persistence by lazy { DesktopPersistence() }
 
     /** The name every wave track carries in the queue, which is how AutoPlay knows to ask here. */
-    val radioName: String get() = DesktopStrings["my_wave", "My Wave"]
+    val radioName: String get() = DesktopStrings["my_jam", "My Jam"]
 
     private val _tuning = MutableStateFlow(
         runCatching { DesktopWaveTuning.valueOf(persistence.string(KEY_TUNING, DesktopWaveTuning.ALL.name)) }

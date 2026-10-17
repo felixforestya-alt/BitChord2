@@ -623,8 +623,11 @@ private fun HeroStage(
             style = style,
             clock = { tick.floatValue },
             accent = accent,
-            disc = { Offset(area.width / 2f, area.height / 2f) to min(area.width, area.height) * 0.30f },
+            // The card is wide and low: the ring and the particles go round an ellipse that fills
+            // it, not a small circle in its middle.
+            disc = { Offset(area.width / 2f, area.height / 2f) to area.height * 0.30f },
             focus = { Rect(0f, 0f, area.width.toFloat(), area.height.toFloat()) },
+            squash = (area.width * 0.40f / (area.height * 0.30f).coerceAtLeast(1f)).coerceAtLeast(1f),
             modifier = Modifier.fillMaxSize().softEdges().graphicsLayer {
                 val b = blur * 14f
                 renderEffect = if (b > 0.5f) BlurEffect(b, b, TileMode.Decal) else null

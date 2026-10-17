@@ -54,6 +54,12 @@ internal fun DesktopVisualizer(
     disc: () -> Pair<Offset, Float>,
     focus: () -> Rect,
     modifier: Modifier,
+    /**
+     * How much wider than tall the "disc" the ring and the particles go round is drawn: 1 in the
+     * player, where there is a disc; more in a wide, low card, where a circle in the middle sat
+     * small under the words and the particles burst from one point.
+     */
+    squash: Float = 1f,
 ) {
     if (style == DesktopVisualizerStyle.NONE) return
     val particles = remember { ParticleField(220) }
@@ -63,9 +69,9 @@ internal fun DesktopVisualizer(
         val energy = energyOf(bands)
         when (style) {
             DesktopVisualizerStyle.AURORA -> aurora(t, energy, accent)
-            DesktopVisualizerStyle.RING -> ring(t, bands, energy, accent, disc())
+            DesktopVisualizerStyle.RING -> ring(t, bands, energy, accent, disc(), squash)
             DesktopVisualizerStyle.WAVES -> waves(t, energy, accent)
-            DesktopVisualizerStyle.PARTICLES -> particles.step(this, t, energy, accent, disc())
+            DesktopVisualizerStyle.PARTICLES -> particles.step(this, t, energy, accent, disc(), squash)
             DesktopVisualizerStyle.SPECTRUM -> spectrum(bands, accent)
             DesktopVisualizerStyle.BARS -> bars(bands, accent, focus())
             DesktopVisualizerStyle.NONE -> Unit
@@ -148,7 +154,7 @@ private fun DrawScope.aurora(t: Float, energy: Energy, accent: Color) {
 
 // ---- Ring: a spectrum radiating from the disc's edge -------------------------------------
 
-private fun DrawScope.ring(t: Float, bands: FloatArray, energy: Energy, accent: Color, disc: Pair<Offset, Float>) {
+private fun DrawScope.ring(t: Float, bands: FloatArray, energy: Energy, accent: Color, disc: Pair<Offset, Float>, squash: Float = 1f) {
     val (centre, radius) = disc
     if (radius <= 0f) return
     val spokes = 160
@@ -164,12 +170,15 @@ private fun DrawScope.ring(t: Float, bands: FloatArray, energy: Energy, accent: 
         val angle = ((around * 360f + spin) * PI / 180f).toFloat()
         val length = radius * (0.02f + value * 0.34f)
         val dir = Offset(cos(angle), sin(angle))
-        val start = centre + dir * inner
-        val end = centre + dir * (inner + length)
+        // Round an ellipse when squashed: the rim stretched, the spokes still their own length.
+        val rim = Offset(dir.x * squash, dir.y)
+        val start = centre + rim * inner
+        val end = centre + rim * inner + dir * length
         drawLine(highlight.copy(alpha = 0.10f + value * 0.25f), start, end, strokeWidth = 9f, cap = StrokeCap.Round)
         drawLine(lerp(highlight, Color.White, value).copy(alpha = 0.55f + value * 0.45f), start, end, strokeWidth = 2.6f, cap = StrokeCap.Round)
     }
-    // A breathing halo just outside the rim.
+    // A breathing halo just outside the rim — a disc's only.
+    if (squash != 1f) return
     drawCircle(
         Brush.radialGradient(
             0.0f to Color.Transparent,
@@ -243,7 +252,7 @@ private class ParticleField(count: Int) {
     private val random = Random(7)
     private var last = Float.NaN
 
-    fun step(scope: DrawScope, t: Float, energy: Energy, accent: Color, disc: Pair<Offset, Float>) = with(scope) {
+    fun step(scope: DrawScope, t: Float, energy: Energy, accent: Color, disc: Pair<Offset, Float>, squash: Float = 1f) = with(scope) {
         val dt = if (last.isNaN()) 0f else (t - last).coerceIn(0f, 0.1f)
         last = t
         val (centre, radius) = disc
@@ -252,9 +261,11 @@ private class ParticleField(count: Int) {
         for (i in x.indices) {
             if (life[i] < 0f || life[i] > ttl[i] || x[i] < -40f || x[i] > this.size.width + 40f || y[i] < -40f || y[i] > this.size.height + 40f) {
                 // Born on the disc's rim, thrown out into the room.
-                val angle = ((random.nextFloat() * 2f - 1f) * 1.25f)
+                // Off the disc's right side, facing the room; round the whole rim when it is
+                // stretched across a card, so the field fills it.
+                val angle = if (squash != 1f) random.nextFloat() * 2f * PI.toFloat() else (random.nextFloat() * 2f - 1f) * 1.25f
                 val r = radius * (0.95f + random.nextFloat() * 0.1f)
-                x[i] = centre.x + cos(angle) * r
+                x[i] = centre.x + cos(angle) * r * squash
                 y[i] = centre.y + sin(angle) * r
                 val speed = 40f + random.nextFloat() * 120f
                 vx[i] = cos(angle) * speed

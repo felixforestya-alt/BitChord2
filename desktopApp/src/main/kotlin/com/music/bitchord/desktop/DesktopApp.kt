@@ -123,6 +123,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowBack
@@ -570,7 +571,8 @@ fun BitChordDesktopApp() {
     var homeState by remember { mutableStateOf<UiState<List<HomeShelf>>>(UiState.Loading) }
     // Home as shown: the feed less the shelves the listener has taken off it.
     val hiddenHomeShelves by DesktopHomeShelves.hidden.collectAsState()
-    val visibleHomeState = remember(homeState, hiddenHomeShelves) {
+    val homeShelfOrder by DesktopHomeShelves.order.collectAsState()
+    val visibleHomeState = remember(homeState, hiddenHomeShelves, homeShelfOrder) {
         (homeState as? UiState.Success)?.let { UiState.Success(DesktopHomeShelves.visible(it.data)) } ?: homeState
     }
     val waveShown by DesktopMyWave.shown.collectAsState()
@@ -1925,6 +1927,9 @@ fun BitChordDesktopApp() {
     val playerStyle by DesktopStyleSettings.playerStyle.collectAsState()
     var versionAlternate by remember { mutableStateOf<Song?>(null) }
     var versionSearching by remember { mutableStateOf(false) }
+    // Each song and its video, both ways round, once found or switched between: the switch back
+    // needs no search, and cannot come up empty — it did, and the switch then vanished.
+    val versionPairs = remember { androidx.compose.runtime.mutableStateMapOf<String, Song>() }
     // Once a track, and from the moment the player is wanted — the pointer on the way into it —
     // not from when it opens: the answer came a second into the opening, and the deck making
     // room for the switch then cost the slide a long frame. Kept when the player is put away.
@@ -1937,16 +1942,24 @@ fun BitChordDesktopApp() {
         if (current.localPath != null || current.localUri != null || !DesktopSearchClient.isVideoId(current.videoId)) {
             return@LaunchedEffect
         }
+        versionPairs[current.videoId]?.let { versionAlternate = it; return@LaunchedEffect }
         versionSearching = true
-        versionAlternate = withContext(Dispatchers.IO) {
+        val found = withContext(Dispatchers.IO) {
             runCatching {
-                if (current.isVideo) {
-                    YtMusicRepository.resolveAudio(current).takeIf { it.videoId != current.videoId }
+                if (current.looksLikeVideo()) {
+                    YtMusicRepository.resolveAudio(current.copy(isVideo = true))
+                        .takeIf { it.videoId != current.videoId }
+                        ?.copy(isVideo = false, isVideoOrigin = false)
                 } else {
                     YtMusicRepository.resolveVideo(current)
                 }
             }.getOrNull()
         }
+        if (found != null) {
+            versionPairs[current.videoId] = found
+            versionPairs[found.videoId] = current
+        }
+        versionAlternate = found
         versionSearching = false
     }
 
@@ -1957,6 +1970,9 @@ fun BitChordDesktopApp() {
         if (partyTrackChangeBlocked()) return
         val at = playbackEngine.state.value.positionMs
         val replacement = target.copy(
+            // Whichever way round, the other one: a video for a song, a song for a video.
+            isVideo = !current.looksLikeVideo(),
+            isVideoOrigin = !current.looksLikeVideo(),
             playbackSource = target.playbackSource ?: current.playbackSource,
             playbackSourceId = target.playbackSourceId ?: current.playbackSourceId,
             playbackSourceType = target.playbackSourceType ?: current.playbackSourceType,
@@ -1967,6 +1983,8 @@ fun BitChordDesktopApp() {
             },
         )
         selectedSong = replacement
+        versionPairs[replacement.videoId] = current
+        versionPairs[current.videoId] = replacement
         versionAlternate = current
         saveQueue()
         playbackEngine.load(replacement, playWhenReady = true, startAtMs = at)
@@ -3792,6 +3810,7 @@ fun BitChordDesktopApp() {
                         onDestinationSelected = ::selectDestination,
                         onOpenAccountPlaylist = { openShelfItem(it, PLAYLISTS_SHELF) },
                         onOpenLocalPlaylist = ::openPlaylist,
+                        onImportPlaylist = { spotifyImportOpen = true },
                         onOpenSettings = ::openSettings,
                         accountAvatar = activeAccount?.avatar
                             ?: activeAccount?.profiles?.firstOrNull()?.avatar,
@@ -3887,11 +3906,14 @@ fun BitChordDesktopApp() {
                             ?: current
                         if (playerStyle == DesktopPlayerStyle.DISC) {
                             DesktopDiscPlayer(
-                                song = playerSong,
+                                // Marked as the video it is, so its clip and the switch read it right.
+                                song = if (playerSong.looksLikeVideo() && !playerSong.isVideo) playerSong.copy(isVideo = true) else playerSong,
                                 // A music video's own thumbnail is a frame of the video; the disc
                                 // wants the song's sleeve, which its song version carries.
-                                coverUrl = if (playerSong.isVideo) {
-                                    versionAlternate?.thumbnailUrl ?: playerSong.thumbnailUrl
+                                coverUrl = if (playerSong.looksLikeVideo()) {
+                                    (versionPairs[playerSong.videoId] ?: versionAlternate)
+                                        ?.takeIf { !it.looksLikeVideo() }?.thumbnailUrl
+                                        ?: playerSong.thumbnailUrl
                                 } else {
                                     playerSong.thumbnailUrl
                                 },
@@ -4858,10 +4880,16 @@ fun BitChordDesktopApp() {
                             leadHero = false,
                             lead = if (waveShown) {
                                 {
+                                    val jamOn = selectedSong?.radioName == DesktopMyWave.radioName
                                     DesktopWaveCard(
                                         starting = waveStarting,
-                                        playing = playback.isPlaying && selectedSong?.radioName == DesktopMyWave.radioName,
+                                        playing = jamOn,
+                                        paused = !playback.isPlaying,
+                                        current = selectedSong?.takeIf { jamOn },
+                                        coverUrl = selectedSong?.thumbnailUrl,
                                         onPlay = ::startWave,
+                                        onPlayPause = ::togglePlayPauseFromUser,
+                                        onSkip = ::playNext,
                                         onTune = { waveSettingsOpen = true },
                                         onCustomizeHome = { homeCustomizeOpen = true },
                                         modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 12.dp),
@@ -5485,6 +5513,7 @@ private fun DesktopSidebar(
     /** Search was picked: the sidebar's box is the page's field, so it takes the focus. */
     focusSearch: Boolean,
     onSearchFocused: () -> Unit,
+    onImportPlaylist: () -> Unit,
 ) {
     val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(focusSearch) {
@@ -5599,6 +5628,8 @@ private fun DesktopSidebar(
                     onHide = { DesktopSidebarVisibility.hide(LOCAL_MUSIC_KEY, "Local Music") },
                 )
             }
+            // In sight, not only at the foot of the Library: the way in from other services.
+            DesktopSidebarItem(Icons.Rounded.Add, DesktopStrings["playlist_import_title", "Import a playlist"], false, onClick = onImportPlaylist)
             Spacer(Modifier.height(6.dp))
             HorizontalDivider(color = desktopChromeDivider())
             Spacer(Modifier.height(12.dp))
@@ -9115,6 +9146,13 @@ private fun SearchResult.key(): String = when (this) {
     is SearchResult.Track -> "track:${song.videoId}"
     is SearchResult.Browse -> "browse:${item.browseId}"
 }
+
+/**
+ * Whether [this] is a music video rather than a song: by its flag, or — for rows that come
+ * unmarked, as a video search's do — by its picture being a video frame from YouTube's image host
+ * rather than a sleeve from YouTube Music's.
+ */
+internal fun Song.looksLikeVideo(): Boolean = isVideo || thumbnailUrl?.contains("ytimg.com") == true
 
 private fun ShelfItem.toSong(): Song {
     val parts = subtitle.split(" • ", " · ", " | ").filter(String::isNotBlank)

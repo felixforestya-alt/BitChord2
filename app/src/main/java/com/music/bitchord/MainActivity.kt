@@ -1067,13 +1067,25 @@ private fun BitChordApp(
         }
     }
 
-    val homeListState = rememberLazyListState()
-    val exploreListState = rememberLazyListState()
+    // BitChord²: the feeds lay out what is about to scroll in ahead of time, between frames,
+    // and keep what just left for a moment — a shelf with its row of covers was otherwise
+    // composed whole in the one frame it came into view, and that frame came late.
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val feedCacheWindow = remember {
+        androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow(ahead = 900.dp, behind = 400.dp)
+    }
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val homeListState = rememberLazyListState(cacheWindow = feedCacheWindow)
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val exploreListState = rememberLazyListState(cacheWindow = feedCacheWindow)
     // BitChord²'s Explore is a grid — see [Bc2ExploreScreen].
     val exploreGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
-    val moodGenreListState = rememberLazyListState()
-    val libraryListState = rememberLazyListState()
-    val historyListState = rememberLazyListState()
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val moodGenreListState = rememberLazyListState(cacheWindow = feedCacheWindow)
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val libraryListState = rememberLazyListState(cacheWindow = feedCacheWindow)
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val historyListState = rememberLazyListState(cacheWindow = feedCacheWindow)
     val libraryShowAllGridState = rememberLazyGridState()
     val searchListState = rememberLazyListState()
     val currentListState = when (selectedTab) {

@@ -118,6 +118,11 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
         AppSettings.init(this, authStore)
         // BitChord²'s own settings — My Jam, Home's shelves — in a file of their own.
         com.music.bitchord.bc2.Bc2Prefs.init(this)
+        // BitChord²: no content capture of the UI. Where the system asks for it (Pixels do), Compose
+        // walked the whole semantics tree for it on every frame of a scroll — a third of a second
+        // of the main thread over a few flings, for nothing anyone sees. Accessibility is apart
+        // from this and unchanged.
+        disableComposeContentCapture()
         // Before anything resolves a track: an addon with `checkValidLossless`
         // is gated on this, and the gate reads "no" until it has looked.
         com.music.bitchord.playback.audio.LosslessOutput.init(this)
@@ -275,5 +280,10 @@ class BitChordApplication : Application(), SingletonImageLoader.Factory {
                 androidx.core.os.LocaleListCompat.forLanguageTags(replacement),
             )
         }
+    }
+
+    @kotlin.OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun disableComposeContentCapture() {
+        androidx.compose.ui.contentcapture.ContentCaptureManager.isEnabled = false
     }
 }

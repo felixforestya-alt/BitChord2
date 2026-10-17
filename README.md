@@ -12,8 +12,14 @@
 
 **The player**
 - A full-window disc player: the cover on a spinning CD, a broadcast-style room lit in the cover's colours, visualisers, and every control on a glass deck
+<img width="2745" height="1755" alt="image" src="https://github.com/user-attachments/assets/ff1589cc-a505-4aed-bc31-0ab280eb2fa4" />
+
 - Music videos play right in the player, with a one-click switch between the song and its video
+<img width="380" height="110" alt="image" src="https://github.com/user-attachments/assets/d0aa9374-25e5-40bd-9cab-eb07b2298ef3" />
+
 - Karaoke lyrics word by word, with translation and romanisation, also on the home card when the player is closed
+<img width="2397" height="410" alt="image" src="https://github.com/user-attachments/assets/95c96937-8c38-4f34-80c5-0f5f7218bf45" />
+
 - Queue on glass, sleep timer, audio output picker, Spotify Canvas backgrounds
 
 **The look**

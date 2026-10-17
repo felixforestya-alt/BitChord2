@@ -107,6 +107,8 @@ private fun desktopMain() = application {
     // Closing puts the window away rather than ending the process, while there is a tray icon to
     // bring it back from — see [DesktopWindowVisibility].
     val visible by DesktopWindowVisibility.visible.collectAsState()
+    // Shown only once it has been cloaked for its warm-up — see [DesktopStartupWarmup].
+    val warmupReady by DesktopStartupWarmup.ready.collectAsState()
     val state = rememberWindowState(width = 1_220.dp, height = 780.dp)
     LaunchedEffect(visible) {
         if (visible && state.isMinimized) {
@@ -131,7 +133,7 @@ private fun desktopMain() = application {
     }
     Window(
         onCloseRequest = { if (DesktopWindowVisibility.onCloseRequest()) exitApplication() },
-        visible = visible,
+        visible = visible && warmupReady,
         title = "BitChord",
         icon = painterResource(Res.drawable.logo),
         state = state,
@@ -146,6 +148,8 @@ private fun desktopMain() = application {
     ) {
         val composeWindow = window
         val openingSize = remember { state.size }
+        // Before anything else, while the window is still hidden: its handle, cloaked.
+        LaunchedEffect(composeWindow) { DesktopStartupWarmup.prepare(composeWindow) }
         LaunchedEffect(composeWindow) {
             DesktopWindowVisibility.attachWindow(composeWindow)
             this.launch { DesktopGpuCache.attach(composeWindow) }

@@ -3483,6 +3483,50 @@ fun BitChordDesktopApp() {
         onOpenQueue = { overlays.toggleSidePanel(DesktopSidePanel.QUEUE) },
     )
 
+    // The warm-up behind the cloak — see [DesktopStartupWarmup]: the player opened and closed and
+    // the home card turned into the bar and back, for real, before the window is first seen.
+    LaunchedEffect(Unit) {
+        val cloaked = kotlinx.coroutines.withTimeoutOrNull(1_500) { DesktopStartupWarmup.cloaked.first { it } } ?: return@LaunchedEffect
+        if (!cloaked) return@LaunchedEffect
+        // The app starts with no track picked even when it restores a queue, and the player only
+        // opens with one: the queue's or the last one played stands in for the warm-up — shown,
+        // never played — and is put back to nothing after.
+        val pickedAtStart = selectedSong
+        val standIn = pickedAtStart ?: liveQueue.current ?: history.firstOrNull()
+        try {
+            if (pickedAtStart == null && standIn != null) selectedSong = standIn
+            // The window's first frames, and the page laid out.
+            repeat(12) { androidx.compose.runtime.withFrameNanos { } }
+            val song = selectedSong
+            // Every step only while still cloaked: should the guard have shown the window
+            // already, the listener is not to watch the player open and close by itself.
+            fun stillHidden() = DesktopStartupWarmup.cloaked.value
+            if (song != null && overlays.settingsPage == null && stillHidden()) {
+                // The card into the bar and back: the morph's own first frames.
+                if (animatedHome && destination == DesktopDestination.LISTEN_NOW) {
+                    runCatching {
+                        homeListState.animateScrollBy(700f, tween(160))
+                        homeListState.animateScrollBy(-700f, tween(160))
+                        homeListState.scrollToItem(0)
+                    }
+                }
+                // The player, opened and put away as a click would.
+                if (stillHidden()) {
+                    overlays.nowPlaying = true
+                    delay(WARMUP_OPEN_MS)
+                    overlays.nowPlaying = false
+                    delay(WARMUP_CLOSE_MS)
+                    DesktopPlayerWarmup.markPrimed()
+                }
+            } else {
+                repeat(30) { androidx.compose.runtime.withFrameNanos { } }
+            }
+        } finally {
+            if (pickedAtStart == null && selectedSong == standIn) selectedSong = null
+            DesktopStartupWarmup.finish()
+        }
+    }
+
     // Checks the playlist import and My Wave against the live services: BITCHORD_SELFTEST=1.
     if (System.getenv("BITCHORD_SELFTEST") == "1") {
         LaunchedEffect(Unit) {
@@ -9369,6 +9413,10 @@ internal val PAGE_TOP_GAP = 16.dp
 
 /** How long Home waits at launch for the saved session before loading as a guest. */
 private const val SESSION_WAIT_MS = 8_000L
+
+/** The player's opening and its entrance, then its closing, as the cloaked warm-up plays them. */
+private const val WARMUP_OPEN_MS = 950L
+private const val WARMUP_CLOSE_MS = 380L
 
 /** Explore is read from disk, or fetched, this long after launch, so it is ready when opened. */
 private const val EXPLORE_PREFETCH_DELAY_MS = 4_000L

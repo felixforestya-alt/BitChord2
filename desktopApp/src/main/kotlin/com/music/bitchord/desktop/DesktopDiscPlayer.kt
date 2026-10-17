@@ -307,7 +307,7 @@ private fun DiscPlayerLayout(
             }
             else -> {
                 entrance.snapTo(0f)
-                entrance.animateTo(1f, tween(PLAYER_ENTRANCE_MS, easing = PLAYER_ENTRANCE_EASING))
+                entrance.animateTo(1f, tween(DesktopStartupWarmup.paced(PLAYER_ENTRANCE_MS), easing = PLAYER_ENTRANCE_EASING))
                 if (DesktopFrameProfiler.enabled) DesktopFrameProfiler.mark("entrance done")
             }
         }

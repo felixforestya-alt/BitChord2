@@ -101,10 +101,10 @@ internal fun DesktopPlayerSheet(
                 // instead of spending its first stretch on one long one.
                 withFrameNanos { }
                 withFrameNanos { }
-                offset.animateTo(0f, tween(SHEET_OPEN_MS, easing = FastOutSlowInEasing))
+                offset.animateTo(0f, tween(DesktopStartupWarmup.paced(SHEET_OPEN_MS), easing = FastOutSlowInEasing))
             } else {
                 DesktopPlayerCover.covering = false
-                offset.animateTo(heightPx, tween(SHEET_CLOSE_MS, easing = FastOutSlowInEasing))
+                offset.animateTo(heightPx, tween(DesktopStartupWarmup.paced(SHEET_CLOSE_MS), easing = FastOutSlowInEasing))
                 // Kept, out of sight, while it is still being prepared for; gone once it is not.
                 snapshotFlow { keepPrepared }.first { !it }
                 mounted = false
@@ -130,6 +130,9 @@ internal fun DesktopPlayerSheet(
         val shownNow by androidx.compose.runtime.rememberUpdatedState(visible)
         LaunchedEffect(primeKey, DesktopPlayerWarmup.primeAgain) {
             if (shownNow) return@LaunchedEffect
+            // Opened for real behind the startup cloak already: every shader is made, and a new
+            // track's cover is one small texture. Priming in view would only cost frames.
+            if (warmedForReal && DesktopPlayerWarmup.primeAgain == 0) return@LaunchedEffect
             // Time for the new cover to arrive and be worked up before it is drawn.
             if (DesktopPlayerWarmup.primeAgain == 0) kotlinx.coroutines.delay(PRIME_DELAY_MS)
             if (shownNow) return@LaunchedEffect
@@ -337,6 +340,9 @@ private const val PRIME_SLOWER = 4
 
 /** Whether the player has been primed once this launch — see [PRIME_SLOWER]. */
 @Volatile private var primedOnce = false
+
+/** Whether the player was opened for real behind the startup cloak — see [DesktopStartupWarmup]. */
+@Volatile private var warmedForReal = false
 private const val PRIME_HEAT_MS = 300L
 private const val PRIME_DELAY_MS = 1_500L
 
@@ -346,6 +352,12 @@ private const val PRIME_DELAY_MS = 1_500L
  * player nobody opened is not kept composed.
  */
 internal object DesktopPlayerWarmup {
+    /** The player has been opened for real already (see [DesktopStartupWarmup]): priming need not crawl. */
+    fun markPrimed() {
+        primedOnce = true
+        warmedForReal = true
+    }
+
     /** Bumped to have the prepared player primed once more, at once. */
     var primeAgain by androidx.compose.runtime.mutableIntStateOf(0)
     var wanted by mutableStateOf(false)

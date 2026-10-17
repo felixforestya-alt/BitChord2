@@ -494,7 +494,7 @@ private fun HeroContent(
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val lift by animateFloatAsState(if (hovered) 1f else 0f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow), label = "heroLift")
-    val visualizer by DesktopStyleSettings.heroVisualizer.collectAsState()
+    val visualizer = DesktopStyleSettings.heroVisualizer.collectAsState().value.let { if (it in DISC_ONLY_VISUALIZERS) DesktopVisualizerStyle.AURORA else it }
     val showLyrics by DesktopStyleSettings.heroLyrics.collectAsState()
     val visualizerNames = DesktopVisualizerStyle.entries.associateWith { it.label() }
     Box(
@@ -575,7 +575,12 @@ private fun HeroContent(
                         Icons.Rounded.AutoAwesome,
                         DesktopStrings["d_visualizer", "Visualiser"] + ": " + visualizerNames.getValue(visualizer),
                         tint = if (visualizer != DesktopVisualizerStyle.NONE) Color.White else Color.White.copy(alpha = 0.5f),
-                        onClick = { DesktopStyleSettings.setHeroVisualizer(visualizer.next()) },
+                        onClick = {
+                            // The ring and the particles are drawn round a disc, and the card has none.
+                            var next = visualizer.next()
+                            while (next in DISC_ONLY_VISUALIZERS) next = next.next()
+                            DesktopStyleSettings.setHeroVisualizer(next)
+                        },
                     )
                     HeroSmallButton(
                         BitChordIcons.Queue,
@@ -623,11 +628,8 @@ private fun HeroStage(
             style = style,
             clock = { tick.floatValue },
             accent = accent,
-            // The card is wide and low: the ring and the particles go round an ellipse that fills
-            // it, not a small circle in its middle.
-            disc = { Offset(area.width / 2f, area.height / 2f) to area.height * 0.30f },
+            disc = { Offset(area.width / 2f, area.height / 2f) to min(area.width, area.height) * 0.30f },
             focus = { Rect(0f, 0f, area.width.toFloat(), area.height.toFloat()) },
-            squash = (area.width * 0.40f / (area.height * 0.30f).coerceAtLeast(1f)).coerceAtLeast(1f),
             modifier = Modifier.fillMaxSize().softEdges().graphicsLayer {
                 val b = blur * 14f
                 renderEffect = if (b > 0.5f) BlurEffect(b, b, TileMode.Decal) else null
@@ -937,3 +939,6 @@ private const val BAR_GLIDE_SECONDS = 0.06f
 internal val HERO_HEIGHT = 252.dp
 
 private val EASE_OUT_EXPO = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+
+/** The visualisers drawn round the disc, which the home card, having no disc, leaves out. */
+private val DISC_ONLY_VISUALIZERS = setOf(DesktopVisualizerStyle.RING, DesktopVisualizerStyle.PARTICLES)

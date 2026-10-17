@@ -49,7 +49,7 @@ internal object DesktopStyleSettings {
     )
     private val _liquidGlass = flag(KEY_LIQUID_GLASS, true)
     private val _animatedHome = flag(KEY_ANIMATED_HOME, true)
-    private val _heroVisualizer = choice(KEY_HERO_VISUALIZER, DesktopVisualizerStyle.BARS)
+    private val _heroVisualizer = choice(KEY_HERO_VISUALIZER, DesktopVisualizerStyle.AURORA)
     private val _heroLyrics = flag(KEY_HERO_LYRICS, true)
 
     /** What moves in the home card, apart from the player's own. */
@@ -125,7 +125,7 @@ internal object DesktopStyleSettings {
     private const val KEY_VISUALIZER_STYLE = "style_visualizer_kind"
     private const val KEY_LIQUID_GLASS = "style_liquid_glass"
     private const val KEY_ANIMATED_HOME = "style_animated_home"
-    private const val KEY_HERO_VISUALIZER = "style_hero_visualizer"
+    private const val KEY_HERO_VISUALIZER = "style_hero_visualizer_v2"
     private const val KEY_HERO_LYRICS = "style_hero_lyrics"
     private const val KEY_BAR_TINTED = "style_bar_tinted"
 }

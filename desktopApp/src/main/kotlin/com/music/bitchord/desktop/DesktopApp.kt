@@ -124,6 +124,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowBack
@@ -592,6 +593,8 @@ fun BitChordDesktopApp() {
     val libraryListState = rememberLazyListState()
     val libraryGridState = rememberLazyGridState()
     val homeWheel = rememberSmoothWheel(homeListState)
+    // The list whichever other page is open scrolls by — see [DesktopPageScroll].
+    val pageScroll = remember { DesktopPageScroll() }
     val exploreWheel = rememberSmoothWheel(exploreGridState)
     val moodGenreWheel = rememberSmoothWheel(moodGenreListState)
     val searchWheel = rememberSmoothWheel(searchListState)
@@ -1100,7 +1103,18 @@ fun BitChordDesktopApp() {
                     (homeState as? UiState.Success)?.data.orEmpty()
                         .flatMap { it.items }.filter { it.videoId != null }.map { it.toSong() }
                 }
-                val batch = DesktopMyWave.start(liked, played)
+                // Grown from one playlist, when the jam is set to: the account's or one kept here.
+                val fromPlaylist = if (DesktopMyWave.seeds.value == DesktopWaveSeeds.PLAYLIST) {
+                    val id = DesktopMyWave.playlist.value?.first
+                    when {
+                        id == null -> emptyList()
+                        id.startsWith(LOCAL_PLAYLIST_PREFIX) -> playlists.firstOrNull { it.id == id.removePrefix(LOCAL_PLAYLIST_PREFIX) }?.songs.orEmpty()
+                        else -> DesktopSearchClient.browse(id).getOrNull()?.songs.orEmpty()
+                    }
+                } else {
+                    emptyList()
+                }
+                val batch = DesktopMyWave.start(liked, played, fromPlaylist)
                 if (batch.isEmpty()) {
                     DesktopTrackLog.log("wave: nothing to start a wave from")
                     return@launch
@@ -1930,6 +1944,16 @@ fun BitChordDesktopApp() {
     // Each song and its video, both ways round, once found or switched between: the switch back
     // needs no search, and cannot come up empty — it did, and the switch then vanished.
     val versionPairs = remember { androidx.compose.runtime.mutableStateMapOf<String, Song>() }
+
+    /**
+     * [song] with its song version's sleeve when it is a music video and that version is known: the
+     * home card and the bars showed a blurry video frame where the cover belongs.
+     */
+    fun withSleeve(song: Song): Song {
+        if (!song.looksLikeVideo()) return song
+        val sleeve = versionPairs[song.videoId]?.takeIf { !it.looksLikeVideo() }?.thumbnailUrl ?: return song
+        return song.copy(thumbnailUrl = sleeve)
+    }
     // Once a track, and from the moment the player is wanted — the pointer on the way into it —
     // not from when it opens: the answer came a second into the opening, and the deck making
     // room for the switch then cost the slide a long frame. Kept when the player is put away.
@@ -1938,7 +1962,9 @@ fun BitChordDesktopApp() {
         versionSearching = false
         val current = selectedSong ?: return@LaunchedEffect
         if (playerStyle != DesktopPlayerStyle.DISC) return@LaunchedEffect
-        snapshotFlow { overlays.nowPlaying || DesktopPlayerWarmup.wanted }.first { it }
+        // A video at once — its sleeve is wanted on the home card and the bars too; a song only
+        // once the player is.
+        if (!current.looksLikeVideo()) snapshotFlow { overlays.nowPlaying || DesktopPlayerWarmup.wanted }.first { it }
         if (current.localPath != null || current.localUri != null || !DesktopSearchClient.isVideoId(current.videoId)) {
             return@LaunchedEffect
         }
@@ -3343,7 +3369,7 @@ fun BitChordDesktopApp() {
     fun nowPlayingBar(current: Song, compact: Boolean, framed: Boolean = true) {
         DesktopNowPlayingBar(
             framed = framed,
-            song = current,
+            song = withSleeve(current),
             isPlaying = playback.isPlaying,
             isLoading = playback.isLoading,
             position = playerPosition,
@@ -3773,7 +3799,7 @@ fun BitChordDesktopApp() {
                         {
                             DesktopMorphingPlayer(
                                 anchor = heroAnchor,
-                                song = current,
+                                song = withSleeve(current),
                                 isPlaying = playback.isPlaying,
                                 onOpenPlayer = { overlays.nowPlaying = true },
                                 transport = { heroTransport(current) },
@@ -4273,7 +4299,14 @@ fun BitChordDesktopApp() {
                     }
 
                     if (waveSettingsOpen) {
-                        DesktopWaveSettingsDialog(onRestart = ::startWave, onDismiss = { waveSettingsOpen = false })
+                        DesktopWaveSettingsDialog(
+                            playlists = (
+                                sidebarAccountPlaylists.mapNotNull { item -> item.browseId?.let { id -> id to item.title } } +
+                                    playlists.map { (LOCAL_PLAYLIST_PREFIX + it.id) to it.title }
+                                ).distinctBy { it.first },
+                            onRestart = ::startWave,
+                            onDismiss = { waveSettingsOpen = false },
+                        )
                     }
                     if (homeCustomizeOpen) {
                         DesktopHomeCustomizeDialog(
@@ -4465,6 +4498,20 @@ fun BitChordDesktopApp() {
                 }
                 // The wheel glides on the page's own list — see [DesktopSmoothWheel] — for the pages
                 // whose list is held here; the rest keep the stock wheel.
+                // The list the open page scrolls by: held up here for the main pages, announced
+                // by the page itself for the rest — see [DesktopPageScroll].
+                val pageList: androidx.compose.foundation.gestures.ScrollableState? = when {
+                    overlays.settingsPage == DesktopSettingsPage.MAIN -> settingsListState
+                    overlays.settingsPage != null || overlays.replay || openedArtist != null || openedCollection != null -> null
+                    destination == DesktopDestination.LISTEN_NOW -> homeListState
+                    destination == DesktopDestination.EXPLORE && selectedMoodGenre != null -> moodGenreListState
+                    destination == DesktopDestination.EXPLORE -> exploreGridState
+                    destination == DesktopDestination.SEARCH -> searchListState
+                    destination == DesktopDestination.LIBRARY && libraryShowAll != null -> libraryGridState
+                    destination == DesktopDestination.LIBRARY -> libraryListState
+                    else -> null
+                } ?: pageScroll.state
+                val announcedWheel = pageScroll.state?.let { rememberSmoothWheel(it) }
                 val pageWheel = when {
                     overlays.settingsPage == DesktopSettingsPage.MAIN -> settingsWheel
                     overlays.settingsPage != null || overlays.replay || openedArtist != null || openedCollection != null -> null
@@ -4476,11 +4523,11 @@ fun BitChordDesktopApp() {
                     destination == DesktopDestination.LIBRARY -> libraryWheel
                     else -> null
                 }
-                CompositionLocalProvider(LocalDesktopContextMenu provides openMenu) {
+                CompositionLocalProvider(LocalDesktopContextMenu provides openMenu, LocalDesktopPageScroll provides pageScroll) {
                 Box(
                     Modifier
                         .fillMaxSize()
-                        .smoothWheel(pageWheel)
+                        .smoothWheel(pageWheel ?: announcedWheel)
                         .graphicsLayer {
                             alpha = 0.15f + pageEnter.value * 0.85f
                             translationY = (1f - pageEnter.value) * 22.dp.toPx()
@@ -4506,6 +4553,7 @@ fun BitChordDesktopApp() {
                             CompositionLocalProvider(LocalDesktopPanelIsPage provides true) {
                             when (overlays.settingsPage!!) {
                                 DesktopSettingsPage.MAIN -> DesktopSettingsScreen(
+                                    onCustomizeHome = { homeCustomizeOpen = true },
                                     query = settingsQuery,
                                     onQueryChange = { settingsQuery = it },
                                     listState = settingsListState,
@@ -4891,7 +4939,6 @@ fun BitChordDesktopApp() {
                                         onPlayPause = ::togglePlayPauseFromUser,
                                         onSkip = ::playNext,
                                         onTune = { waveSettingsOpen = true },
-                                        onCustomizeHome = { homeCustomizeOpen = true },
                                         modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 12.dp),
                                     )
                                 }
@@ -4900,7 +4947,7 @@ fun BitChordDesktopApp() {
                             },
                             header = if (animatedHome && DesktopFrameProfiler.on("header")) {
                                 {
-                                    val current = selectedSong
+                                    val current = selectedSong?.let(::withSleeve)
                                     DesktopHomeHeader(
                                         song = current,
                                         heroAnchor = heroAnchor,
@@ -5149,7 +5196,15 @@ fun BitChordDesktopApp() {
                             menu = { song -> songMenu(song) },
                         )
                     }
-                }
+                                    // The page's scrollbar, along its right edge, whichever page it is.
+                    DesktopPageScrollbar(
+                        pageList,
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .fillMaxHeight()
+                            .padding(top = contentPadding.calculateTopPadding() + 6.dp, bottom = contentPadding.calculateBottomPadding() + 6.dp, end = 3.dp),
+                    )
+}
                 }
                 }
 
@@ -6314,6 +6369,7 @@ private fun DesktopArtistPage(
                 val top = artist.songs.take(MAX_ARTIST_SONGS)
                 Box(Modifier.fillMaxSize()) {
                     LazyColumn(
+                        state = rememberPageListState(),
                         contentPadding = pagePadding(bottom = 32.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
@@ -6560,6 +6616,7 @@ private fun DesktopHistoryPage(
     DesktopPageScaffold(contentPadding) {
         val isCurrentRow = rememberPlayingRowMatcher(history)
         LazyColumn(
+            state = rememberPageListState(),
             contentPadding = pagePadding(start = DesktopPageGutter, end = DesktopPageGutter, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -6724,6 +6781,7 @@ private fun DesktopLibrarySongContent(
         DesktopEmptyPage(BitChordIcons.Search, "No matching music", "Try a different search.")
     } else if (view == DesktopLibraryView.GRID) {
         LazyVerticalGrid(
+            state = rememberPageGridState(),
             columns = GridCells.Adaptive(minSize = 150.dp),
             modifier = Modifier.fillMaxSize(),
             contentPadding = pagePadding(bottom = 32.dp),
@@ -6742,6 +6800,7 @@ private fun DesktopLibrarySongContent(
     } else {
         val isCurrentRow = rememberPlayingRowMatcher(songs)
         LazyColumn(
+            state = rememberPageListState(),
             modifier = Modifier.fillMaxSize(),
             contentPadding = pagePadding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -6771,6 +6830,7 @@ private fun DesktopLibraryGroupingContent(
         DesktopEmptyPage(BitChordIcons.Search, "Nothing here yet", "Music will be grouped as it is added.")
     } else if (view == DesktopLibraryView.GRID) {
         LazyVerticalGrid(
+            state = rememberPageGridState(),
             columns = GridCells.Adaptive(minSize = 150.dp),
             modifier = Modifier.fillMaxSize(),
             contentPadding = pagePadding(bottom = 32.dp),
@@ -6788,6 +6848,7 @@ private fun DesktopLibraryGroupingContent(
         }
     } else {
         LazyColumn(
+            state = rememberPageListState(),
             modifier = Modifier.fillMaxSize(),
             contentPadding = pagePadding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -6837,6 +6898,8 @@ private enum class DesktopSettingsSection {
  */
 @Composable
 private fun DesktopSettingsScreen(
+    /** Opens the choice of what Home shows and in what order. */
+    onCustomizeHome: () -> Unit,
     query: String,
     onQueryChange: (String) -> Unit,
     listState: LazyListState,
@@ -7342,6 +7405,12 @@ private fun DesktopSettingsScreen(
                         barTinted,
                         DesktopStyleSettings::setBarTinted,
                     )
+                    SettingsRow(
+                        Icons.Rounded.Dashboard,
+                        DesktopStrings["home_customize", "Customize Home"],
+                        DesktopStrings["home_customize_subtitle", "Which shelves Home shows, in what order, and My Jam"],
+                        onClick = onCustomizeHome,
+                    )
                     val animatedHome by DesktopStyleSettings.animatedHome.collectAsState()
                     SettingsToggle(
                         DesktopStrings["d_animated_home", "Living main window"],
@@ -7737,6 +7806,7 @@ private fun DesktopLicensesPage(onDismiss: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
         )
         LazyColumn(
+            state = rememberPageListState(),
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -8054,6 +8124,7 @@ private fun DesktopCollectionPage(
     DesktopPageScaffold(contentPadding) {
         val isCurrentRow = rememberPlayingRowMatcher(songs)
         LazyColumn(
+            state = rememberPageListState(),
             contentPadding = pagePadding(
                 start = DesktopPageGutter,
                 top = DesktopPageGutter,

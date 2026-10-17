@@ -31,7 +31,13 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Tune
-import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.DragHandle
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -108,6 +115,12 @@ internal object DesktopHomeShelves {
         persistence.saveString(KEY_ORDER, now.joinToString("\n"))
     }
 
+    /** Home's shelves in exactly [titles]' order. */
+    fun setOrder(titles: List<String>) {
+        _order.value = titles
+        persistence.saveString(KEY_ORDER, titles.joinToString("\n"))
+    }
+
     fun resetOrder() {
         _order.value = emptyList()
         persistence.saveString(KEY_ORDER, "")
@@ -152,7 +165,6 @@ internal fun DesktopWaveCard(
     onPlayPause: () -> Unit,
     onSkip: () -> Unit,
     onTune: () -> Unit,
-    onCustomizeHome: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tuning by DesktopMyWave.tuning.collectAsState()
@@ -164,7 +176,7 @@ internal fun DesktopWaveCard(
     val phase by rememberInfiniteTransition(label = "wave").animateFloat(
         0f, 1f, infiniteRepeatable(tween(if (moving) 2_600 else 9_000, easing = LinearEasing), RepeatMode.Restart), label = "wavePhase",
     )
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier
                 .weight(1f)
@@ -237,19 +249,23 @@ internal fun DesktopWaveCard(
                     )
                 }
                 if (playing) {
-                    Box(
-                        Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f)).clickable(onClick = onSkip),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Rounded.SkipNext, DesktopStrings["next", "Next"], tint = Color.White, modifier = Modifier.size(26.dp))
-                    }
+                    CardIcon(Icons.Rounded.SkipNext, DesktopStrings["next", "Next"], onSkip)
+                    Spacer(Modifier.width(10.dp))
                 }
+                // The jam's own settings, on the jam itself.
+                CardIcon(Icons.Rounded.Tune, DesktopStrings["wave_settings", "Jam settings"], onTune)
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            WaveSideButton(Icons.Rounded.Tune, DesktopStrings["wave_settings", "Jam settings"], onTune)
-            WaveSideButton(Icons.Rounded.Dashboard, DesktopStrings["home_customize", "Customize Home"], onCustomizeHome)
-        }
+    }
+}
+
+@Composable
+private fun CardIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(44.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.16f)).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(24.dp))
     }
 }
 
@@ -261,23 +277,6 @@ private fun LevelBars(phase: Float, color: Color) {
             val h = 0.35f + 0.65f * ((sin((phase * 2f * PI.toFloat() * 3f) + i * 1.7f) + 1f) / 2f)
             Box(Modifier.width(4.dp).height(22.dp * h).clip(RoundedCornerShape(2.dp)).background(color))
         }
-    }
-}
-
-@Composable
-private fun WaveSideButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Row(
-        Modifier
-            .height(51.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color.White.copy(alpha = 0.08f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(10.dp))
-        Text(label, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -295,14 +294,21 @@ private fun DesktopWaveSeeds.label(): String = when (this) {
     DesktopWaveSeeds.LIKED_AND_HISTORY -> DesktopStrings["wave_seeds_both", "Likes and history"]
     DesktopWaveSeeds.LIKED -> DesktopStrings["wave_seeds_liked", "Likes"]
     DesktopWaveSeeds.HISTORY -> DesktopStrings["wave_seeds_history", "Recently played"]
+    DesktopWaveSeeds.PLAYLIST -> DesktopStrings["wave_seeds_playlist", "A playlist"]
 }
 
 /** My Wave's settings: what it plays and what it grows from. Changes apply from the next tracks. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun DesktopWaveSettingsDialog(onRestart: () -> Unit, onDismiss: () -> Unit) {
+internal fun DesktopWaveSettingsDialog(
+    /** The playlists the jam can grow from: id and title. */
+    playlists: List<Pair<String, String>>,
+    onRestart: () -> Unit,
+    onDismiss: () -> Unit,
+) {
     val tuning by DesktopMyWave.tuning.collectAsState()
     val seeds by DesktopMyWave.seeds.collectAsState()
+    val playlist by DesktopMyWave.playlist.collectAsState()
     val onlyNew by DesktopMyWave.onlyNew.collectAsState()
     DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 460, popup = true) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp)) {
@@ -317,6 +323,19 @@ internal fun DesktopWaveSettingsDialog(onRestart: () -> Unit, onDismiss: () -> U
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 DesktopWaveSeeds.entries.forEach { option ->
                     Choice(option.label(), option == seeds) { DesktopMyWave.setSeeds(option) }
+                }
+            }
+            if (seeds == DesktopWaveSeeds.PLAYLIST) {
+                Spacer(Modifier.height(10.dp))
+                if (playlists.isEmpty()) {
+                    Text(DesktopStrings["wave_no_playlists", "No playlists yet."], color = DesktopSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        playlists.forEach { (id, title) ->
+                            Choice(title, playlist?.first == id) { DesktopMyWave.setPlaylist(id, title) }
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -339,7 +358,10 @@ internal fun DesktopWaveSettingsDialog(onRestart: () -> Unit, onDismiss: () -> U
     }
 }
 
-/** Which of the feed's shelves Home shows, and whether My Wave leads it. */
+/**
+ * Which of the feed's shelves Home shows and in what order — each row dragged by its handle, as
+ * the player's queue is — and whether My Jam leads it.
+ */
 @Composable
 internal fun DesktopHomeCustomizeDialog(shelfTitles: List<String>, onDismiss: () -> Unit) {
     val hidden by DesktopHomeShelves.hidden.collectAsState()
@@ -348,28 +370,20 @@ internal fun DesktopHomeCustomizeDialog(shelfTitles: List<String>, onDismiss: ()
     // What the feed has now, then whatever is hidden but did not come this time — in the order
     // Home shows them.
     val all = (shelfTitles + hidden).distinctBy { it.trim().lowercase() }
-    val titles = androidx.compose.runtime.remember(all, order) { DesktopHomeShelves.ordered(all) }
-    DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 480, popup = true) {
+    val shown = androidx.compose.runtime.remember(all, order) { DesktopHomeShelves.ordered(all) }
+    DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 500, popup = true) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp)) {
             DialogTitle(DesktopStrings["home_customize", "Customize Home"])
             Text(
-                DesktopStrings["home_customize_hint", "Turn off what you don't want to see. Hidden shelves stay hidden after the feed reloads."],
+                DesktopStrings["home_customize_hint2", "Drag by the handle to reorder. Switch off what you don't want to see."],
                 color = DesktopSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
             Spacer(Modifier.height(12.dp))
-            ToggleLine(DesktopMyWave.radioName, DesktopStrings["wave_card_hint", "The button at the top of Home"], waveShown, DesktopMyWave::setShown)
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                titles.forEachIndexed { index, title ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        MoveButton(Icons.Rounded.KeyboardArrowUp, enabled = index > 0) { DesktopHomeShelves.move(all, title, -1) }
-                        MoveButton(Icons.Rounded.KeyboardArrowDown, enabled = index < titles.lastIndex) { DesktopHomeShelves.move(all, title, +1) }
-                        Spacer(Modifier.width(8.dp))
-                        Box(Modifier.weight(1f)) {
-                            ToggleLine(title, null, !DesktopHomeShelves.isHidden(title)) { show -> DesktopHomeShelves.setHidden(title, !show) }
-                        }
-                    }
-                }
+            ToggleLine(DesktopMyWave.radioName, DesktopStrings["wave_card_hint", "The card at the top of Home"], waveShown, DesktopMyWave::setShown)
+            Spacer(Modifier.height(4.dp))
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                ReorderableShelves(shown, onReorder = DesktopHomeShelves::setOrder)
             }
             Spacer(Modifier.height(16.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -382,6 +396,85 @@ internal fun DesktopHomeCustomizeDialog(shelfTitles: List<String>, onDismiss: ()
                     Spacer(Modifier.width(8.dp))
                 }
                 TextAction(DesktopStrings["done", "Done"], filled = true, onClick = onDismiss)
+            }
+        }
+    }
+}
+
+/** The shelves as rows that follow the pointer while dragged by their handle. */
+@Composable
+private fun ReorderableShelves(titles: List<String>, onReorder: (List<String>) -> Unit) {
+    var live by androidx.compose.runtime.remember(titles) { androidx.compose.runtime.mutableStateOf(titles) }
+    var dragged by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var totalDrag by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0f) }
+    var startIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
+    var startOrder by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<List<String>>(emptyList()) }
+    val heights = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateMapOf<String, Float>() }
+
+    fun topOf(list: List<String>, index: Int): Float {
+        var top = 0f
+        for (slot in 0 until index.coerceAtMost(list.size)) top += heights[list[slot]] ?: 0f
+        return top
+    }
+
+    Column {
+        live.forEach { title ->
+            androidx.compose.runtime.key(title) {
+                val dragging = title == dragged
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { heights[title] = it.height.toFloat() }
+                        .zIndex(if (dragging) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = if (dragging) totalDrag - (topOf(live, live.indexOf(title)) - topOf(startOrder, startIndex)) else 0f
+                            if (dragging) { scaleX = 1.02f; scaleY = 1.02f }
+                        }
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (dragging) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+                        .padding(start = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Rounded.DragHandle,
+                        DesktopStrings["drag_to_reorder", "Drag to reorder"],
+                        tint = DesktopSecondary,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .pointerHoverIcon(androidx.compose.ui.input.pointer.PointerIcon(java.awt.Cursor(java.awt.Cursor.N_RESIZE_CURSOR)))
+                            .pointerInput(title) {
+                                detectDragGestures(
+                                    onDragStart = {
+                                        dragged = title
+                                        totalDrag = 0f
+                                        startOrder = live
+                                        startIndex = live.indexOf(title)
+                                    },
+                                    onDragEnd = {
+                                        dragged = null
+                                        onReorder(live)
+                                    },
+                                    onDragCancel = {
+                                        dragged = null
+                                        live = titles
+                                    },
+                                ) { change, amount ->
+                                    change.consume()
+                                    totalDrag += amount.y
+                                    val layout = startOrder.map { heights[it] ?: 0f }
+                                    if (layout.all { it > 0f }) {
+                                        val target = reorderTargetSlot(layout, startIndex, totalDrag)
+                                        val at = live.indexOf(title)
+                                        if (target != at) live = live.toMutableList().apply { removeAt(at); add(target, title) }
+                                    }
+                                }
+                            },
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Box(Modifier.weight(1f)) {
+                        ToggleLine(title, null, !DesktopHomeShelves.isHidden(title)) { show -> DesktopHomeShelves.setHidden(title, !show) }
+                    }
+                }
             }
         }
     }

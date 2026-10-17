@@ -22,7 +22,7 @@ internal enum class DesktopWaveTuning(
 }
 
 /** Which tracks the wave starts out from. */
-internal enum class DesktopWaveSeeds { LIKED_AND_HISTORY, LIKED, HISTORY }
+internal enum class DesktopWaveSeeds { LIKED_AND_HISTORY, LIKED, HISTORY, PLAYLIST }
 
 /**
  * My Wave: one button that plays the listener's own endless station, as Yandex Music has it.
@@ -49,6 +49,17 @@ internal object DesktopMyWave {
             .getOrDefault(DesktopWaveSeeds.LIKED_AND_HISTORY),
     )
     private val _onlyNew = MutableStateFlow(persistence.boolean(KEY_ONLY_NEW, false))
+    private val _playlist = MutableStateFlow(
+        persistence.string(KEY_PLAYLIST).split('\n').takeIf { it.size == 2 && it[0].isNotBlank() }?.let { it[0] to it[1] },
+    )
+
+    /** The playlist the jam grows from when [seeds] says so: its id and title. */
+    val playlist: StateFlow<Pair<String, String>?> = _playlist
+
+    fun setPlaylist(id: String, title: String) {
+        _playlist.value = id to title
+        persistence.saveString(KEY_PLAYLIST, "$id\n$title")
+    }
     private val _shown = MutableStateFlow(persistence.boolean(KEY_SHOWN, true))
 
     val tuning: StateFlow<DesktopWaveTuning> = _tuning
@@ -87,8 +98,9 @@ internal object DesktopMyWave {
      * Starts a wave from [liked] and [history] (most recent first) and returns its first tracks,
      * or an empty list when there is nothing to grow it from.
      */
-    suspend fun start(liked: List<Song>, history: List<Song>, limit: Int = FIRST_BATCH): List<Song> {
+    suspend fun start(liked: List<Song>, history: List<Song>, fromPlaylist: List<Song> = emptyList(), limit: Int = FIRST_BATCH): List<Song> {
         val pool = when (_seeds.value) {
+            DesktopWaveSeeds.PLAYLIST -> fromPlaylist.take(SEED_POOL * 2)
             DesktopWaveSeeds.LIKED -> liked.take(SEED_POOL)
             DesktopWaveSeeds.HISTORY -> history.take(SEED_POOL)
             // Interleaved, so neither side crowds the other out.
@@ -98,7 +110,7 @@ internal object DesktopMyWave {
         // A different start each time, as the wave is meant to feel.
         seedPool = pool.shuffled()
         nextSeed = 0
-        known = if (_onlyNew.value) (liked + history).mapTo(HashSet(), Song::videoId) else emptySet()
+        known = if (_onlyNew.value) (liked + history + fromPlaylist).mapTo(HashSet(), Song::videoId) else emptySet()
         return more(emptyList(), limit)
     }
 
@@ -158,4 +170,5 @@ internal object DesktopMyWave {
     private const val KEY_SEEDS = "wave_seeds"
     private const val KEY_ONLY_NEW = "wave_only_new"
     private const val KEY_SHOWN = "wave_shown"
+    private const val KEY_PLAYLIST = "wave_playlist"
 }

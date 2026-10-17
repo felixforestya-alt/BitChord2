@@ -308,7 +308,7 @@
     <string name="wave_character">Характер</string>
     <string name="wave_from">На основе</string>
     <string name="wave_play_tuned">Запустить так</string>
-    <string name="wave_card_hint">Кнопка вверху главной</string>
+    <string name="wave_card_hint">Карточка вверху главной</string>
     <string name="home_customize_hint">Выключите то, что не хотите видеть. Скрытые полки останутся скрытыми и после обновления ленты.</string>
     <string name="show_all">Показать всё</string>
     <string name="done">Готово</string>
@@ -332,4 +332,8 @@
     <string name="my_jam">Мой джем</string>
     <string name="jam_playing">играет</string>
     <string name="jam_paused">пауза</string>
+    <string name="home_customize_subtitle">Какие полки на главной, в каком порядке, и «Мой джем»</string>
+    <string name="home_customize_hint2">Перетаскивайте за ручку, чтобы поменять порядок. Выключите то, что не хотите видеть.</string>
+    <string name="wave_seeds_playlist">Плейлист</string>
+    <string name="wave_no_playlists">Плейлистов пока нет.</string>
 </resources>

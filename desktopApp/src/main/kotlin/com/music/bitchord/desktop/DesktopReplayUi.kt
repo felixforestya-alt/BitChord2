@@ -82,7 +82,7 @@ internal fun DesktopReplayPage(
 ) {
     // The mesh behind this page is painted by the frame, so the chrome is tinted by it too.
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = contentPadding) {
+        LazyColumn(Modifier.fillMaxSize(), state = rememberPageListState(), contentPadding = contentPadding) {
             item("heading") {
                 // No arrow of its own: the top bar's back is the way out, as the gesture is on
                 // Android.

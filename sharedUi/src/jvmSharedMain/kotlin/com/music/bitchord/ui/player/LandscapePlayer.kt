@@ -604,10 +604,16 @@ internal fun LandscapeLyricsPane(
                     .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                LyricsStatusWithChange(
-                    status = status,
-                    onStatusClick = onStatusClick,
-                )
+                // Scaled with the toggles either side of it.
+                val here = androidx.compose.ui.platform.LocalDensity.current
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(here.density, here.fontScale * minOf(1f, controls.scale)),
+                ) {
+                    LyricsStatusWithChange(
+                        status = status,
+                        onStatusClick = onStatusClick,
+                    )
+                }
             }
             ScaledToggle(controls.scale) { if (hasLyrics) translationToggle() }
         }

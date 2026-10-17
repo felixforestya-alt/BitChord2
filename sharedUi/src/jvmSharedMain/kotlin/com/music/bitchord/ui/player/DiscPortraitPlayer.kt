@@ -404,7 +404,7 @@ internal fun DiscPortraitPlayer(
                                         Box(Modifier.zIndex(1f)) { credits() }
                                         // Just clear of the buttons hanging below the artist —
                                         // whether a line being sung comes next or the deck does.
-                                        Spacer(Modifier.height(drop + 4.dp))
+                                        Spacer(Modifier.height(drop - 6.dp))
                                         if (lyricStrip != null) lyricStrip()
                                     }
                                 }
@@ -418,10 +418,12 @@ internal fun DiscPortraitPlayer(
                                 val paneDensity = LocalDensity.current
                                 androidx.compose.runtime.CompositionLocalProvider(
                                     LocalLyricsFocusFraction provides 0.42f,
-                                    LocalLyricsPaneControls provides LyricsPaneControls(scale = 1.3f, bottomGap = 14.dp),
+                                    // On its side the toggles and the source line a size down, so the
+                                    // words have the height.
+                                    LocalLyricsPaneControls provides LyricsPaneControls(scale = if (wide) 0.85f else 1.3f, bottomGap = if (wide) 4.dp else 14.dp),
                                     LocalDensity provides androidx.compose.ui.unit.Density(
-                                        paneDensity.density * (if (wide) WIDE_PANE_SCALE else 1f),
-                                        paneDensity.fontScale * (if (wide) WIDE_PANE_SCALE else 1f),
+                                        paneDensity.density * (if (wide) WIDE_LYRICS_SCALE else 1f),
+                                        paneDensity.fontScale * (if (wide) WIDE_LYRICS_SCALE else 1f),
                                     ),
                                 ) { lyricsPane() }
                             }
@@ -545,8 +547,9 @@ private val CREDITS_BUTTONS_DROP = 20.dp
 /** On its side the track's words are larger still: there is width to spare for them. */
 private const val WIDE_WORDS_SCALE = 1.38f
 
-/** And the lyrics and the queue on its side, larger than the deck beside them. */
-private const val WIDE_PANE_SCALE = 1.25f
+/** And the lyrics and the queue on its side, a little larger than the deck beside them. */
+private const val WIDE_PANE_SCALE = 1.1f
+private const val WIDE_LYRICS_SCALE = 1.15f
 
 /** How much of the artist's line the like and menu buttons take at its end. */
 private val CREDITS_BUTTONS_WIDTH = 100.dp

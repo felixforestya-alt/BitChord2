@@ -229,8 +229,7 @@ internal fun DesktopExplorePage(
 
 @Composable
 private fun ExploreHeading() {
-    val shimmer = rememberInfiniteTransition(label = "exploreHeading")
-    val sweep by shimmer.animateFloat(0f, 1f, infiniteRepeatable(tween(7_000, easing = LinearEasing), RepeatMode.Restart), label = "exploreSweep")
+    val sweep by com.music.bitchord.ui.rememberLoopingFraction(7_000)
     Column(Modifier.padding(bottom = 6.dp)) {
         Text(
             DesktopStrings["explore", "Explore"],
@@ -327,8 +326,9 @@ private fun ExploreCard(item: MoodGenre, index: Int, onClick: () -> Unit) {
 /** A card waiting for its cover: its own colour, softly moving, rather than a grey shimmer. */
 @Composable
 private fun ExploreGlow(tone: Color, index: Int, modifier: Modifier) {
-    val drift = rememberInfiniteTransition(label = "exploreGlow")
-    val t by drift.animateFloat(0f, 1f, infiniteRepeatable(tween(3_200 + index % 5 * 300, easing = LinearEasing), RepeatMode.Reverse), label = "glowT")
+    // There and back, on the shared ambient beat.
+    val loop by com.music.bitchord.ui.rememberLoopingFraction(2 * (3_200 + index % 5 * 300))
+    val t = if (loop < 0.5f) loop * 2f else 2f - loop * 2f
     Box(
         modifier.background(
             Brush.radialGradient(

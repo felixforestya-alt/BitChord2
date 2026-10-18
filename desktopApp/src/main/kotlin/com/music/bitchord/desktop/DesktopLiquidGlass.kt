@@ -63,6 +63,9 @@ internal class DesktopGlassBackdrop(val layer: GraphicsLayer) {
     /** Whether anything has been recorded yet. */
     internal var recorded = false
 
+    /** The ambient beat the source last drew in — see [com.music.bitchord.ui.ambientTick]. */
+    internal var lastTick = -1
+
     /**
      * True while the source is recording. A pane drawn *inside* its own source would otherwise
      * draw the layer being recorded into that same layer, without end — the stack overflow that
@@ -97,7 +100,13 @@ internal fun Modifier.glassSource(backdrop: DesktopGlassBackdrop): Modifier =
             // Read without being observed: `revision++` reads before it writes, and a read here
             // made this very draw depend on the value it then changed — so it marked itself stale
             // and redrew on every frame of the display, forever, the whole window with it.
-            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { backdrop.revision++ }
+            //
+            // Not when this draw is an ambient beat's: the panes read that beat themselves and
+            // redraw in this same frame, and a bump would ask for a second frame after it.
+            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+                val tick = com.music.bitchord.ui.ambientTick.intValue
+                if (tick != backdrop.lastTick) backdrop.lastTick = tick else backdrop.revision++
+            }
         }
 
 /**
@@ -147,6 +156,9 @@ internal fun Modifier.desktopLiquidGlass(
             // Read so the pane redraws when the page under it does.
             @Suppress("UNUSED_VARIABLE")
             val revision = backdrop.revision
+            // And on every ambient beat, in the frame the page moves in — see [glassSource].
+            @Suppress("UNUSED_VARIABLE")
+            val beat = com.music.bitchord.ui.ambientTick.intValue
             val radius = (cornerOf?.invoke() ?: cornerRadius).toPx().coerceAtMost(minOf(size.width, size.height) / 2f)
             val lens = lensOf?.invoke() ?: 0f
             val outline = Path().apply {

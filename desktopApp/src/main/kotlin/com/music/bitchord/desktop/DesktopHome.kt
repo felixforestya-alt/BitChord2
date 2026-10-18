@@ -688,14 +688,19 @@ private fun HeroStage(
             AnimatedContent(
                 targetState = indexState.value,
                 transitionSpec = {
-                    (fadeIn(tween(380)) + scaleIn(tween(520, easing = EASE_OUT_EXPO), initialScale = 1.3f)) togetherWith
-                        (fadeOut(tween(160)) + scaleOut(tween(220), targetScale = 0.85f))
+                    // Swapped outright while the window is in the background: nobody to see it.
+                    if (com.music.bitchord.ui.AppActivity.quiet) {
+                        androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                    } else {
+                        (fadeIn(tween(380)) + scaleIn(tween(520, easing = EASE_OUT_EXPO), initialScale = 1.3f)) togetherWith
+                            (fadeOut(tween(160)) + scaleOut(tween(220), targetScale = 0.85f))
+                    }
                 },
                 label = "heroLyric",
             ) { shown ->
                 // Out of focus as it arrives, sharpening as it settles — with room around it for
                 // the blur to spread into instead of being cut at the words' own edges.
-                val focus = remember { Animatable(0f) }
+                val focus = remember { Animatable(if (com.music.bitchord.ui.AppActivity.quiet) 1f else 0f) }
                 LaunchedEffect(Unit) { focus.animateTo(1f, tween(480, easing = EASE_OUT_EXPO)) }
                 Box(
                     Modifier

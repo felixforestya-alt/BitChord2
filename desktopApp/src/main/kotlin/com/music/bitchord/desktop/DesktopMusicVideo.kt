@@ -121,8 +121,9 @@ internal fun rememberDesktopMusicVideo(
                     frames.frame = publish(withContext(Dispatchers.Default) { rasterOf(pixels, info, decoder.width) }, retired)
                     frames.state = DesktopVideoState.PLAYING
                 }
-                if (!playing) {
-                    // Paused: the frame stays up; only a seek moves it.
+                if (!playing || com.music.bitchord.ui.AppActivity.quiet) {
+                    // Paused, or the window in the background: the frame stays up; only a seek
+                    // moves it, and coming back to the window catches up with the audio.
                     delay(PAUSED_POLL_MS)
                     val held = audioNowMs()
                     if (abs(held - lastPts) > PAUSED_RESYNC_MS) seekTo = held

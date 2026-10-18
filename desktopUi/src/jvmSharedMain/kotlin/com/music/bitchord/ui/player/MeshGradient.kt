@@ -124,26 +124,74 @@ fun MeshGradientBackground(
     val colorSpec: AnimationSpec<Color> = if (reduceAnimation || !animated) snap() else tween(colorFadeMillis)
     // Held as states and read only while drawing: a fade then redraws the mesh alone, where read
     // here it recomposed all of this on every frame of it.
-    val animatedColors = tuned.mapIndexed { index, color ->
-        animateColorAsState(color, colorSpec, label = "meshColor$index")
+    //
+    // The fade is stepped on the shared ambient beat (see AppActivity) rather than animated per
+    // colour: five colour animations asked for every frame the display has, for as long as a
+    // palette that changes on a timer kept fading — on a fast monitor, most of what it drew.
+    val targets = tuned + tuned.first().dimmed()
+    val snapColors = reduceAnimation || !animated
+    val fadeFrom = remember { mutableStateOf(targets) }
+    val fadeTo = remember { mutableStateOf(targets) }
+    val fade = remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+    fun shownNow(): List<Color> = fadeTo.value.mapIndexed { i, to ->
+        androidx.compose.ui.graphics.lerp(fadeFrom.value.getOrElse(i) { to }, to, fade.floatValue)
     }
-    val baseColor = animateColorAsState(tuned.first().dimmed(), colorSpec, label = "meshBase")
+    val quietNow = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(targets, snapColors, colorFadeMillis) {
+        if (targets == fadeTo.value) return@LaunchedEffect
+        fadeFrom.value = shownNow()
+        fadeTo.value = targets
+        // Nobody looking, or no fade wanted: the new colours at once.
+        if (snapColors || com.music.bitchord.ui.AppActivity.quiet) {
+            fade.floatValue = 1f
+            return@LaunchedEffect
+        }
+        fade.floatValue = 0f
+        var start = -1L
+        while (fade.floatValue < 1f) {
+            com.music.bitchord.ui.awaitAmbientFrame { now ->
+                if (start < 0) start = now
+                val t = ((now - start) / 1_000_000f / colorFadeMillis.coerceAtLeast(1)).coerceIn(0f, 1f)
+                // The tween's own curve: fast out, slow in.
+                fade.floatValue = androidx.compose.animation.core.FastOutSlowInEasing.transform(t).let { if (t >= 1f) 1f else it }
+            }
+        }
+    }
+    // A fade cut short by the window going to the background lands on its colours.
+    LaunchedEffect(quietNow) { if (quietNow) fade.floatValue = 1f }
+    val animatedColors = (0 until 4).map { index ->
+        remember(index) { androidx.compose.runtime.derivedStateOf { shownNow()[index] } }
+    }
+    val baseColor = remember { androidx.compose.runtime.derivedStateOf { shownNow()[4] } }
 
     // Read in the draw lambda, not here: an Animatable read during draw
     // invalidates only the drawing, leaving composition out of the loop.
     val phase = remember { Animatable(0f) }
-    LaunchedEffect(trackKey, reduceAnimation, continuous, animated) {
+    // The continuous drift's own share of the phase, written inside the frame it is drawn in: a
+    // write after the frame asked for another one straight away, two frames for every step.
+    val driftTurn = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    // Held where it is while the window is in the background (see AppActivity): a drift nobody
+    // sees, at the display's full rate, was most of what a playing app cost a game in front of it.
+    val quiet = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(trackKey, reduceAnimation, continuous, animated, quiet) {
         when {
             !animated || reduceAnimation -> phase.snapTo(0f)
+            quiet -> Unit
             // A full turn at a time, restarted rather than looped with an
             // infinite spec: the blobs' speeds are irrational multiples of each
             // other, so the pattern never repeats, and a linear phase keeps the
             // orbit even instead of easing to a halt each lap.
-            continuous -> while (isActive) {
-                phase.animateTo(
-                    targetValue = phase.value + (2 * PI).toFloat(),
-                    animationSpec = tween(driftMillis * 4, easing = LinearEasing),
-                )
+            // Stepped by hand at the ambient rate rather than animated, which would ask for
+            // every frame the display has.
+            continuous -> {
+                var last = System.nanoTime()
+                while (isActive) {
+                    com.music.bitchord.ui.awaitAmbientFrame { now ->
+                        val turn = (now - last) / 1_000_000f / (driftMillis * 4) * (2 * PI).toFloat()
+                        last = now
+                        driftTurn.floatValue = (driftTurn.floatValue + turn) % (2 * PI * 64).toFloat()
+                    }
+                }
             }
             else -> phase.animateTo(
                 targetValue = phase.value + DRIFT_RADIANS,
@@ -184,7 +232,7 @@ fun MeshGradientBackground(
             Offset(0.25f, 0.75f),
         )
         val speeds = listOf(1f, -0.7f, 0.85f, -1.15f)
-        val drift = phase.value
+        val drift = phase.value + driftTurn.floatValue
 
         animatedColors.forEachIndexed { index, colorState ->
             val color = colorState.value
@@ -253,8 +301,9 @@ val WelcomeMeshPalettes: List<MeshPalette> = listOf(
 fun cyclingMeshPalette(palettes: List<MeshPalette>, stepMillis: Int = MESH_CYCLE_MILLIS): MeshPalette {
     val reduceAnimation by PlayerSettings.reduceAnimation.collectAsStateWithLifecycle()
     var step by remember { mutableIntStateOf(0) }
-    LaunchedEffect(reduceAnimation, stepMillis) {
-        if (reduceAnimation) return@LaunchedEffect
+    val quiet = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(reduceAnimation, stepMillis, quiet) {
+        if (reduceAnimation || quiet) return@LaunchedEffect
         while (isActive) {
             delay(stepMillis.toLong())
             step++

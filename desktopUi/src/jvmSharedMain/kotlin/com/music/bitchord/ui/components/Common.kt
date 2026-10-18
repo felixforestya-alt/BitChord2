@@ -684,24 +684,27 @@ val PlayingAccent = Color(0xFFFB4A62)
 
 @Composable
 fun SearchPlayingBars(modifier: Modifier = Modifier) {
-    val heights = listOf(0.38f, 0.78f, 0.52f).mapIndexed { index, minimum ->
-        val transition = rememberInfiniteTransition(label = "search playing bar $index")
-        val height by transition.animateFloat(
-            initialValue = minimum,
-            targetValue = 1f - (index * 0.12f),
-            animationSpec = infiniteRepeatable(
-                animation = keyframes {
-                    durationMillis = 520 + index * 130
-                    minimum at 0
-                    1f at (260 + index * 50)
-                    minimum at durationMillis
-                },
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "search bar height $index",
-        )
-        height
+    // Standing, mid-bounce, while the window is in the background: no frames for them.
+    if (com.music.bitchord.ui.AppActivity.quiet) {
+        PlayingBarsStill(modifier)
+        return
     }
+    // Each bar up and down at its own pace, on the shared ambient beat (see AppActivity).
+    val heights = listOf(0.38f, 0.78f, 0.52f).mapIndexed { index, minimum ->
+        val loop by com.music.bitchord.ui.rememberLoopingFraction(2 * (520 + index * 130))
+        val there = if (loop < 0.5f) loop * 2f else 2f - loop * 2f
+        val eased = kotlin.math.sin(there * kotlin.math.PI.toFloat() / 2f)
+        minimum + (1f - index * 0.12f - minimum) * eased
+    }
+    PlayingBarsPlate(modifier, heights)
+}
+
+/** The bars held still, at heights they pass through while moving. */
+@Composable
+private fun PlayingBarsStill(modifier: Modifier) = PlayingBarsPlate(modifier, listOf(0.62f, 0.95f, 0.7f))
+
+@Composable
+private fun PlayingBarsPlate(modifier: Modifier, heights: List<Float>) {
     // The plate is a fixed square so only the bars move, never the box around them.
     Box(
         modifier = modifier

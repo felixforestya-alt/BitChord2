@@ -1767,16 +1767,7 @@ private fun ShimmerText(
     ),
     baseAlpha: Float = 0.55f,
 ) {
-    val transition = rememberInfiniteTransition(label = "lossless-shimmer")
-    val progress = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3_000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "lossless-shimmer-progress",
-    )
+    val progress = com.music.bitchord.ui.rememberLoopingFraction(3_000)
     val tint = LocalPlayerTint.current
     val baseColor = tint.copy(alpha = baseAlpha)
     // The glyphs are laid out and drawn once, in the plain tint, and the moving

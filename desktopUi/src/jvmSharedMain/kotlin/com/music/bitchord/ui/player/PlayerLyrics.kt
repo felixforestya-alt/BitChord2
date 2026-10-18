@@ -797,11 +797,12 @@ private fun rememberLyricClock(
     // reading instead, every reading restarted it, and each restart spent a
     // frame waiting for its first frame time — a hitch twice a second.
     val foreground = rememberIsForeground()
-    LaunchedEffect(engine, playhead, isPlaying, foreground) {
-        if (!isPlaying || !foreground) return@LaunchedEffect
+    val quiet = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(engine, playhead, isPlaying, foreground, quiet) {
+        if (!isPlaying || !foreground || quiet) return@LaunchedEffect
         engine.restart()
         while (true) {
-            withFrameNanos { frameNanos ->
+            com.music.bitchord.ui.awaitAmbientFrame { frameNanos ->
                 // Readings are stamped on the System.nanoTime clock. The frame
                 // time is that clock too wherever it is a vsync stamp, and is
                 // preferred for being evenly spaced; anywhere it is not, the
@@ -1714,7 +1715,7 @@ private fun Modifier.lyricParticles(
  */
 @Composable
 private fun LyricsSkeleton(modifier: Modifier = Modifier) {
-    val sweep = rememberInfiniteTransition(label = "lyricsSkeleton").animateFloat(
+    val sweep = rememberLyricsSkeletonSweep(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -3377,4 +3378,19 @@ fun LyricsTranslationButton(versions: LyricsVersions, enabled: Boolean) {
         enabled = enabled,
         onClick = versions.ui.toggleTranslation,
     )
+}
+
+/** The lyrics skeleton's sweep on the shared ambient beat, standing in for its infinite transition. */
+@Composable
+private fun rememberLyricsSkeletonSweep(
+    initialValue: Float,
+    targetValue: Float,
+    animationSpec: androidx.compose.animation.core.InfiniteRepeatableSpec<Float>,
+    label: String,
+): androidx.compose.runtime.State<Float> {
+    val period = (animationSpec.animation as? androidx.compose.animation.core.TweenSpec<Float>)?.durationMillis ?: 1_200
+    val fraction = com.music.bitchord.ui.rememberLoopingFraction(period)
+    return remember(fraction) {
+        androidx.compose.runtime.derivedStateOf { initialValue + (targetValue - initialValue) * fraction.value }
+    }
 }

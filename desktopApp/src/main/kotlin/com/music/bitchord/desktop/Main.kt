@@ -37,6 +37,35 @@ fun main() {
     DesktopClassPreload.start()
     // Lists build their next items between frames — see [DesktopPrefetch].
     DesktopPrefetch.install()
+    // BITCHORD_FPSLOG=1: frames drawn per second, and whether the window counts as in the
+    // background, every few seconds — what a still window should keep at nothing.
+    if (System.getenv("BITCHORD_FPSLOG") == "1") {
+        // Who writes state, by the first frame of our code (or the library's) on the writer's stack.
+        val writers = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        val counter = java.util.concurrent.atomic.AtomicLong()
+        androidx.compose.runtime.snapshots.Snapshot.registerGlobalWriteObserver { written ->
+            if (counter.incrementAndGet() % 7 != 0L) return@registerGlobalWriteObserver
+            val value = runCatching { (written as? androidx.compose.runtime.State<*>)?.value }.getOrNull()
+            writers.merge("#" + System.identityHashCode(written) + " " + (value?.javaClass?.simpleName ?: "?") + "=" + value.toString().take(28), 1, Int::plus)
+            val stack = Thread.currentThread().stackTrace
+            val site = stack.drop(2).firstOrNull { it.className.startsWith("com.music.bitchord") }
+                ?: stack.drop(2).firstOrNull { !it.className.startsWith("androidx.compose.runtime") && !it.className.startsWith("java.") && !it.className.startsWith("kotlin") }
+            val key = site?.let { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" } ?: "?"
+            writers.merge(key, 1, Int::plus)
+        }
+        Thread({
+            var before = DesktopPrefetch.framesDrawn
+            while (true) {
+                Thread.sleep(5_000)
+                val now = DesktopPrefetch.framesDrawn
+                DesktopTrackLog.log("fps %.1f quiet=%s beats=%d".format((now - before) / 5.0, com.music.bitchord.ui.AppActivity.quiet, com.music.bitchord.ui.ambientBeats))
+                DesktopTrackLog.log("fps writers: " + writers.entries.filterNot { it.key.startsWith("#") }.sortedByDescending { it.value }.take(6).joinToString { "${it.key} x${it.value}" })
+                DesktopTrackLog.log("fps states: " + writers.entries.filter { it.key.startsWith("#") }.sortedByDescending { it.value }.take(10).joinToString { "${it.key} x${it.value}" })
+                writers.clear()
+                before = now
+            }
+        }, "bitchord-fps-log").apply { isDaemon = true }.start()
+    }
     // Before any WebView exists, so the sign-in window can start over with an empty jar.
     DesktopWebCookies.install()
     DesktopWindowVisibility.install()
@@ -166,6 +195,8 @@ private fun desktopMain() = application {
         LaunchedEffect(composeWindow) { DesktopStartupWarmup.prepare(composeWindow) }
         LaunchedEffect(composeWindow) {
             DesktopWindowVisibility.attachWindow(composeWindow)
+            // Whether anyone is looking — see DesktopActivityWatch.
+            DesktopActivityWatch.attach(composeWindow)
             this.launch { DesktopGpuCache.attach(composeWindow) }
             DesktopMemoryTrim.watch(composeWindow)
             // AWT's default is white, and it is what shows for the frame or two a moved or resized

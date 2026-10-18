@@ -92,7 +92,8 @@ internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
                 while (isActive) {
                     // Paused with the track, or for the length of the sleeve's
                     // collapse: the last frame stays up, nothing is decoded.
-                    snapshotFlow { running }.first { it }
+                    // And while the window is in the background: nobody to show it to.
+                    snapshotFlow { running && !com.music.bitchord.ui.AppActivity.quiet }.first { it }
                     val started = System.currentTimeMillis()
                     val decoded = withContext(Dispatchers.IO) { decoder.nextFrame(pixels) }
                     if (!decoded) break

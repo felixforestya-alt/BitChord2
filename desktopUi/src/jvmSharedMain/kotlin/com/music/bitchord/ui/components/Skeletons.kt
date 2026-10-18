@@ -63,12 +63,10 @@ fun ShimmerBox(modifier: Modifier = Modifier, shape: Shape = BlockShape) {
     val highlight = MaterialTheme.colorScheme.onSurfaceVariant
         .copy(alpha = 0.16f)
         .compositeOver(base)
-    val sweep = rememberInfiniteTransition(label = "skeleton").animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(SHIMMER_PERIOD_MS, easing = LinearEasing)),
-        label = "sweep",
-    )
+    // On the shared ambient beat (see AppActivity), not an infinite transition of its own: a list
+    // keeps placeholders built out of sight too, and each one's transition held the window at the
+    // display's full rate for a shimmer nobody could see.
+    val sweep = com.music.bitchord.ui.rememberLoopingFraction(SHIMMER_PERIOD_MS)
     Box(
         modifier
             .clip(shape)

@@ -364,11 +364,13 @@ private val BAR_IDLE = Color.White.copy(alpha = 0.78f)
 @Composable
 internal fun rememberFrameClock(running: Boolean): androidx.compose.runtime.MutableFloatState {
     val clock = remember { mutableFloatStateOf(0f) }
-    LaunchedEffect(running) {
-        if (!running) return@LaunchedEffect
-        var last = withFrameNanos { it }
+    // Still while nobody is looking at the window — see AppActivity.
+    val quiet = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(running, quiet) {
+        if (!running || quiet) return@LaunchedEffect
+        var last = System.nanoTime()
         while (true) {
-            withFrameNanos { now ->
+            com.music.bitchord.ui.awaitAmbientFrame { now ->
                 clock.floatValue += (now - last) / 1_000_000_000f
                 last = now
             }

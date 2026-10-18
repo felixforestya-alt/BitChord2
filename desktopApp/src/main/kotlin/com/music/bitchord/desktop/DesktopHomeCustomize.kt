@@ -180,9 +180,7 @@ internal fun DesktopWaveCard(
     val deep by androidx.compose.animation.animateColorAsState(palette.deep, tween(700), label = "jamDeep")
     val moving = playing && !paused
     // Read only while drawing, so the wave moves by redrawing alone and nothing recomposes for it.
-    val phase = rememberInfiniteTransition(label = "wave").animateFloat(
-        0f, 1f, infiniteRepeatable(tween(if (moving) 2_600 else 9_000, easing = LinearEasing), RepeatMode.Restart), label = "wavePhase",
-    )
+    val phase = com.music.bitchord.ui.rememberLoopingFraction(if (moving) 2_600 else 9_000)
     Box(
         Modifier
             // Folds up into the card above as it joins: shorter by as much, from the top.

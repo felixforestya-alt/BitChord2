@@ -3643,12 +3643,7 @@ fun BitChordDesktopApp() {
 
     // My Jam's row along the foot of the "now playing" card, while the jam has joined it.
     val jamFootRow = @Composable { rowModifier: Modifier ->
-        val phase = rememberInfiniteTransition(label = "jamFoot").animateFloat(
-            0f,
-            1f,
-            infiniteRepeatable(tween(2_600, easing = LinearEasing), RepeatMode.Restart),
-            label = "jamFootPhase",
-        )
+        val phase = com.music.bitchord.ui.rememberLoopingFraction(2_600)
         DesktopJamRow(
             starting = waveStarting,
             playing = true,
@@ -3889,6 +3884,47 @@ fun BitChordDesktopApp() {
                 (homeState as? UiState.Success)?.data?.flatMap { it.items }?.firstOrNull { it.videoId != null }
                     ?.let { playSong(it.toSong(), startPlaying = false) }
                 kotlinx.coroutines.delay(4_000)
+            }
+            // BITCHORD_PROFILE_LOAD=1: what the app costs the rest of the computer while a track
+            // plays — the processor, in whole cores, and frames drawn — on Home, with the player
+            // open, and minimised. The volume is the profile's own, set to nothing beforehand.
+            if (System.getenv("BITCHORD_PROFILE_LOAD") == "1") {
+                val os = java.lang.management.ManagementFactory.getOperatingSystemMXBean() as com.sun.management.OperatingSystemMXBean
+                suspend fun phase(label: String) {
+                    kotlinx.coroutines.delay(4_000)
+                    val cpu0 = os.processCpuTime
+                    val wall0 = System.nanoTime()
+                    val frames0 = DesktopPrefetch.framesDrawn
+                    kotlinx.coroutines.delay(14_000)
+                    DesktopFrameProfiler.countIdleFrames(label, 6_000)
+                    val cores = (os.processCpuTime - cpu0).toDouble() / (System.nanoTime() - wall0)
+                    val focused = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null
+                    DesktopTrackLog.log(
+                        "load %-16s cpu=%.2f cores  frames=%d  playing=%s focused=%s".format(
+                            label, cores, DesktopPrefetch.framesDrawn - frames0, playbackEngine.state.value.isPlaying, focused,
+                        ),
+                    )
+                    val threads = java.lang.management.ManagementFactory.getThreadMXBean()
+                    val busiest = ArrayList<Pair<String, Long>>()
+                    for (id in threads.allThreadIds) {
+                        val info: java.lang.management.ThreadInfo = threads.getThreadInfo(id) ?: continue
+                        busiest += info.threadName to threads.getThreadCpuTime(id)
+                    }
+                    busiest.sortByDescending { it.second }
+                    DesktopTrackLog.log("load   threads: " + busiest.take(10).joinToString { "${it.first}=${it.second / 1_000_000}ms" })
+                }
+                if (!playbackEngine.state.value.isPlaying) togglePlayPauseFromUser()
+                phase("home-playing")
+                overlays.nowPlaying = true
+                phase("player-playing")
+                overlays.nowPlaying = false
+                kotlinx.coroutines.delay(1_500)
+                DesktopTrackLog.log("load minimise via frame: " + DesktopWindowsFrame.minimize())
+                phase("minimised-playing")
+                togglePlayPauseFromUser()
+                phase("minimised-paused")
+                DesktopTrackLog.log("profile done")
+                return@LaunchedEffect
             }
             // BITCHORD_PROFILE_VIDEO=1: a music video, played silent with the player open — for
             // what playing one costs in memory, measured from outside.

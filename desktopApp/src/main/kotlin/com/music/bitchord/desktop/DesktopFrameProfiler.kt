@@ -151,7 +151,9 @@ internal object DesktopFrameProfiler {
         val changes = java.util.concurrent.ConcurrentHashMap<String, Int>()
         val handle = androidx.compose.runtime.snapshots.Snapshot.registerApplyObserver { changed, _ ->
             changed.forEach { state ->
-                val name = state.javaClass.name.substringAfterLast('.') + "@" + System.identityHashCode(state)
+                val value = runCatching { (state as? androidx.compose.runtime.State<*>)?.value }.getOrNull()
+                val name = state.javaClass.name.substringAfterLast('.') + "@" + System.identityHashCode(state) +
+                    " = " + (value?.javaClass?.name?.substringAfterLast('.') ?: "null") + " " + value.toString().take(60)
                 changes.merge(name, 1, Int::plus)
             }
         }

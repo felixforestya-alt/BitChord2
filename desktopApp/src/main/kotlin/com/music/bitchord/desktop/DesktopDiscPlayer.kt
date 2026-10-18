@@ -273,12 +273,14 @@ private fun DiscPlayerLayout(
     val playing by rememberUpdatedState(isPlaying)
     // Still while composed ahead out of sight: nothing there to move, and no frames to ask for.
     val sheetShown = LocalPlayerSheetShown.current
-    LaunchedEffect(reduceAnimation, sheetShown) {
-        if (!sheetShown) return@LaunchedEffect
-        var last = withFrameNanos { it }
+    // And while the window is in the background (see AppActivity): the disc stops where it is.
+    val quiet = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(reduceAnimation, sheetShown, quiet) {
+        if (!sheetShown || quiet) return@LaunchedEffect
+        var last = System.nanoTime()
         var velocity = 0f
         while (true) {
-            withFrameNanos { now ->
+            com.music.bitchord.ui.awaitAmbientFrame { now ->
                 val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
                 last = now
                 if (!reduceAnimation) clock.floatValue += dt
@@ -730,8 +732,13 @@ private fun CurrentLyricLine(
     AnimatedContent(
         targetState = index,
         transitionSpec = {
-            (slideInVertically(tween(420, easing = EASE_OUT_EXPO)) { it / 2 } + fadeIn(tween(320))) togetherWith
-                (slideOutVertically(tween(260)) { -it / 2 } + fadeOut(tween(200)))
+            // Swapped outright while the window is in the background: nobody to see it.
+            if (com.music.bitchord.ui.AppActivity.quiet) {
+                androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+            } else {
+                (slideInVertically(tween(420, easing = EASE_OUT_EXPO)) { it / 2 } + fadeIn(tween(320))) togetherWith
+                    (slideOutVertically(tween(260)) { -it / 2 } + fadeOut(tween(200)))
+            }
         },
         label = "lyricLine",
         modifier = Modifier.padding(top = 10.dp),

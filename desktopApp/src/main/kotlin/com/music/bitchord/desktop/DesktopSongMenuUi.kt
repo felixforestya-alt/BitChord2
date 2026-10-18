@@ -611,7 +611,7 @@ private const val MAX_LYRICS_OFFSET_MS = 5_000
 
 /** The panel a menu is drawn in: a floating card in the app's own glass. */
 @Composable
-private fun DesktopMenuSurface(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+internal fun DesktopMenuSurface(onDismiss: () -> Unit, content: @Composable () -> Unit) {
     Popup(
         popupPositionProvider = remember { DesktopMenuPosition() },
         onDismissRequest = onDismiss,
@@ -693,7 +693,7 @@ private fun DesktopMenuHeader(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun DesktopMenuDivider() {
+internal fun DesktopMenuDivider() {
     HorizontalDivider(
         Modifier.padding(vertical = 5.dp),
         thickness = 0.5.dp,
@@ -703,7 +703,7 @@ private fun DesktopMenuDivider() {
 
 /** One menu row. */
 @Composable
-private fun DesktopMenuRow(
+internal fun DesktopMenuRow(
     icon: ImageVector,
     label: String,
     tint: Color? = null,

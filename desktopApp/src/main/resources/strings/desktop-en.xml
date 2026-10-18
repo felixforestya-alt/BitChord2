@@ -215,4 +215,10 @@
     <string name="d_liked_music_hint">Goes in as a like on each track</string>
     <string name="d_liking_progress">Liking… %1$d of %2$d</string>
     <string name="d_liking_failed">%1$d of %2$d could not be liked</string>
+    <string name="reorder_playlist">Edit order</string>
+    <string name="d_duration_m">%d min</string>
+    <string name="d_duration_hm">%1$d hr %2$d min</string>
+    <string name="d_tracks_one">%d song</string>
+    <string name="d_tracks_few">%d songs</string>
+    <string name="d_tracks_many">%d songs</string>
 </resources>

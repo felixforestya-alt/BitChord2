@@ -3222,6 +3222,15 @@ fun BitChordDesktopApp() {
         }
     }
 
+    // The whole list, not its first hundred: the pages after the first are fetched one after
+    // another as soon as it opens, so the count, the length and the list are all of it before
+    // anyone scrolls — each finished page asks for the next.
+    LaunchedEffect(openedCollection?.browseId, openedCollection?.continuation, collectionLoadingMore) {
+        val page = openedCollection ?: return@LaunchedEffect
+        if (page.loading || page.continuation == null || collectionLoadingMore) return@LaunchedEffect
+        loadMoreCollectionSongs()
+    }
+
     fun renameOpenPlaylist(title: String) {
         val collection = openedCollection ?: return
         playlistBusy = true
@@ -8672,7 +8681,7 @@ private fun DesktopCollectionPage(
     val metadata = buildList {
         add(typeLabel.uppercase())
         subtitleParts.firstOrNull { it.matches(Regex("\\d{4}")) }?.let(::add)
-        if (songs.isNotEmpty()) add("${songs.size} songs")
+        if (songs.isNotEmpty()) add(trackCount(songs.size))
         val seconds = songs.sumOf { it.durationText.durationMillis() / 1_000L }
         if (seconds > 0) add(formatCollectionDuration(seconds))
     }.joinToString(" • ").uppercase()
@@ -8772,74 +8781,36 @@ private fun DesktopCollectionPage(
                             )
                             Box {
                                 DesktopCircleButton(Icons.Rounded.MoreHoriz, DesktopStrings["more", "More"], onClick = { moreOpen = true })
-                                DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text(DesktopStrings["download_all", "Download all"]) },
-                                        leadingIcon = { Icon(BitChordIcons.Download, null) },
-                                        onClick = {
-                                            moreOpen = false
-                                            onDownloadAll(songs)
-                                        },
-                                    )
-                                    onShare?.let { share ->
-                                        DropdownMenuItem(
-                                            text = { Text(DesktopStrings["share", "Share"]) },
-                                            leadingIcon = { Icon(Icons.Rounded.Share, null) },
-                                            onClick = {
-                                                moreOpen = false
-                                                share()
-                                            },
-                                        )
+                                // The song menu's own panel and rows, so the two menus look like one app.
+                                if (moreOpen) DesktopMenuSurface(onDismiss = { moreOpen = false }) {
+                                    fun pick(action: () -> Unit) {
+                                        moreOpen = false
+                                        action()
                                     }
-                                    onRename?.let { rename ->
-                                        DropdownMenuItem(
-                                            text = { Text(DesktopStrings["rename", "Rename"]) },
-                                            leadingIcon = { Icon(Icons.Rounded.Edit, null) },
-                                            onClick = {
-                                                moreOpen = false
-                                                rename()
-                                            },
-                                        )
+                                    DesktopMenuRow(BitChordIcons.Download, DesktopStrings["download_all", "Download all"]) { pick { onDownloadAll(songs) } }
+                                    onShare?.let { share ->
+                                        DesktopMenuRow(Icons.Rounded.Share, DesktopStrings["share", "Share"]) { pick(share) }
                                     }
                                     onAddAllToPlaylist?.let { addAll ->
-                                        DropdownMenuItem(
-                                            text = { Text(DesktopStrings["d_add_all_to_playlist", "Add all to playlist…"]) },
-                                            leadingIcon = { Icon(BitChordIcons.Plus, null) },
-                                            onClick = {
-                                                moreOpen = false
-                                                addAll()
-                                            },
-                                        )
+                                        DesktopMenuRow(BitChordIcons.Plus, DesktopStrings["d_add_all_to_playlist", "Add all to playlist…"]) { pick(addAll) }
+                                    }
+                                    if (onRename != null || onReorder != null || onShuffleOrder != null || onDelete != null) DesktopMenuDivider()
+                                    onRename?.let { rename ->
+                                        DesktopMenuRow(Icons.Rounded.Edit, DesktopStrings["rename", "Rename"]) { pick(rename) }
                                     }
                                     onReorder?.let { reorder ->
-                                        DropdownMenuItem(
-                                            text = { Text(DesktopStrings["reorder_playlist", "Edit order"]) },
-                                            leadingIcon = { Icon(Icons.Rounded.DragHandle, null) },
-                                            onClick = {
-                                                moreOpen = false
-                                                reorder()
-                                            },
-                                        )
+                                        DesktopMenuRow(Icons.Rounded.DragHandle, DesktopStrings["reorder_playlist", "Edit order"]) { pick(reorder) }
                                     }
                                     onShuffleOrder?.let { shuffleOrder ->
-                                        DropdownMenuItem(
-                                            text = { Text(DesktopStrings["d_shuffle_order", "Shuffle order"]) },
-                                            leadingIcon = { Icon(BitChordIcons.Shuffle, null) },
-                                            onClick = {
-                                                moreOpen = false
-                                                shuffleOrder()
-                                            },
-                                        )
+                                        DesktopMenuRow(BitChordIcons.Shuffle, DesktopStrings["d_shuffle_order", "Shuffle order"]) { pick(shuffleOrder) }
                                     }
                                     onDelete?.let { delete ->
-                                        DropdownMenuItem(
-                                            text = { Text(DesktopStrings["delete", "Delete"]) },
-                                            leadingIcon = { Icon(Icons.Rounded.Delete, null) },
-                                            onClick = {
-                                                moreOpen = false
-                                                delete()
-                                            },
-                                        )
+                                        DesktopMenuDivider()
+                                        DesktopMenuRow(
+                                            Icons.Rounded.Delete,
+                                            DesktopStrings["delete", "Delete"],
+                                            tint = MaterialTheme.colorScheme.error,
+                                        ) { pick(delete) }
                                     }
                                 }
                             }
@@ -9835,10 +9806,24 @@ private fun formatTime(ms: Long): String {
 private fun formatCollectionDuration(totalSeconds: Long): String {
     val minutes = totalSeconds / 60L
     return if (minutes < 60L) {
-        "$minutes min"
+        DesktopStrings["d_duration_m", "%d min"].format(minutes)
     } else {
-        "${minutes / 60L} hr ${minutes % 60L} min"
+        DesktopStrings["d_duration_hm", "%1\$d hr %2\$d min"].format(minutes / 60L, minutes % 60L)
     }
+}
+
+/** "12 songs", in the app's language — with Russian's three plural forms where it has them. */
+private fun trackCount(count: Int): String {
+    val mod10 = count % 10
+    val mod100 = count % 100
+    val key = when {
+        DesktopStrings.resolvedTag() != "ru" -> if (count == 1) "d_tracks_one" else "d_tracks_many"
+        mod10 == 1 && mod100 != 11 -> "d_tracks_one"
+        mod10 in 2..4 && mod100 !in 12..14 -> "d_tracks_few"
+        else -> "d_tracks_many"
+    }
+    val fallback = if (count == 1) "%d song" else "%d songs"
+    return DesktopStrings[key, fallback].format(count)
 }
 
 private fun formatSleepTimer(ms: Long): String = formatTime(ms)

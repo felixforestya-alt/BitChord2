@@ -393,4 +393,10 @@
     <string name="d_liked_music_hint">Каждому треку поставится лайк</string>
     <string name="d_liking_progress">Ставлю лайки… %1$d из %2$d</string>
     <string name="d_liking_failed">Не удалось лайкнуть %1$d из %2$d</string>
+    <string name="reorder_playlist">Изменить порядок</string>
+    <string name="d_duration_m">%d мин</string>
+    <string name="d_duration_hm">%1$d ч %2$d мин</string>
+    <string name="d_tracks_one">%d трек</string>
+    <string name="d_tracks_few">%d трека</string>
+    <string name="d_tracks_many">%d треков</string>
 </resources>

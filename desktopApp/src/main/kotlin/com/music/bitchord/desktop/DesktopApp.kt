@@ -1137,7 +1137,7 @@ fun BitChordDesktopApp() {
     var waveStarting by remember { mutableStateOf(false) }
 
     /** Plays My Wave — see [DesktopMyWave] — from the account's likes and what was played lately. */
-    fun startWave() {
+    fun startWave(from: Song? = null) {
         if (waveStarting || partyTrackChangeBlocked()) return
         waveStarting = true
         scope.launch {
@@ -1161,7 +1161,13 @@ fun BitChordDesktopApp() {
                 } else {
                     emptyList()
                 }
-                val batch = DesktopMyWave.start(liked, played, fromPlaylist)
+                val batch = if (from != null) {
+                    // A jam from one track: that track first, then what grows from it.
+                    val seed = canonicalSong(from)
+                    listOf(seed) + DesktopMyWave.startFrom(seed, liked, played).filterNot { it.videoId == seed.videoId }
+                } else {
+                    DesktopMyWave.start(liked, played, fromPlaylist)
+                }
                 if (batch.isEmpty()) {
                     DesktopTrackLog.log("wave: nothing to start a wave from")
                     return@launch
@@ -2475,6 +2481,7 @@ fun BitChordDesktopApp() {
         onDownload = ::downloadSong,
         onRemoveDownload = ::removeDownload,
         onStartRadio = ::startRadio,
+        onStartJam = { song -> startWave(from = song) },
         onPlayNext = ::playNext,
         onAddToQueue = ::addToQueue,
         onOpenAlbum = ::openAlbum,
@@ -3418,6 +3425,7 @@ fun BitChordDesktopApp() {
         onDownload = ::downloadSong,
         onRemoveDownload = ::removeDownload,
         onStartRadio = ::startRadio,
+        onStartJam = { song -> startWave(from = song) },
         onPlayNext = ::playNext,
         onAddToQueue = ::addToQueue,
         // Both leave the player, the way opening a page from Android's sheet collapses it.

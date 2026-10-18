@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.DownloadDone
@@ -86,6 +87,8 @@ internal data class DesktopSongActions(
     val onDownload: (Song) -> Unit,
     val onRemoveDownload: (Song) -> Unit,
     val onStartRadio: (Song) -> Unit,
+    /** My Jam grown from this track — its feel, and the jam's learning. */
+    val onStartJam: (Song) -> Unit,
     val onPlayNext: (Song) -> Unit,
     val onAddToQueue: (Song) -> Unit,
     val onOpenAlbum: (String) -> Unit,
@@ -215,6 +218,7 @@ internal fun DesktopSongMenuFor(
         onDownload = { actions.onDownload(song); close() },
         onRemoveDownload = { actions.onRemoveDownload(song); close() },
         onStartRadio = { actions.onStartRadio(song); close() },
+        onStartJam = { actions.onStartJam(song); close() },
         onPlayNext = { actions.onPlayNext(song); close() },
         onAddToQueue = { actions.onAddToQueue(song); close() },
         onOpenAlbum = { id -> actions.onOpenAlbum(id); close() },
@@ -259,6 +263,7 @@ internal fun DesktopSongMenu(
     onAddToPlaylist: () -> Unit,
     onDownload: () -> Unit,
     onStartRadio: () -> Unit,
+    onStartJam: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onOpenAlbum: ((String) -> Unit)?,
@@ -414,6 +419,7 @@ internal fun DesktopSongMenu(
             )
         }
         DesktopMenuRow(Icons.Rounded.Radio, DesktopStrings["start_radio", "Start radio"], onClick = onStartRadio)
+        DesktopMenuRow(Icons.Rounded.AutoAwesome, DesktopStrings["d_start_jam", "Start a jam from this"], onClick = onStartJam)
         DesktopMenuRow(Icons.AutoMirrored.Rounded.PlaylistPlay, DesktopStrings["play_next", "Play next"], onClick = onPlayNext)
         DesktopMenuRow(Icons.AutoMirrored.Rounded.QueueMusic, DesktopStrings["add_to_queue", "Add to queue"], onClick = onAddToQueue)
         // What the player's content column shows, and the ways of reading the

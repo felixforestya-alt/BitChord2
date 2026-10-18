@@ -120,9 +120,9 @@ internal object DesktopMyWave {
 
     /** Whether the jam is to leave [song] out: an artist disliked, or skipped past again and again. */
     fun unwanted(song: Song): Boolean {
-        val keys = artistKeys(song)
+        if (song.videoId in _skipped.value) return true
         val blocked = _blocked.value
-        return keys.any { it in blocked || (artistTaste[it] ?: 0f) <= SKIPPED_OUT }
+        return artistKeys(song).any { it in blocked }
     }
 
     /** A heart or a thumbs-down given to [song] while the jam plays. */
@@ -148,7 +148,25 @@ internal object DesktopMyWave {
     }
 
     /** [song] skipped in its first seconds. */
-    fun onSkipped(song: Song) = artistKeys(song).forEach { nudge(it, -SKIP_WEIGHT) }
+    fun onSkipped(song: Song) {
+        // The track is the one turned down, not who made it: it never comes back, and the artist
+        // still can — only a little less favoured. Leaving an artist out is the thumbs-down's job.
+        saveSkipped((_skipped.value + song.videoId).toList().takeLast(MAX_SKIPPED).toSet())
+        artistKeys(song).forEach { artistTaste.merge(it, -SKIP_WEIGHT) { a, b -> (a + b).coerceIn(SKIP_FLOOR, TASTE_CEILING) } }
+    }
+
+    /** Tracks skipped in their first seconds: the jam does not bring them again. */
+    private val _skipped = MutableStateFlow(
+        persistence.string(KEY_SKIPPED).split('\n').map(String::trim).filter(String::isNotEmpty).toSet(),
+    )
+    val skippedTracks: StateFlow<Set<String>> = _skipped
+
+    fun clearSkipped() = saveSkipped(emptySet())
+
+    private fun saveSkipped(ids: Set<String>) {
+        _skipped.value = ids
+        persistence.saveString(KEY_SKIPPED, ids.joinToString("\n"))
+    }
 
     /** [song] heard to its end. */
     fun onFinished(song: Song) = artistKeys(song).forEach { nudge(it, LISTEN_WEIGHT) }
@@ -274,6 +292,10 @@ internal object DesktopMyWave {
     /** How far back in the queue "in a row" looks. */
     private const val RECENT_WINDOW = 4
     private const val KEY_BLOCKED = "wave_blocked_artists"
+    private const val KEY_SKIPPED = "wave_skipped_tracks"
+    private const val MAX_SKIPPED = 2_000
+    /** How far skips alone can bring an artist down: out of favour, never out of the jam. */
+    private const val SKIP_FLOOR = -1f
     private const val SEED_POOL = 40
     private const val PER_SEED = 6
     private const val SEED_TRIES = 6

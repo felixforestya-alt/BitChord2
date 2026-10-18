@@ -361,6 +361,7 @@ internal fun DesktopWaveSettingsDialog(
     val playlist by DesktopMyWave.playlist.collectAsState()
     val onlyNew by DesktopMyWave.onlyNew.collectAsState()
     val blocked by DesktopMyWave.blockedArtists.collectAsState()
+    val skipped by DesktopMyWave.skippedTracks.collectAsState()
     DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 460, popup = true) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp)) {
             DialogTitle(DesktopStrings["wave_settings", "Wave settings"])
@@ -431,6 +432,18 @@ internal fun DesktopWaveSettingsDialog(
                 }
                 Spacer(Modifier.height(6.dp))
                 TextAction(DesktopStrings["wave_unblock_all", "Let them all back"]) { DesktopMyWave.unblockAll() }
+            }
+            if (skipped.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        DesktopStrings["wave_skipped_count", "Skipped tracks not played again: %d"].format(skipped.size),
+                        color = DesktopSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextAction(DesktopStrings["wave_skipped_clear", "Forget"]) { DesktopMyWave.clearSkipped() }
+                }
             }
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {

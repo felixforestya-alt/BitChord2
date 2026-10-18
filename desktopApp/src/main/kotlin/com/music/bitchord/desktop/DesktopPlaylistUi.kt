@@ -88,6 +88,13 @@ internal fun DesktopPlaylistDialog(
     error: String?,
     onPickAccount: (UserPlaylist) -> Unit,
     onPickLocal: (DesktopPlaylist) -> Unit,
+    /**
+     * Liked Music, which takes tracks only as likes: liking each of them. Null where there is no
+     * account to like on, or nothing here YouTube could be asked to like.
+     */
+    onPickLiked: (() -> Unit)? = null,
+    /** How far a run of likes has got, as liked of total; null when none is running. */
+    likeProgress: Pair<Int, Int>? = null,
     onCreate: (String, PlaylistPrivacy) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -114,6 +121,16 @@ internal fun DesktopPlaylistDialog(
         )
         error?.let { DialogError(it) }
         DialogAction(BitChordIcons.Plus, "New playlist", enabled = !busy) { creating = true }
+        onPickLiked?.let { pickLiked ->
+            DialogAction(
+                BitChordIcons.HeartFilled,
+                DesktopStrings["d_liked_music", "Liked Music"],
+                subtitle = likeProgress?.let { (done, total) -> DesktopStrings["d_liking_progress", "Liking… %1\$d of %2\$d"].format(done, total) }
+                    ?: DesktopStrings["d_liked_music_hint", "Goes in as a like on each track"],
+                enabled = !busy,
+                onClick = pickLiked,
+            )
+        }
 
         if (signedIn && !canUseAccount) {
             Text(

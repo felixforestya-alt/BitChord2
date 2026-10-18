@@ -648,6 +648,8 @@ fun BitChordDesktopApp() {
     var playlistBatch by remember { mutableStateOf<Pair<String, List<Song>>?>(null) }
     // The open playlist's "shuffle the saved order", waiting for its confirmation.
     var shuffleOrderAsked by remember { mutableStateOf(false) }
+    // A run of likes into Liked Music under way: how many of how many.
+    var likeProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     // One busy flag and one message for every playlist edit: only one of them can be in flight,
     // because each is driven by a dialog that is modal.
     var playlistBusy by remember { mutableStateOf(false) }
@@ -1784,6 +1786,55 @@ fun BitChordDesktopApp() {
                     playlistBusy = false
                     playlistError = it.message ?: "Could not add to ${playlist.title}"
                 }
+        }
+    }
+
+    /**
+     * Into Liked Music, which YouTube fills only with likes: every track of the batch (or the one
+     * being added) that is not liked yet is liked, one after another so YouTube takes them all,
+     * shown on the page at once and counted in the dialog as they go.
+     */
+    fun addToLiked() {
+        val songs = (playlistBatch?.second ?: listOfNotNull(playlistTarget))
+            .filter { DesktopSearchClient.isVideoId(it.videoId) && it.videoId !in likedIds }
+            .distinctBy(Song::videoId)
+        if (songs.isEmpty()) {
+            closePlaylistDialogs()
+            return
+        }
+        playlistBusy = true
+        playlistError = null
+        likeProgress = 0 to songs.size
+        // On the page straight away; the account follows request by request.
+        likedIds = likedIds + songs.map(Song::videoId)
+        dislikedIds = dislikedIds - songs.mapTo(HashSet(), Song::videoId)
+        persistence.saveLikedIds(likedIds)
+        persistence.saveDislikedIds(dislikedIds)
+        editCollections({ it.playlistId == LIKED_PLAYLIST_ID }) { page ->
+            page.copy(songs = songs.reversed().map { it.copy(setVideoId = null) } + page.songs.filterNot { old -> songs.any { it.videoId == old.videoId } })
+        }
+        (libraryState as? UiState.Success)?.data?.let { page ->
+            libraryState = UiState.Success(page.copy(likedSongs = songs.reversed() + page.likedSongs.filterNot { old -> songs.any { it.videoId == old.videoId } }))
+        }
+        scope.launch {
+            var failed = 0
+            songs.forEachIndexed { i, song ->
+                DesktopSearchClient.rate(song.videoId, LikeStatus.LIKE).onFailure {
+                    failed++
+                    DesktopTrackLog.log("liked: ${song.videoId} failed: ${it.message}")
+                }
+                likeProgress = (i + 1) to songs.size
+                if (songs.size > 1) delay(LIKE_RUN_SPACING_MS)
+            }
+            DesktopTrackLog.log("liked: ${songs.size - failed} of ${songs.size} added to Liked Music")
+            likeProgress = null
+            libraryStale = true
+            if (failed == 0) {
+                closePlaylistDialogs()
+            } else {
+                playlistBusy = false
+                playlistError = DesktopStrings["d_liking_failed", "%1\$d of %2\$d could not be liked"].format(failed, songs.size)
+            }
         }
     }
 
@@ -4743,6 +4794,11 @@ fun BitChordDesktopApp() {
                             error = playlistError,
                             onPickAccount = ::addToAccountPlaylist,
                             onPickLocal = ::addToPlaylist,
+                            onPickLiked = ::addToLiked.takeIf {
+                                youtubeSignedIn && (playlistBatch?.second ?: listOfNotNull(playlistTarget))
+                                    .any { DesktopSearchClient.isVideoId(it.videoId) }
+                            },
+                            likeProgress = likeProgress,
                             onCreate = ::createPlaylist,
                             onDismiss = ::closePlaylistDialogs,
                         )
@@ -5267,8 +5323,9 @@ fun BitChordDesktopApp() {
                                 openedCollection?.owned == true && openedCollection?.type == BrowseType.PLAYLIST
                             },
                             onAddAllToPlaylist = { openedCollection?.let(::addCollectionToPlaylist); Unit }.takeIf {
+                                // A Spotify list once its tracks are matched to YouTube's.
                                 openedCollection?.songs?.isNotEmpty() == true &&
-                                    !openedCollection!!.browseId.startsWith(SPOTIFY_PAGE_PREFIX)
+                                    openedCollection!!.songs.none { it.isMatchPending }
                             },
                             onRemoveFromPlaylist = ::removeFromOpenPlaylist
                                 .takeIf { openedCollection?.owned == true },
@@ -9840,3 +9897,6 @@ private const val JAM_KEEP_AHEAD = 2
 
 /** A skip this early in a jam track counts against its artist. */
 private const val JAM_EARLY_SKIP_MS = 30_000L
+
+/** Between the likes of a run into Liked Music, so YouTube takes every one. */
+private const val LIKE_RUN_SPACING_MS = 120L

@@ -211,4 +211,8 @@
     <string name="wave_skipped_count">Skipped tracks not played again: %d</string>
     <string name="wave_skipped_clear">Forget</string>
     <string name="d_start_jam">Start a jam from this</string>
+    <string name="d_liked_music">Liked Music</string>
+    <string name="d_liked_music_hint">Goes in as a like on each track</string>
+    <string name="d_liking_progress">Liking… %1$d of %2$d</string>
+    <string name="d_liking_failed">%1$d of %2$d could not be liked</string>
 </resources>

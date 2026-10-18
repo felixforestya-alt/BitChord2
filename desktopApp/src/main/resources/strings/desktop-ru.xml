@@ -389,4 +389,8 @@
     <string name="wave_skipped_count">Пропущенных треков, которые больше не попадутся: %d</string>
     <string name="wave_skipped_clear">Забыть</string>
     <string name="d_start_jam">Джем по треку</string>
+    <string name="d_liked_music">Понравившиеся</string>
+    <string name="d_liked_music_hint">Каждому треку поставится лайк</string>
+    <string name="d_liking_progress">Ставлю лайки… %1$d из %2$d</string>
+    <string name="d_liking_failed">Не удалось лайкнуть %1$d из %2$d</string>
 </resources>

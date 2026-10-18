@@ -71,6 +71,8 @@ fun main() {
             available = { DesktopPoTokenWebView.available },
         ).asTokenProvider(),
     )
+    // Round a network that throttles YouTube, where the setting says to — see DesktopNetworkSettings.
+    com.music.bitchord.data.net.DpiBypass.enabled = DesktopNetworkSettings.bypass.value
     // The public "apps open right now" count; see Presence.
     DesktopPresence.install()
     installImageLoader()
@@ -87,6 +89,10 @@ fun main() {
 private fun installImageLoader() {
     coil3.SingletonImageLoader.setSafe { context ->
         coil3.ImageLoader.Builder(context)
+            // Covers through the app's own client, so they come round a throttling network too.
+            .components {
+                add(coil3.network.okhttp.OkHttpNetworkFetcherFactory(callFactory = { com.music.bitchord.data.Http.client }))
+            }
             .memoryCache {
                 coil3.memory.MemoryCache.Builder()
                     .maxSizeBytes(48L * 1024 * 1024)

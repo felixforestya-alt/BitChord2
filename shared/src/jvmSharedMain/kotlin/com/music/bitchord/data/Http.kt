@@ -137,6 +137,9 @@ object Http {
         .dispatcher(Dispatcher().apply { maxRequestsPerHost = 16 })
         .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
         .addInterceptor(webDavInterceptor)
+        // Inert until switched on — see DpiBypass, for networks that throttle or misdirect YouTube.
+        .socketFactory(com.music.bitchord.data.net.DpiBypass.socketFactory)
+        .dns(com.music.bitchord.data.net.DpiBypass.dns)
         .apply { if (USAGE_LOGGING_ENABLED) addNetworkInterceptor(usageInterceptor) }
         .build()
 }

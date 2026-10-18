@@ -1,11 +1,9 @@
 package com.music.bitchord.desktop
 
+import com.music.bitchord.data.Http
 import com.music.bitchord.data.innertube.StreamResolver
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
+import java.util.concurrent.TimeUnit
+import okhttp3.Request
 
 /** Reads a remote file in bounded windows rather than as one open-ended request. */
 internal class DesktopRangeStream(
@@ -55,8 +53,7 @@ internal class DesktopRangeStream(
     private fun fetchWindowFor(at: Long): Boolean {
         val start = at - (at % windowBytes)
         val end = start + windowBytes - 1
-        val request = HttpRequest.newBuilder(URI.create(url))
-            .timeout(Duration.ofSeconds(20))
+        val request = Request.Builder().url(url)
             .header("Range", "bytes=$start-$end")
             .header("Accept", "*/*")
             // Anything else would arrive compressed and the byte offsets the caller is counting in
@@ -64,20 +61,22 @@ internal class DesktopRangeStream(
             .header("Accept-Encoding", "identity")
         headers.forEach { (name, value) -> runCatching { request.header(name, value) } }
 
-        val response = runCatching {
-            client.send(request.GET().build(), HttpResponse.BodyHandlers.ofByteArray())
+        // The app's own client, so the media goes the way the rest of YouTube does — including
+        // round a network that throttles it, when that is switched on (see DpiBypass).
+        val (status, body, stated) = runCatching {
+            client.newCall(request.get().build()).execute().use { response ->
+                Triple(response.code, if (response.isSuccessful) response.body.bytes() else ByteArray(0), response.header("content-range"))
+            }
         }.getOrNull() ?: return false
-        if (response.statusCode() !in 200..299) {
+        if (status !in 200..299) {
             // A URL cleared before playback has been refused mid-track: tell the resolver, as the
             // phone's ChunkedDataSource does, so it forgets it and benches the client that minted it.
-            StreamResolver.onPlaybackRefused(url, response.statusCode())
+            StreamResolver.onPlaybackRefused(url, status)
             return false
         }
 
-        val body = response.body()
         // A server that honoured the range says where the bytes came from and how many there are in
         // total.
-        val stated = response.headers().firstValue("content-range").orElse(null)
         if (stated != null) {
             windowStart = stated.substringAfter("bytes ").substringBefore('-').trim().toLongOrNull() ?: start
             length = stated.substringAfterLast('/').trim().toLongOrNull() ?: length
@@ -94,9 +93,9 @@ internal class DesktopRangeStream(
         /** Comfortably inside what Google will serve. */
         const val DEFAULT_WINDOW = 512 * 1024
 
-        val client: HttpClient = HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .connectTimeout(Duration.ofSeconds(15))
+        val client = Http.client.newBuilder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(20, TimeUnit.SECONDS)
             .build()
     }
 }

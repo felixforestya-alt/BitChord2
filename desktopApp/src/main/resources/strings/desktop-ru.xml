@@ -384,4 +384,6 @@
     <string name="d_library_on_device">Плейлисты на этом компьютере</string>
     <string name="wave_blocked">Не предлагать (дизлайк)</string>
     <string name="wave_unblock_all">Вернуть всех</string>
+    <string name="d_dpi_bypass">Обход блокировок YouTube</string>
+    <string name="d_dpi_bypass_subtitle">Без VPN, для сетей, где YouTube замедляют (как в России): адреса через зашифрованный DNS, а имя сайта в первом пакете разрезается, чтобы фильтр его не узнал</string>
 </resources>

@@ -8125,6 +8125,13 @@ private fun DesktopSettingsScreen(
             }
             if (section == DesktopSettingsSection.ADVANCED) item {
                 SettingsGroup(DesktopStrings["advanced_options", "Advanced options"]) {
+                    val bypass by DesktopNetworkSettings.bypass.collectAsState()
+                    SettingsToggle(
+                        DesktopStrings["d_dpi_bypass", "Get round YouTube blocking"],
+                        DesktopStrings["d_dpi_bypass_subtitle", "Without a VPN, for networks that slow YouTube down (as in Russia): looks up addresses over encrypted DNS and splits the site's name in the first packet so the filter does not recognise it"],
+                        bypass,
+                        DesktopNetworkSettings::setBypass,
+                    )
                     SettingsToggle(
                         DesktopStrings["show_nerd_stats", "Show stats for nerds"],
                         DesktopStrings["show_nerd_stats_subtitle", "Codec, bitrate and sample rate on the player"],

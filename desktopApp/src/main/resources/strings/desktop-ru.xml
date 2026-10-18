@@ -378,4 +378,8 @@
     <string name="d_shuffle_order">Перемешать порядок</string>
     <string name="d_shuffle_order_title">Перемешать плейлист?</string>
     <string name="d_shuffle_order_body">Треки встанут в случайном порядке, и он сохранится в самом плейлисте.</string>
+    <string name="d_library_customize">Настроить библиотеку</string>
+    <string name="d_library_customize_hint">Выключи то, что не хочешь видеть на странице.</string>
+    <string name="d_library_replay">Карточки Replay</string>
+    <string name="d_library_on_device">Плейлисты на этом компьютере</string>
 </resources>

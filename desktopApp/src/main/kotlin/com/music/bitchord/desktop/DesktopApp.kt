@@ -590,6 +590,8 @@ fun BitChordDesktopApp() {
     var spotifyImportOpen by remember { mutableStateOf(false) }
     var waveSettingsOpen by remember { mutableStateOf(false) }
     var homeCustomizeOpen by remember { mutableStateOf(false) }
+    var libraryCustomizeOpen by remember { mutableStateOf(false) }
+    val libraryHidden by DesktopLibrarySections.hidden.collectAsState()
     /** Where the one back button in the top bar goes: every place visited, oldest first. */
     val navHistory = remember { mutableStateListOf<DesktopNavEntry>() }
     /** Set while [goBack] puts a place back, so that move is not itself recorded as a visit. */
@@ -4604,6 +4606,13 @@ fun BitChordDesktopApp() {
                             onDismiss = { waveSettingsOpen = false },
                         )
                     }
+                    if (libraryCustomizeOpen) {
+                        DesktopLibraryCustomizeDialog(
+                            links = libraryLinks.map { it.item.title },
+                            shelves = (libraryState as? UiState.Success)?.data?.shelves?.map { it.title }.orEmpty(),
+                            onDismiss = { libraryCustomizeOpen = false },
+                        )
+                    }
                     if (homeCustomizeOpen) {
                         DesktopHomeCustomizeDialog(
                             shelfTitles = (homeState as? UiState.Success)?.data.orEmpty().map { it.title },
@@ -5447,7 +5456,15 @@ fun BitChordDesktopApp() {
                         }
                         destination == DesktopDestination.LIBRARY -> LibraryScreen(
                             signedIn = youtubeSignedIn,
-                            state = libraryState,
+                            // Without the parts switched off in Customize Library.
+                            state = libraryHidden.let { hidden ->
+                                val page = (libraryState as? UiState.Success)?.data
+                                if (page == null || hidden.isEmpty()) {
+                                    libraryState
+                                } else {
+                                    UiState.Success(page.copy(shelves = page.shelves.filterNot { DesktopLibrarySections.isHidden(hidden, it.title) }))
+                                }
+                            },
                             listState = libraryListState,
                             onShelfItemClick = ::openLibraryItem,
                             onShelfItemLongPress = { item -> if (item.videoId != null) openMenu(item.toSong()) },
@@ -5455,10 +5472,14 @@ fun BitChordDesktopApp() {
                             onImportSpotifyPlaylist = { spotifyImportOpen = true },
                             onShowAll = { shelf -> libraryShowAll = shelf },
                             replay = {
+                                // What the page shows, and where it is changed.
+                                Row(Modifier.fillMaxWidth().padding(horizontal = PAGE_GUTTER, vertical = 4.dp), horizontalArrangement = Arrangement.End) {
+                                    DesktopCustomizePill(DesktopStrings["d_library_customize", "Customize Library"], onClick = { libraryCustomizeOpen = true })
+                                }
                                 // The phone's wallet of Replay cards, or nothing until there is
                                 // listening to deal them from.
                                 val cards = remember(replaySummary) { replaySummary.heroCards() }
-                                if (!replaySummary.isEmpty && cards.isNotEmpty()) {
+                                if (!replaySummary.isEmpty && cards.isNotEmpty() && !DesktopLibrarySections.isHidden(libraryHidden, DesktopLibrarySections.REPLAY)) {
                                     ShelfRow(
                                         modifier = Modifier.padding(vertical = 6.dp),
                                         contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
@@ -5486,8 +5507,8 @@ fun BitChordDesktopApp() {
                             onRefresh = ::reloadLibrary,
                             pullState = rememberPullToRefreshState(),
                             contentPadding = sharedPagePadding,
-                            links = libraryLinks,
-                            deviceItems = libraryDeviceItems,
+                            links = libraryLinks.filterNot { DesktopLibrarySections.isHidden(libraryHidden, it.item.title) },
+                            deviceItems = if (DesktopLibrarySections.isHidden(libraryHidden, DesktopLibrarySections.ON_DEVICE)) emptyList() else libraryDeviceItems,
                             showTitle = false,
                         )
                         destination == DesktopDestination.HISTORY -> DesktopHistoryPage(

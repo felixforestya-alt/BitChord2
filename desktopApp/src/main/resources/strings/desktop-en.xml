@@ -200,4 +200,8 @@
     <string name="d_shuffle_order">Shuffle order</string>
     <string name="d_shuffle_order_title">Shuffle this playlist?</string>
     <string name="d_shuffle_order_body">Its tracks are put in a random order, and the order is saved to the playlist itself.</string>
+    <string name="d_library_customize">Customize Library</string>
+    <string name="d_library_customize_hint">Switch off what you don\'t want on the page.</string>
+    <string name="d_library_replay">Replay cards</string>
+    <string name="d_library_on_device">Playlists on this computer</string>
 </resources>

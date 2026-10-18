@@ -662,3 +662,99 @@ internal object DesktopJamJoin {
     var amount by androidx.compose.runtime.mutableFloatStateOf(0f)
 }
 
+/**
+ * Which parts of the Library page are shown: its folders, the Replay cards, what is kept on this
+ * computer, and each of the account's shelves — Artists, say, for a library that is all
+ * playlists. Kept by title, as Home's are.
+ */
+internal object DesktopLibrarySections {
+
+    private val persistence by lazy { DesktopPersistence() }
+
+    private val _hidden = MutableStateFlow(
+        persistence.string(KEY_LIBRARY_HIDDEN).split('\n').map(String::trim).filter(String::isNotEmpty).toSet(),
+    )
+
+    val hidden: StateFlow<Set<String>> = _hidden
+
+    /** The Replay cards at the head of the page. */
+    const val REPLAY = "#replay"
+
+    /** The playlists kept on this computer. */
+    const val ON_DEVICE = "#on-device"
+
+    fun isHidden(hidden: Set<String>, key: String): Boolean = key.trim().lowercase() in hidden.mapTo(HashSet()) { it.lowercase() }
+
+    fun setHidden(key: String, hide: Boolean) {
+        val rest = _hidden.value.filterNot { it.equals(key.trim(), ignoreCase = true) }.toSet()
+        save(if (hide) rest + key.trim() else rest)
+    }
+
+    fun showAll() = save(emptySet())
+
+    private fun save(keys: Set<String>) {
+        _hidden.value = keys
+        persistence.saveString(KEY_LIBRARY_HIDDEN, keys.joinToString("\n"))
+    }
+
+    private const val KEY_LIBRARY_HIDDEN = "library_hidden_sections"
+}
+
+/** Library's switches: each folder, the Replay cards, and each of the account's shelves. */
+@Composable
+internal fun DesktopLibraryCustomizeDialog(
+    links: List<String>,
+    shelves: List<String>,
+    onDismiss: () -> Unit,
+) {
+    val hidden by DesktopLibrarySections.hidden.collectAsState()
+    DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 500, popup = true) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp)) {
+            DialogTitle(DesktopStrings["d_library_customize", "Customize Library"])
+            Text(
+                DesktopStrings["d_library_customize_hint", "Switch off what you don't want on the page."],
+                color = DesktopSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(12.dp))
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+                val rows = buildList {
+                    add(DesktopLibrarySections.REPLAY to DesktopStrings["d_library_replay", "Replay cards"])
+                    links.forEach { add(it to it) }
+                    add(DesktopLibrarySections.ON_DEVICE to DesktopStrings["d_library_on_device", "Playlists on this computer"])
+                    shelves.forEach { add(it to it) }
+                }.distinctBy { it.first.lowercase() }
+                rows.forEach { (key, label) ->
+                    ToggleLine(label, null, !DesktopLibrarySections.isHidden(hidden, key)) { show ->
+                        DesktopLibrarySections.setHidden(key, !show)
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (hidden.isNotEmpty()) {
+                    TextAction(DesktopStrings["show_all", "Show all"]) { DesktopLibrarySections.showAll() }
+                    Spacer(Modifier.width(8.dp))
+                }
+                TextAction(DesktopStrings["done", "Done"], filled = true, onClick = onDismiss)
+            }
+        }
+    }
+}
+
+/** The pill that opens a page's customisation, as Home has beside its greeting. */
+@Composable
+internal fun DesktopCustomizePill(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color.White.copy(alpha = 0.07f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(androidx.compose.material.icons.Icons.Rounded.Tune, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(label, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
+    }
+}

@@ -77,7 +77,7 @@ class PoTokenGenerator(
             webViewBadImpl = true
             null
         } catch (e: Exception) {
-            TrackLog.e(TAG, "PO token generation failed type=${e::class.simpleName ?: "unknown"}")
+            TrackLog.e(TAG, "PO token generation failed type=${e::class.simpleName ?: "unknown"}: ${e.message}")
             throw e
         }
     }

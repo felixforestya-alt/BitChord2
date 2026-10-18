@@ -394,7 +394,7 @@ internal object DesktopUpdateChecker {
      * one in, and put the old one back if anything fails. Plain ASCII, so the console's codepage
      * does not matter; the paths come in as arguments.
      */
-    private val INSTALL_SCRIPT = """
+    internal val INSTALL_SCRIPT = """
         param([int]${'$'}ProcId, [string]${'$'}Src, [string]${'$'}Dst, [string]${'$'}Backup, [int]${'$'}Relaunch, [string]${'$'}Result, [string]${'$'}Version)
         ${'$'}ErrorActionPreference = 'Stop'
         ${'$'}log = ${'$'}Result + '.log'

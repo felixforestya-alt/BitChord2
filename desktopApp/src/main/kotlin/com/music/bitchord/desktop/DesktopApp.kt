@@ -642,6 +642,10 @@ fun BitChordDesktopApp() {
     var replaySummary by remember { mutableStateOf(DesktopListeningStats.summary()) }
     var statsCountedSongs by remember { mutableStateOf<Set<String>>(emptySet()) }
     var playlistTarget by remember { mutableStateOf<Song?>(null) }
+    // A whole album's or playlist's tracks on their way into a playlist — its title, and them.
+    var playlistBatch by remember { mutableStateOf<Pair<String, List<Song>>?>(null) }
+    // The open playlist's "shuffle the saved order", waiting for its confirmation.
+    var shuffleOrderAsked by remember { mutableStateOf(false) }
     // One busy flag and one message for every playlist edit: only one of them can be in flight,
     // because each is driven by a dialog that is modal.
     var playlistBusy by remember { mutableStateOf(false) }
@@ -1011,8 +1015,41 @@ fun BitChordDesktopApp() {
     }
     startSong = ::playSong
 
+    /**
+     * Changes a collection wherever it is held — the page open now and any copy kept for Back —
+     * so an edit shows at once rather than after a reload, and Back does not bring the old list.
+     */
+    fun editCollections(matches: (DesktopCollection) -> Boolean, change: (DesktopCollection) -> DesktopCollection) {
+        openedCollection?.takeIf { !it.loading && matches(it) }?.let { openedCollection = change(it) }
+        for (i in navHistory.indices) {
+            val entry = navHistory[i]
+            val held = entry.collection?.takeIf { !it.loading && matches(it) } ?: continue
+            navHistory[i] = entry.copy(collection = change(held))
+        }
+    }
+
     /** Applies a rating locally and carries it to the account. */
     fun rate(song: Song, status: LikeStatus) {
+        val wasLiked = song.videoId in likedIds
+        // Liked Music follows the heart straight away: a track un-liked leaves the list on
+        // screen, one liked comes in at the top, as YouTube Music lists it.
+        if (status == LikeStatus.LIKE && !wasLiked) {
+            editCollections({ it.playlistId == LIKED_PLAYLIST_ID }) { page ->
+                page.copy(songs = listOf(song.copy(setVideoId = null)) + page.songs.filterNot { it.videoId == song.videoId })
+            }
+        } else if (status != LikeStatus.LIKE && wasLiked) {
+            editCollections({ it.playlistId == LIKED_PLAYLIST_ID }) { page ->
+                page.copy(songs = page.songs.filterNot { it.videoId == song.videoId })
+            }
+        }
+        (libraryState as? UiState.Success)?.data?.let { page ->
+            val liked = if (status == LikeStatus.LIKE) {
+                listOf(song) + page.likedSongs.filterNot { it.videoId == song.videoId }
+            } else {
+                page.likedSongs.filterNot { it.videoId == song.videoId }
+            }
+            if (liked != page.likedSongs) libraryState = UiState.Success(page.copy(likedSongs = liked))
+        }
         likedIds = if (status == LikeStatus.LIKE) likedIds + song.videoId else likedIds - song.videoId
         dislikedIds = if (status == LikeStatus.DISLIKE) {
             dislikedIds + song.videoId
@@ -1512,6 +1549,8 @@ fun BitChordDesktopApp() {
     fun closePlaylistDialogs() {
         overlays.playlistDialog = false
         playlistTarget = null
+        playlistBatch = null
+        shuffleOrderAsked = false
         overlays.rename = false
         overlays.delete = false
         overlays.reorder = false
@@ -1523,11 +1562,12 @@ fun BitChordDesktopApp() {
     fun createPlaylist(title: String, privacy: PlaylistPrivacy) {
         val name = title.trim()
         if (name.isBlank()) return
-        val seed = playlistTarget
+        val seeds = playlistBatch?.second ?: listOfNotNull(playlistTarget)
+        val seed = seeds.firstOrNull()
         // A track from another source cannot go in an account playlist, so the playlist made to
         // hold it is one kept here.
-        if (!DesktopYouTubeAuth.isSignedIn || (seed != null && !DesktopSearchClient.isVideoId(seed.videoId))) {
-            playlists = playlists + DesktopPlaylist(title = name, songs = listOfNotNull(seed))
+        if (!DesktopYouTubeAuth.isSignedIn || (seeds.isNotEmpty() && seeds.none { DesktopSearchClient.isVideoId(it.videoId) })) {
+            playlists = playlists + DesktopPlaylist(title = name, songs = seeds.distinctBy(Song::videoId))
             persistence.savePlaylists(playlists)
             closePlaylistDialogs()
             return
@@ -1535,7 +1575,11 @@ fun BitChordDesktopApp() {
         playlistBusy = true
         playlistError = null
         scope.launch {
-            DesktopSearchClient.createPlaylist(name, privacy, listOfNotNull(seed?.videoId))
+            DesktopSearchClient.createPlaylist(
+                name,
+                privacy,
+                seeds.map(Song::videoId).filter(DesktopSearchClient::isVideoId).distinct(),
+            )
                 .onSuccess { playlistId ->
                     closePlaylistDialogs()
                     editPlaylistShelf { items ->
@@ -1544,7 +1588,7 @@ fun BitChordDesktopApp() {
                             // Only what this request itself establishes: an unseeded playlist gets
                             // a card of just its name rather than a guess at what the feed will
                             // call it.
-                            subtitle = if (seed != null) "1 song" else "",
+                            subtitle = if (seeds.isNotEmpty()) "${seeds.size} songs" else "",
                             thumbnailUrl = seed?.thumbnailUrl,
                             videoId = null,
                             browseId = "VL$playlistId",
@@ -1617,25 +1661,126 @@ fun BitChordDesktopApp() {
     }
 
     fun addToPlaylist(playlist: DesktopPlaylist) {
-        val song = playlistTarget ?: return
+        val adding = playlistBatch?.second ?: listOfNotNull(playlistTarget)
+        if (adding.isEmpty()) return
         playlists = playlists.map { current ->
-            if (current.id == playlist.id) current.copy(songs = (current.songs + song).distinctBy(Song::videoId)) else current
+            if (current.id == playlist.id) current.copy(songs = (current.songs + adding).distinctBy(Song::videoId)) else current
         }
+        playlistBatch = null
         persistence.savePlaylists(playlists)
         playlistTarget = null
     }
 
+    /**
+     * Every track of [songs] that [playlist] does not have yet, added in batches YouTube takes in
+     * one go — the "merge" of one list into another. What was already there is left as it is
+     * rather than added twice.
+     */
+    fun addAllToAccountPlaylist(playlist: UserPlaylist, songs: List<Song>) {
+        playlistBusy = true
+        playlistError = null
+        scope.launch {
+            val result = runCatching {
+                val present = DesktopSearchClient.playlistEntries("VL${playlist.playlistId}")
+                    .getOrDefault(emptyList())
+                    .mapTo(HashSet(), Song::videoId)
+                val adding = songs
+                    .filter { DesktopSearchClient.isVideoId(it.videoId) && it.videoId !in present }
+                    .distinctBy(Song::videoId)
+                val entries = HashMap<String, String>()
+                adding.chunked(PLAYLIST_ADD_BATCH).forEach { chunk ->
+                    entries += DesktopSearchClient.addToPlaylist(playlist.playlistId, chunk.map(Song::videoId)).getOrThrow()
+                }
+                adding.map { it.copy(setVideoId = entries[it.videoId]) }
+            }
+            result.onSuccess { added ->
+                DesktopTrackLog.log("playlist: ${added.size} of ${songs.size} added to ${playlist.title}")
+                editCollections({ it.playlistId == playlist.playlistId }) { page ->
+                    if (page.continuation != null) page else page.copy(songs = page.songs + added)
+                }
+                libraryStale = true
+                closePlaylistDialogs()
+            }.onFailure {
+                DesktopTrackLog.log("playlist: adding ${songs.size} to ${playlist.title} failed: ${it.message}")
+                playlistBusy = false
+                playlistError = it.message ?: "Could not add to ${playlist.title}"
+            }
+        }
+    }
+
     fun addToAccountPlaylist(playlist: UserPlaylist) {
+        playlistBatch?.let { (_, songs) ->
+            addAllToAccountPlaylist(playlist, songs)
+            return
+        }
         val song = playlistTarget ?: return
         playlistBusy = true
         playlistError = null
         scope.launch {
             DesktopSearchClient.addToPlaylist(playlist.playlistId, listOf(song.videoId))
-                .onSuccess { closePlaylistDialogs() }
+                .onSuccess { added ->
+                    // At the end of the playlist on screen (or kept for Back), with the entry id
+                    // it was given, so it can be taken out again or moved without a reload.
+                    editCollections({ it.playlistId == playlist.playlistId }) { page ->
+                        if (page.continuation != null || page.songs.any { it.videoId == song.videoId }) {
+                            page
+                        } else {
+                            page.copy(songs = page.songs + song.copy(setVideoId = added[song.videoId]))
+                        }
+                    }
+                    libraryStale = true
+                    closePlaylistDialogs()
+                }
                 .onFailure {
                     DesktopTrackLog.log("playlist: could not add ${song.videoId}: ${it.message}")
                     playlistBusy = false
                     playlistError = it.message ?: "Could not add to ${playlist.title}"
+                }
+        }
+    }
+
+    /** The open album's or playlist's every track — all its pages, not just those shown. */
+    suspend fun allSongsOf(collection: DesktopCollection): List<Song> =
+        if (collection.continuation != null && collection.type == BrowseType.PLAYLIST) {
+            DesktopSearchClient.playlistEntries(collection.browseId).getOrDefault(collection.songs)
+        } else {
+            collection.songs
+        }
+
+    /** Opens the playlist picker for everything in [collection]. */
+    fun addCollectionToPlaylist(collection: DesktopCollection) {
+        scope.launch {
+            playlistBusy = true
+            val songs = allSongsOf(collection)
+            playlistBusy = false
+            if (songs.isNotEmpty()) playlistBatch = collection.title to songs
+        }
+    }
+
+    /** The open playlist's own order, shuffled and saved to the account. */
+    fun shuffleOpenPlaylistOrder() {
+        val collection = openedCollection ?: return
+        playlistBusy = true
+        playlistError = null
+        scope.launch {
+            DesktopSearchClient.playlistEntries(collection.browseId)
+                .mapCatching { entries ->
+                    val shuffled = entries.shuffled()
+                    DesktopSearchClient.reorderPlaylist(
+                        collection.playlistId,
+                        current = entries.mapNotNull { it.setVideoId },
+                        target = shuffled.mapNotNull { it.setVideoId },
+                    ).getOrThrow()
+                    shuffled
+                }
+                .onSuccess { shuffled ->
+                    editCollections({ it.browseId == collection.browseId }) { it.copy(songs = shuffled, continuation = null) }
+                    libraryStale = true
+                    closePlaylistDialogs()
+                }
+                .onFailure {
+                    playlistBusy = false
+                    playlistError = it.message ?: "Could not shuffle the playlist"
                 }
         }
     }
@@ -3031,12 +3176,10 @@ fun BitChordDesktopApp() {
                 collection.playlistId,
                 listOf(setVideoId to song.videoId),
             ).onSuccess {
-                val current = openedCollection
-                if (current != null && current.browseId == collection.browseId) {
-                    openedCollection = current.copy(
-                        songs = current.songs.filterNot { it.setVideoId == setVideoId },
-                    )
+                editCollections({ it.browseId == collection.browseId }) { page ->
+                    page.copy(songs = page.songs.filterNot { it.setVideoId == setVideoId })
                 }
+                libraryStale = true
             }.onFailure {
                 DesktopTrackLog.log("playlist: could not remove ${song.videoId}: ${it.message}")
             }
@@ -4528,20 +4671,41 @@ fun BitChordDesktopApp() {
                             },
                         )
                     }
-                    if (overlays.playlistDialog || playlistTarget != null) {
+                    if (overlays.playlistDialog || playlistTarget != null || playlistBatch != null) {
                         DesktopPlaylistDialog(
                             song = playlistTarget,
+                            batch = playlistBatch,
                             accountPlaylists = accountPlaylists,
                             localPlaylists = playlists,
                             signedIn = youtubeSignedIn,
-                            canUseAccount = playlistTarget
-                                ?.let { DesktopSearchClient.isVideoId(it.videoId) } ?: true,
+                            canUseAccount = playlistBatch?.second?.any { DesktopSearchClient.isVideoId(it.videoId) }
+                                ?: playlistTarget?.let { DesktopSearchClient.isVideoId(it.videoId) }
+                                ?: true,
                             busy = playlistBusy,
                             error = playlistError,
                             onPickAccount = ::addToAccountPlaylist,
                             onPickLocal = ::addToPlaylist,
                             onCreate = ::createPlaylist,
                             onDismiss = ::closePlaylistDialogs,
+                        )
+                    }
+                    if (shuffleOrderAsked) {
+                        AlertDialog(
+                            onDismissRequest = ::closePlaylistDialogs,
+                            title = { Text(DesktopStrings["d_shuffle_order_title", "Shuffle this playlist?"]) },
+                            text = {
+                                Text(
+                                    playlistError ?: DesktopStrings["d_shuffle_order_body", "Its tracks are put in a random order, and the order is saved to the playlist itself."],
+                                )
+                            },
+                            confirmButton = {
+                                TextButton(onClick = ::shuffleOpenPlaylistOrder, enabled = !playlistBusy) {
+                                    Text(DesktopStrings["d_shuffle_order", "Shuffle order"])
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = ::closePlaylistDialogs) { Text(DesktopStrings["cancel", "Cancel"]) }
+                            },
                         )
                     }
                     if (overlays.rename) {
@@ -5040,6 +5204,13 @@ fun BitChordDesktopApp() {
                             onDelete = { overlays.delete = true }.takeIf { openedCollection?.owned == true },
                             onReorder = { overlays.reorder = true }.takeIf {
                                 openedCollection?.owned == true && openedCollection?.type == BrowseType.PLAYLIST
+                            },
+                            onShuffleOrder = { shuffleOrderAsked = true }.takeIf {
+                                openedCollection?.owned == true && openedCollection?.type == BrowseType.PLAYLIST
+                            },
+                            onAddAllToPlaylist = { openedCollection?.let(::addCollectionToPlaylist); Unit }.takeIf {
+                                openedCollection?.songs?.isNotEmpty() == true &&
+                                    !openedCollection!!.browseId.startsWith(SPOTIFY_PAGE_PREFIX)
                             },
                             onRemoveFromPlaylist = ::removeFromOpenPlaylist
                                 .takeIf { openedCollection?.owned == true },
@@ -8316,6 +8487,10 @@ private fun DesktopCollectionPage(
     onDelete: (() -> Unit)?,
     /** Opens the drag-into-order sheet; only a playlist the account owns can be rearranged. */
     onReorder: (() -> Unit)?,
+    /** Shuffles the playlist's own saved order; again only an owned playlist. */
+    onShuffleOrder: (() -> Unit)?,
+    /** Every track here into a playlist — another one, a new one, or one kept here. */
+    onAddAllToPlaylist: (() -> Unit)?,
     /** Copies the release's own YouTube Music link; null for anything with no link to share. */
     onShare: (() -> Unit)?,
     onRemoveFromPlaylist: ((Song) -> Unit)?,
@@ -8492,6 +8667,16 @@ private fun DesktopCollectionPage(
                                             },
                                         )
                                     }
+                                    onAddAllToPlaylist?.let { addAll ->
+                                        DropdownMenuItem(
+                                            text = { Text(DesktopStrings["d_add_all_to_playlist", "Add all to playlist…"]) },
+                                            leadingIcon = { Icon(BitChordIcons.Plus, null) },
+                                            onClick = {
+                                                moreOpen = false
+                                                addAll()
+                                            },
+                                        )
+                                    }
                                     onReorder?.let { reorder ->
                                         DropdownMenuItem(
                                             text = { Text(DesktopStrings["reorder_playlist", "Edit order"]) },
@@ -8499,6 +8684,16 @@ private fun DesktopCollectionPage(
                                             onClick = {
                                                 moreOpen = false
                                                 reorder()
+                                            },
+                                        )
+                                    }
+                                    onShuffleOrder?.let { shuffleOrder ->
+                                        DropdownMenuItem(
+                                            text = { Text(DesktopStrings["d_shuffle_order", "Shuffle order"]) },
+                                            leadingIcon = { Icon(BitChordIcons.Shuffle, null) },
+                                            onClick = {
+                                                moreOpen = false
+                                                shuffleOrder()
                                             },
                                         )
                                     }
@@ -9556,3 +9751,9 @@ private const val EXPLORE_BATCH_MS = 250L
 
 /** How far into a track it may still be swapped for the version tracks start as. */
 private const val START_VERSION_WINDOW_MS = 8_000L
+
+/** Liked Music, as a playlist id: the page a heart adds to and takes from. */
+private const val LIKED_PLAYLIST_ID = "LM"
+
+/** How many tracks go into a playlist in one request when a whole list is added. */
+private const val PLAYLIST_ADD_BATCH = 100

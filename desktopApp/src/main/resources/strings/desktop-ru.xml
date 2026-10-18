@@ -373,4 +373,9 @@
     <string name="d_retry">Повторить</string>
     <string name="d_update_skip">Пропустить версию</string>
     <string name="d_update_ready">Скачано и проверено. Установится при перезапуске.</string>
+    <string name="d_add_all_to_playlist">Добавить всё в плейлист…</string>
+    <string name="d_add_all_from">%1$s — треков: %2$d; те, что уже есть, пропущу</string>
+    <string name="d_shuffle_order">Перемешать порядок</string>
+    <string name="d_shuffle_order_title">Перемешать плейлист?</string>
+    <string name="d_shuffle_order_body">Треки встанут в случайном порядке, и он сохранится в самом плейлисте.</string>
 </resources>

@@ -77,6 +77,8 @@ import com.music.bitchord.ui.icons.BitChordIcons
 @Composable
 internal fun DesktopPlaylistDialog(
     song: Song?,
+    /** A whole list on its way in instead of one [song]: where it is from, and its tracks. */
+    batch: Pair<String, List<Song>>? = null,
     accountPlaylists: List<UserPlaylist>,
     localPlaylists: List<DesktopPlaylist>,
     signedIn: Boolean,
@@ -89,14 +91,14 @@ internal fun DesktopPlaylistDialog(
     onCreate: (String, PlaylistPrivacy) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var creating by remember { mutableStateOf(song == null) }
+    var creating by remember { mutableStateOf(song == null && batch == null) }
 
     DesktopDialogFrame(onDismiss = onDismiss) {
         if (creating) {
             NewPlaylistForm(
                 // Nowhere to go back to when the dialog opened onto the form; its own dismiss is
                 // the way out.
-                onBack = if (song == null) null else ({ creating = false }),
+                onBack = if (song == null && batch == null) null else ({ creating = false }),
                 signedIn = signedIn && canUseAccount,
                 busy = busy,
                 error = error,
@@ -105,7 +107,11 @@ internal fun DesktopPlaylistDialog(
             return@DesktopDialogFrame
         }
 
-        DialogHeading("Add to playlist", song?.let { "${it.title} — ${it.artist}" }.orEmpty())
+        DialogHeading(
+            DesktopStrings["add_to_playlist", "Add to playlist"],
+            batch?.let { (from, songs) -> DesktopStrings["d_add_all_from", "%1\$s — %2\$d tracks; ones already there are skipped"].format(from, songs.size) }
+                ?: song?.let { "${it.title} — ${it.artist}" }.orEmpty(),
+        )
         error?.let { DialogError(it) }
         DialogAction(BitChordIcons.Plus, "New playlist", enabled = !busy) { creating = true }
 

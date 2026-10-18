@@ -496,18 +496,21 @@ private fun ReorderableShelves(titles: List<String>, onReorder: (List<String>) -
         live.forEach { title ->
             androidx.compose.runtime.key(title) {
                 val dragging = title == dragged
+                val shown = !DesktopHomeShelves.isHidden(title)
                 Row(
                     Modifier
-                        .fillMaxWidth()
+                        .bleed(ROW_BLEED)
                         .onSizeChanged { heights[title] = it.height.toFloat() }
                         .zIndex(if (dragging) 1f else 0f)
                         .graphicsLayer {
                             translationY = if (dragging) totalDrag - (topOf(live, live.indexOf(title)) - topOf(startOrder, startIndex)) else 0f
                             if (dragging) { scaleX = 1.02f; scaleY = 1.02f }
                         }
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(14.dp))
                         .background(if (dragging) Color.White.copy(alpha = 0.10f) else Color.Transparent)
-                        .padding(start = 4.dp),
+                        // The whole row is the switch's, handle to switch, so its highlight is too.
+                        .clickable { DesktopHomeShelves.setHidden(title, shown) }
+                        .padding(horizontal = ROW_BLEED, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
@@ -547,7 +550,9 @@ private fun ReorderableShelves(titles: List<String>, onReorder: (List<String>) -
                     )
                     Spacer(Modifier.width(10.dp))
                     Box(Modifier.weight(1f)) {
-                        ToggleLine(title, null, !DesktopHomeShelves.isHidden(title)) { show -> DesktopHomeShelves.setHidden(title, !show) }
+                        // The feed names this one in English; it is shown in the app's language.
+                        val label = if (title.equals("Recents", ignoreCase = true)) DesktopStrings["d_recents", "Recents"] else title
+                        ToggleContent(label, null, shown) { show -> DesktopHomeShelves.setHidden(title, !show) }
                     }
                 }
             }
@@ -595,10 +600,37 @@ private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun ToggleLine(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onChange(!checked) }.padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    // Its highlight reaches a little past the words and the switch on both sides, evenly, rather
+    // than starting at the first letter and stopping at the switch's edge.
+    Box(
+        Modifier
+            .bleed(ROW_BLEED)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable { onChange(!checked) }
+            .padding(horizontal = ROW_BLEED, vertical = 6.dp),
+    ) { ToggleContent(title, subtitle, checked, onChange) }
+}
+
+/**
+ * Wider than the column it is in by [amount] each side, so a row's highlight can stand off its
+ * contents while they stay lined up with everything else in the column.
+ */
+private fun Modifier.bleed(amount: androidx.compose.ui.unit.Dp) = layout { measurable, constraints ->
+    val extra = amount.roundToPx()
+    val placeable = measurable.measure(
+        constraints.copy(
+            minWidth = constraints.maxWidth + extra * 2,
+            maxWidth = constraints.maxWidth + extra * 2,
+        ),
+    )
+    layout(constraints.maxWidth, placeable.height) { placeable.place(-extra, 0) }
+}
+
+private val ROW_BLEED = 12.dp
+
+@Composable
+private fun ToggleContent(title: String, subtitle: String?, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, color = Color.White, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             subtitle?.let { Text(it, color = DesktopSecondary, style = MaterialTheme.typography.bodySmall) }

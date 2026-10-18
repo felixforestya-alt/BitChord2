@@ -1,508 +1,368 @@
 package com.music.bitchord.desktop
 
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.request.get
-import io.ktor.client.request.header
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.isSuccess
+import java.io.File
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.file.Files
+import java.security.MessageDigest
+import java.time.Duration
+import java.util.zip.ZipInputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
-import java.io.File
-import java.io.FileOutputStream
-import java.net.URI
-import java.net.http.HttpClient as JavaHttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
-import java.util.regex.Pattern
-import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
-import kotlin.coroutines.coroutineContext
+import kotlinx.serialization.json.longOrNull
 
 /**
- * Checks for updates on GitHub, downloads the portable release or installer,
- * unpacks it, and seamlessly applies the update in-place.
+ * Updates from this fork's GitHub releases, start to finish: is there a newer one, fetch it,
+ * check it is the file the release says it is, unpack it beside the app, and swap it in once the
+ * app is out of the way.
+ *
+ * The swap cannot happen from inside: the running app holds its own jars and runtime open. So it
+ * is left to a small script started as the app exits, which waits for it to be gone, copies the
+ * old build aside, mirrors the new one over it — removing files the new build no longer has —
+ * and, if any of that fails, puts the old one back. How it went is written to a file the next
+ * launch reads, so a failed update is said out loud rather than discovered.
+ *
+ * Only a portable build that can write to its own folder updates itself. Anything else — a run
+ * from Gradle, an installed copy under Program Files — is pointed at the release page instead.
  */
 internal object DesktopUpdateChecker {
 
     data class UpdateInfo(
         val version: String,
         val releaseUrl: String,
-        /** The installer or zip archive for this platform, or null when the release has none. */
+        /** The Windows archive, or null when the release has none. */
         val downloadUrl: String?,
         val notes: String?,
         val assetName: String? = null,
         val assetSize: Long = 0L,
+        /** The archive's SHA-256 as GitHub records it, lower-case hex; null when not given. */
+        val sha256: String? = null,
     )
 
     sealed interface UpdateState {
         data object Idle : UpdateState
         data object Checking : UpdateState
-        data class UpToDate(val version: String) : UpdateState
+        data object UpToDate : UpdateState
         data class Available(val info: UpdateInfo) : UpdateState
-        data class Downloading(
-            val info: UpdateInfo,
-            val progress: Float, // 0.0f .. 1.0f, or -1f if indeterminate
-            val downloadedBytes: Long,
-            val totalBytes: Long,
-        ) : UpdateState
-        data class Extracting(val info: UpdateInfo) : UpdateState
-        data class ReadyToRestart(
-            val info: UpdateInfo,
-            val isDevMode: Boolean,
-            val targetDir: File,
-        ) : UpdateState
+        /** [progress] in 0..1, or -1 while the size is unknown. */
+        data class Downloading(val info: UpdateInfo, val progress: Float, val downloadedBytes: Long, val totalBytes: Long) : UpdateState
+        data class Preparing(val info: UpdateInfo) : UpdateState
+        /** Unpacked and checked; goes in when the app next exits, or now with [restartNow]. */
+        data class Ready(val info: UpdateInfo) : UpdateState
         data class Error(val message: String, val info: UpdateInfo? = null) : UpdateState
     }
 
     const val REPO_OWNER = "felixforestya-alt"
     const val REPO_NAME = "BitChord2"
-
-    private const val LATEST_RELEASE_URL =
-        "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-    private const val RELEASES_ATOM_URL =
-        "https://github.com/$REPO_OWNER/$REPO_NAME/releases.atom"
-    private const val EXPANDED_ASSETS_BASE_URL =
-        "https://github.com/$REPO_OWNER/$REPO_NAME/releases/expanded_assets/"
+    const val RELEASES_URL = "https://github.com/$REPO_OWNER/$REPO_NAME/releases"
+    private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
 
     val currentVersion: String =
-        System.getProperty("bitchord.version")?.takeIf { it.isNotBlank() } ?: "1.0.1"
-
-    /**
-     * Whether update checks are disabled for custom dev builds.
-     * Set to false so in-app update checks work for all users.
-     */
-    const val customBuild = false
+        System.getProperty("bitchord.version")?.takeIf { it.isNotBlank() }?.removePrefix("v") ?: "dev"
 
     private val _state = MutableStateFlow<UpdateState>(UpdateState.Idle)
     val state: StateFlow<UpdateState> = _state.asStateFlow()
 
-    private val _latestUpdate = MutableStateFlow<UpdateInfo?>(null)
-    val latestUpdate: StateFlow<UpdateInfo?> = _latestUpdate.asStateFlow()
-
-    private var activeDownloadJob: Job? = null
-
     private val json = Json { ignoreUnknownKeys = true }
+    private val mutex = Mutex()
 
-    private val http = HttpClient(CIO) {
-        install(HttpTimeout) {
-            requestTimeoutMillis = 15_000
-            connectTimeoutMillis = 10_000
-        }
-    }
-
-    private val javaClient: JavaHttpClient by lazy {
-        JavaHttpClient.newBuilder()
-            .followRedirects(JavaHttpClient.Redirect.ALWAYS)
+    private val client: HttpClient by lazy {
+        HttpClient.newBuilder()
+            .followRedirects(HttpClient.Redirect.NORMAL)
             .connectTimeout(Duration.ofSeconds(15))
             .build()
     }
 
-    suspend fun check(): UpdateInfo? = checkForUpdates(force = false)
+    /** Where downloads are unpacked and the swap script and its report are kept. */
+    private val workDir: File by lazy { DesktopMediaCache.directory.parent.resolve("updates").toFile() }
+    private val stagedDir: File get() = File(workDir, "staged")
+    private val backupDir: File get() = File(workDir, "backup")
+    private val resultFile: File get() = File(workDir, "result.txt")
 
-    suspend fun checkForUpdates(force: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
-        val currentState = _state.value
-        if (!force && (currentState is UpdateState.Checking || currentState is UpdateState.Downloading || currentState is UpdateState.Extracting)) {
-            return@withContext _latestUpdate.value
-        }
+    /** Set by the window: ends the app the ordinary way, so it saves what it saves on the way out. */
+    @Volatile
+    var exitApp: (() -> Unit)? = null
+
+    @Volatile
+    private var installOnExit = false
+
+    @Volatile
+    private var relaunchAfterInstall = false
+
+    private var hookInstalled = false
+
+    /**
+     * The packaged build's folder — the one with `BitChord.exe`, `app` and `runtime` — when this
+     * is one; null when run from Gradle or anywhere else that is not a portable build.
+     */
+    val installDir: File? by lazy {
+        if (!DesktopPlatform.isWindows) return@lazy null
+        val launcher = runCatching { ProcessHandle.current().info().command().orElse(null) }.getOrNull()
+            ?.let(::File)
+            ?.takeIf { it.isFile && it.name.equals("BitChord.exe", ignoreCase = true) }
+            ?: return@lazy null
+        launcher.parentFile?.takeIf { isAppFolder(it) }
+    }
+
+    /** Whether this copy can put an update in place itself. */
+    val canSelfUpdate: Boolean by lazy {
+        val dir = installDir ?: return@lazy false
+        runCatching {
+            val probe = File(File(dir, "app"), ".update-probe")
+            probe.writeText("")
+            probe.delete()
+        }.isSuccess
+    }
+
+    /**
+     * Asks GitHub for the latest release. Quiet about failures when [userAsked] is false — a
+     * launch without the network is not worth an error.
+     */
+    suspend fun check(userAsked: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
+        val busy = _state.value.let { it is UpdateState.Downloading || it is UpdateState.Preparing || it is UpdateState.Ready }
+        if (busy) return@withContext (_state.value as? UpdateState.Ready)?.info
         _state.value = UpdateState.Checking
-
-        val result = runCatching { fetchLatestReleaseViaApi() }
-            .getOrNull()
-            ?: runCatching { fetchLatestReleaseViaFallback() }
-                .getOrNull()
-
-        if (result == null) {
-            _state.value = UpdateState.Error("Не удалось получить информацию о релизах с GitHub")
+        val info = runCatching { fetchLatest() }.getOrElse {
+            DesktopTrackLog.log("update check failed: ${it.message}")
+            _state.value = if (userAsked) {
+                UpdateState.Error(DesktopStrings["d_update_check_failed", "Could not reach GitHub to check for updates"])
+            } else {
+                UpdateState.Idle
+            }
             return@withContext null
         }
-
-        val latest = result.version.trim().removePrefix("v").removePrefix("V")
-        if (!isNewer(latest, currentVersion)) {
-            _state.value = UpdateState.UpToDate(currentVersion)
-            _latestUpdate.value = null
+        if (info == null || !isNewer(info.version, currentVersion)) {
+            _state.value = UpdateState.UpToDate
             return@withContext null
         }
-
-        _latestUpdate.value = result
-        _state.value = UpdateState.Available(result)
-        result
+        _state.value = UpdateState.Available(info)
+        info
     }
 
-    private suspend fun fetchLatestReleaseViaApi(): UpdateInfo? {
-        val response = http.get(LATEST_RELEASE_URL) {
-            header("Accept", "application/vnd.github+json")
-        }
-        if (!response.status.isSuccess()) return null
-        val release = json.parseToJsonElement(response.bodyAsText()) as? JsonObject ?: return null
+    private fun fetchLatest(): UpdateInfo? {
+        val request = HttpRequest.newBuilder(URI.create(LATEST_RELEASE_URL))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "BitChord/$currentVersion")
+            .timeout(Duration.ofSeconds(20))
+            .GET()
+            .build()
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+        check(response.statusCode() in 200..299) { "GitHub answered ${response.statusCode()}" }
+        val release = json.parseToJsonElement(response.body()) as? JsonObject ?: return null
         val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return null
-        val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: return null
-        val latest = tag.trim().removePrefix("v").removePrefix("V")
-        val asset = installerAssetFromApi(release)
+        val asset = release["assets"]?.jsonArray.orEmpty()
+            .mapNotNull { it as? JsonObject }
+            .filter { it["state"]?.jsonPrimitive?.contentOrNull == "uploaded" }
+            .firstOrNull { it["name"]?.jsonPrimitive?.contentOrNull.orEmpty().endsWith(".zip", ignoreCase = true) }
         return UpdateInfo(
-            version = latest,
-            releaseUrl = url,
-            downloadUrl = asset?.first,
-            notes = release["body"]?.jsonPrimitive?.contentOrNull,
-            assetName = asset?.second,
-            assetSize = asset?.third ?: 0L,
+            version = tag.trim().removePrefix("v").removePrefix("V"),
+            releaseUrl = release["html_url"]?.jsonPrimitive?.contentOrNull ?: RELEASES_URL,
+            downloadUrl = asset?.get("browser_download_url")?.jsonPrimitive?.contentOrNull,
+            notes = release["body"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
+            assetName = asset?.get("name")?.jsonPrimitive?.contentOrNull,
+            assetSize = asset?.get("size")?.jsonPrimitive?.longOrNull ?: 0L,
+            sha256 = asset?.get("digest")?.jsonPrimitive?.contentOrNull
+                ?.takeIf { it.startsWith("sha256:") }
+                ?.removePrefix("sha256:")
+                ?.lowercase(),
         )
     }
 
-    private fun installerAssetFromApi(release: JsonObject): Triple<String, String, Long>? {
-        val assets = release["assets"]?.jsonArray?.mapNotNull { it as? JsonObject }.orEmpty()
-        val hit = pickAsset(assets.map { asset ->
-            val name = asset["name"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val downloadUrl = asset["browser_download_url"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val size = asset["size"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
-            val state = asset["state"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            AssetCandidate(name, downloadUrl, size, state == "uploaded")
-        }) ?: return null
-        return Triple(hit.url, hit.name, hit.size)
-    }
-
-    private fun fetchLatestReleaseViaFallback(): UpdateInfo? {
-        val atomReq = HttpRequest.newBuilder()
-            .uri(URI.create(RELEASES_ATOM_URL))
-            .header("User-Agent", "BitChord/$currentVersion")
-            .timeout(Duration.ofSeconds(15))
-            .GET()
-            .build()
-        val atomXml = javaClient.send(atomReq, HttpResponse.BodyHandlers.ofString()).body() ?: return null
-        val tagMatcher = Pattern.compile("releases/tag/([^\"/?#]+)").matcher(atomXml)
-        if (!tagMatcher.find()) return null
-        val rawTag = tagMatcher.group(1)
-        val tag = rawTag.trim().removePrefix("v").removePrefix("V")
-
-        var notes: String? = null
-        val contentMatcher = Pattern.compile("<content type=\"html\">(.*?)</content>", Pattern.DOTALL).matcher(atomXml)
-        if (contentMatcher.find()) {
-            val html = contentMatcher.group(1)
-            notes = Pattern.compile("<[^>]*>").matcher(html).replaceAll("").trim()
-        }
-
-        val releaseUrl = "https://github.com/$REPO_OWNER/$REPO_NAME/releases/tag/$rawTag"
-
-        val assetsReq = HttpRequest.newBuilder()
-            .uri(URI.create("$EXPANDED_ASSETS_BASE_URL$rawTag"))
-            .header("User-Agent", "BitChord/$currentVersion")
-            .timeout(Duration.ofSeconds(15))
-            .GET()
-            .build()
-        val assetsHtml = javaClient.send(assetsReq, HttpResponse.BodyHandlers.ofString()).body().orEmpty()
-        val assetMatcher = Pattern.compile("href=\"(/[^\"]+/releases/download/[^\"]+)\"").matcher(assetsHtml)
-        val candidates = mutableListOf<AssetCandidate>()
-        while (assetMatcher.find()) {
-            val path = assetMatcher.group(1)
-            val name = path.substringAfterLast('/')
-            val fullUrl = "https://github.com$path"
-            candidates.add(AssetCandidate(name, fullUrl, 0L, true))
-        }
-
-        val chosen = pickAsset(candidates)
-        return UpdateInfo(
-            version = tag,
-            releaseUrl = releaseUrl,
-            downloadUrl = chosen?.url,
-            notes = notes,
-            assetName = chosen?.name,
-            assetSize = chosen?.size ?: 0L,
-        )
-    }
-
-    private data class AssetCandidate(
-        val name: String,
-        val url: String,
-        val size: Long,
-        val uploaded: Boolean,
-    )
-
-    private fun pickAsset(candidates: List<AssetCandidate>): AssetCandidate? {
-        val valid = candidates.filter { it.uploaded && it.url.isNotBlank() }
-        if (DesktopPlatform.isWindows) {
-            // Priority 1: Portable zip archive (user requested automatic download & unpack)
-            val zip = valid.firstOrNull { it.name.endsWith(".zip", ignoreCase = true) }
-            if (zip != null) return zip
-            // Priority 2: Installer executable
-            return valid.firstOrNull { it.name.endsWith(".exe", ignoreCase = true) }
-        } else if (DesktopPlatform.isLinux) {
-            return valid.firstOrNull { it.name.endsWith(".AppImage", ignoreCase = true) }
-                ?: valid.firstOrNull { it.name.endsWith(".deb", ignoreCase = true) }
-                ?: valid.firstOrNull { it.name.endsWith(".rpm", ignoreCase = true) }
-                ?: valid.firstOrNull { it.name.endsWith(".tar.gz", ignoreCase = true) }
-        } else if (DesktopPlatform.isMac) {
-            return valid.firstOrNull { it.name.endsWith(".dmg", ignoreCase = true) }
-                ?: valid.firstOrNull { it.name.endsWith(".pkg", ignoreCase = true) }
-                ?: valid.firstOrNull { it.name.endsWith(".zip", ignoreCase = true) }
-        }
-        return valid.firstOrNull()
-    }
-
-    fun cancelDownload() {
-        activeDownloadJob?.cancel()
-        activeDownloadJob = null
-        val info = _latestUpdate.value
-        _state.value = if (info != null) UpdateState.Available(info) else UpdateState.Idle
-    }
-
-    suspend fun downloadAndApply(info: UpdateInfo) = withContext(Dispatchers.IO) {
-        val downloadUrl = info.downloadUrl
-        if (downloadUrl.isNullOrBlank()) {
-            _state.value = UpdateState.Error("Ссылка на загрузку не найдена в релизе", info)
-            return@withContext
-        }
-
-        val tempDir = File(System.getProperty("java.io.tmpdir"), "BitChord_update")
-        tempDir.mkdirs()
-
-        val fileName = info.assetName
-            ?: downloadUrl.substringAfterLast('/').substringBefore('?')
-            .takeIf { it.isNotBlank() }
-            ?: (if (downloadUrl.endsWith(".exe", ignoreCase = true)) "update.exe" else "update.zip")
-        val destFile = File(tempDir, fileName)
-
-        _state.value = UpdateState.Downloading(info, 0f, 0L, info.assetSize)
-
-        try {
-            val req = HttpRequest.newBuilder()
-                .uri(URI.create(downloadUrl))
-                .header("User-Agent", "BitChord/$currentVersion")
-                .timeout(Duration.ofMinutes(10))
-                .GET()
-                .build()
-
-            val response = javaClient.send(req, HttpResponse.BodyHandlers.ofInputStream())
-            if (response.statusCode() !in 200..299) {
-                _state.value = UpdateState.Error("Ошибка сервера при загрузке: HTTP ${response.statusCode()}", info)
+    /**
+     * Downloads [info]'s archive, checks it, and unpacks it ready to go in. One at a time; a
+     * second call while one runs just waits for it.
+     */
+    suspend fun download(info: UpdateInfo) = mutex.withLock {
+        withContext(Dispatchers.IO) {
+            if ((_state.value as? UpdateState.Ready)?.info == info) return@withContext
+            val url = info.downloadUrl
+            if (url == null || !canSelfUpdate) {
+                _state.value = UpdateState.Error(
+                    DesktopStrings["d_update_manual", "This copy cannot update itself — download the new version from the release page"],
+                    info,
+                )
                 return@withContext
             }
-
-            val totalBytes = response.headers().firstValueAsLong("Content-Length")
-                .orElse(if (info.assetSize > 0) info.assetSize else 0L)
-
-            var downloadedBytes = 0L
-            val buffer = ByteArray(64 * 1024)
-
-            FileOutputStream(destFile).use { fos ->
-                response.body().use { input ->
-                    var bytesRead = 0
-                    while (coroutineContext.isActive && input.read(buffer).also { bytesRead = it } != -1) {
-                        fos.write(buffer, 0, bytesRead)
-                        downloadedBytes += bytesRead
-                        val progress = if (totalBytes > 0) {
-                            (downloadedBytes.toDouble() / totalBytes.toDouble()).toFloat().coerceIn(0f, 1f)
-                        } else {
-                            -1f
-                        }
-                        _state.value = UpdateState.Downloading(info, progress, downloadedBytes, totalBytes)
-                    }
-                }
-            }
-
-            if (!coroutineContext.isActive) {
-                destFile.delete()
-                _state.value = UpdateState.Available(info)
-                return@withContext
-            }
-
-            if (destFile.name.endsWith(".zip", ignoreCase = true)) {
-                _state.value = UpdateState.Extracting(info)
-                val extractDir = File(tempDir, "extracted")
-                if (extractDir.exists()) extractDir.deleteRecursively()
-                extractDir.mkdirs()
-
-                unzip(destFile, extractDir)
-
-                val exeInZip = extractDir.walkTopDown().firstOrNull {
-                    it.isFile && it.name.equals("BitChord.exe", ignoreCase = true)
-                }
-                val payloadDir = exeInZip?.parentFile ?: extractDir
-                val installDir = findCurrentInstallDir()
-                val isDevMode = installDir == null || !File(installDir, "BitChord.exe").exists()
-
-                _state.value = UpdateState.ReadyToRestart(
-                    info = info,
-                    isDevMode = isDevMode,
-                    targetDir = if (isDevMode) payloadDir else installDir,
-                )
-            } else {
-                val installDir = findCurrentInstallDir()
-                val isDevMode = installDir == null
-                _state.value = UpdateState.ReadyToRestart(
-                    info = info,
-                    isDevMode = isDevMode,
-                    targetDir = destFile.parentFile,
-                )
-            }
-        } catch (_: CancellationException) {
-            destFile.delete()
-            _state.value = UpdateState.Available(info)
-        } catch (t: Throwable) {
-            destFile.delete()
-            _state.value = UpdateState.Error("Ошибка при загрузке: ${t.localizedMessage ?: t.message}", info)
-        }
-    }
-
-    private fun unzip(zipFile: File, destDir: File) {
-        ZipInputStream(zipFile.inputStream().buffered()).use { zis ->
-            var entry: ZipEntry?
-            val canonicalDestDirPath = destDir.canonicalPath
-            while (zis.nextEntry.also { entry = it } != null) {
-                val currentEntry = entry ?: break
-                val targetFile = File(destDir, currentEntry.name)
-                if (!targetFile.canonicalPath.startsWith(canonicalDestDirPath + File.separator) &&
-                    targetFile.canonicalPath != canonicalDestDirPath
-                ) {
-                    continue
-                }
-                if (currentEntry.isDirectory) {
-                    targetFile.mkdirs()
-                } else {
-                    targetFile.parentFile?.mkdirs()
-                    FileOutputStream(targetFile).use { fos ->
-                        zis.copyTo(fos)
-                    }
-                }
-                zis.closeEntry()
-            }
-        }
-    }
-
-    fun findCurrentInstallDir(): File? {
-        // 1. ProcessHandle command path (when launched via BitChord.exe)
-        try {
-            val cmd = ProcessHandle.current().info().command().orElse(null)
-            if (!cmd.isNullOrBlank()) {
-                val f = File(cmd)
-                if (f.isFile && f.name.contains("BitChord", ignoreCase = true)) {
-                    return f.parentFile
-                }
-            }
-        } catch (_: Throwable) {}
-
-        // 2. CodeSource location (when inside packaged desktopApp.jar in app/ directory)
-        try {
-            val cs = DesktopUpdateChecker::class.java.protectionDomain?.codeSource?.location
-            if (cs != null) {
-                val f = File(cs.toURI())
-                if (f.isFile && f.parentFile?.name == "app") {
-                    val root = f.parentFile?.parentFile
-                    if (root != null && File(root, "BitChord.exe").exists()) {
-                        return root
-                    }
-                }
-                if (f.isDirectory && File(f, "BitChord.exe").exists()) {
-                    return f
-                }
-            }
-        } catch (_: Throwable) {}
-
-        // 3. User directory if BitChord.exe exists there
-        try {
-            val userDir = File(System.getProperty("user.dir"))
-            if (File(userDir, "BitChord.exe").exists()) {
-                return userDir
-            }
-        } catch (_: Throwable) {}
-
-        return null
-    }
-
-    fun applyAndRestart() {
-        val current = _state.value as? UpdateState.ReadyToRestart ?: return
-        if (current.isDevMode) {
+            val archive = File(workDir, "download.zip")
             try {
-                ProcessBuilder("explorer.exe", current.targetDir.absolutePath).start()
-            } catch (_: Throwable) {
-                DesktopExternalLinks.open(current.targetDir.toURI().toString())
-            }
-            return
-        }
-
-        if (DesktopPlatform.isWindows) {
-            val tempDir = File(System.getProperty("java.io.tmpdir"), "BitChord_update")
-            val extractDir = File(tempDir, "extracted")
-            val exeInZip = extractDir.walkTopDown().firstOrNull {
-                it.isFile && it.name.equals("BitChord.exe", ignoreCase = true)
-            }
-            val payloadDir = exeInZip?.parentFile
-            val installDir = current.targetDir
-            val targetExe = File(installDir, "BitChord.exe")
-
-            if (payloadDir != null && targetExe.exists()) {
-                val batchFile = File(tempDir, "apply_update.cmd")
-                batchFile.writeText(
-                    """
-                    @echo off
-                    chcp 65001 >nul
-                    set "PID=%~1"
-                    set "SRC=%~2"
-                    set "DST=%~3"
-                    set "EXE=%~4"
-                    set "LOG=%TEMP%\bitchord_update.log"
-                    echo [%date% %time%] Waiting for process %PID% to terminate... > "%LOG%"
-
-                    :wait_proc
-                    tasklist /fi "PID eq %PID%" 2>nul | findstr /i "%PID%" >nul
-                    if not errorlevel 1 (
-                        timeout /t 1 /nobreak >nul
-                        goto wait_proc
-                    )
-
-                    echo [%date% %time%] Process ended. Copying files from %SRC% to %DST%... >> "%LOG%"
-                    timeout /t 1 /nobreak >nul
-
-                    robocopy "%SRC%" "%DST%" /E /IS /IT /NP /R:5 /W:1 >> "%LOG%" 2>&1
-                    if errorlevel 8 (
-                        echo [%date% %time%] Robocopy error %errorlevel%, falling back to xcopy... >> "%LOG%"
-                        xcopy "%SRC%\*" "%DST%\" /E /Y /Q /H /R >> "%LOG%" 2>&1
-                    )
-
-                    echo [%date% %time%] Restarting %EXE%... >> "%LOG%"
-                    start "" "%EXE%"
-
-                    timeout /t 3 /nobreak >nul
-                    rmdir /s /q "%SRC%" >nul 2>&1
-                    echo [%date% %time%] Update complete. >> "%LOG%"
-                    exit
-                    """.trimIndent(),
-                    Charsets.UTF_8,
+                workDir.mkdirs()
+                fetchArchive(info, url, archive)
+                _state.value = UpdateState.Preparing(info)
+                stagedDir.deleteRecursively()
+                unzip(archive, stagedDir)
+                val payload = stagedDir.walkTopDown().maxDepth(3)
+                    .firstOrNull { it.isDirectory && isAppFolder(it) }
+                    ?: error(DesktopStrings["d_update_bad_archive", "The download is not a BitChord build"])
+                // Kept where the script will look for it, whatever the archive's folder was called.
+                File(workDir, "payload.txt").writeText(payload.absolutePath)
+                archive.delete()
+                _state.value = UpdateState.Ready(info)
+                // Asked for, and checked: it goes in at the next exit unless restarted for sooner.
+                installWhenAppExits()
+                DesktopTrackLog.log("update ${info.version} ready at $payload")
+            } catch (cancelled: CancellationException) {
+                archive.delete()
+                _state.value = UpdateState.Available(info)
+                throw cancelled
+            } catch (failure: Throwable) {
+                archive.delete()
+                stagedDir.deleteRecursively()
+                DesktopTrackLog.log("update download failed: ${failure.message}")
+                _state.value = UpdateState.Error(
+                    failure.message ?: DesktopStrings["d_update_download_failed", "The update could not be downloaded"],
+                    info,
                 )
+            }
+        }
+    }
 
-                ProcessBuilder(
-                    "cmd.exe", "/c", "start", "\"BitChord Updater\"", "/min",
-                    batchFile.absolutePath,
-                    ProcessHandle.current().pid().toString(),
-                    payloadDir.absolutePath,
-                    installDir.absolutePath,
-                    targetExe.absolutePath,
-                ).start()
-
-                kotlin.system.exitProcess(0)
-            } else {
-                val exeInstaller = tempDir.listFiles()?.firstOrNull {
-                    it.name.endsWith(".exe", ignoreCase = true) && !it.name.equals("apply_update.cmd", ignoreCase = true)
+    private suspend fun fetchArchive(info: UpdateInfo, url: String, into: File) {
+        val request = HttpRequest.newBuilder(URI.create(url))
+            .header("User-Agent", "BitChord/$currentVersion")
+            .timeout(Duration.ofMinutes(30))
+            .GET()
+            .build()
+        val response = client.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        if (response.statusCode() !in 200..299) {
+            response.body().close()
+            error("HTTP ${response.statusCode()}")
+        }
+        val total = response.headers().firstValueAsLong("Content-Length").orElse(info.assetSize)
+        val digest = MessageDigest.getInstance("SHA-256")
+        var done = 0L
+        var lastShown = 0L
+        _state.value = UpdateState.Downloading(info, if (total > 0) 0f else -1f, 0L, total)
+        response.body().use { input ->
+            into.outputStream().buffered().use { output ->
+                val buffer = ByteArray(256 * 1024)
+                while (true) {
+                    kotlin.coroutines.coroutineContext.ensureActive()
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                    digest.update(buffer, 0, read)
+                    done += read
+                    // A few times a second, not once per read: every new state is a frame of UI.
+                    val now = System.nanoTime()
+                    if (now - lastShown > PROGRESS_INTERVAL_NS) {
+                        lastShown = now
+                        val progress = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else -1f
+                        _state.value = UpdateState.Downloading(info, progress, done, total)
+                    }
                 }
-                if (exeInstaller != null) {
-                    ProcessBuilder(exeInstaller.absolutePath).start()
-                    kotlin.system.exitProcess(0)
+            }
+        }
+        if (info.assetSize > 0 && done != info.assetSize) {
+            error(DesktopStrings["d_update_incomplete", "The download was cut short"])
+        }
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        if (info.sha256 != null && actual != info.sha256) {
+            error(DesktopStrings["d_update_checksum", "The download does not match the release — not installed"])
+        }
+    }
+
+    internal fun unzip(archive: File, into: File) {
+        into.mkdirs()
+        val root = into.canonicalFile
+        ZipInputStream(archive.inputStream().buffered()).use { zip ->
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                // Archives made by Windows' own zipper name folders with backslashes.
+                val name = entry.name.replace('\\', '/')
+                val target = File(root, name).canonicalFile
+                // Nothing outside the folder it is unpacked into, whatever the archive says.
+                if (!target.path.startsWith(root.path + File.separator)) continue
+                if (entry.isDirectory || name.endsWith("/")) {
+                    target.mkdirs()
+                } else {
+                    target.parentFile?.mkdirs()
+                    target.outputStream().buffered().use { zip.copyTo(it) }
                 }
             }
         }
     }
+
+    /** The update goes in when the app next exits, without opening it again. */
+    fun installWhenAppExits() {
+        if (_state.value !is UpdateState.Ready) return
+        installOnExit = true
+        ensureExitHook()
+    }
+
+    /** Ends the app now, puts the update in, and opens it again. */
+    fun restartNow() {
+        if (_state.value !is UpdateState.Ready) return
+        installOnExit = true
+        relaunchAfterInstall = true
+        ensureExitHook()
+        val exit = exitApp
+        if (exit != null) exit() else kotlin.system.exitProcess(0)
+    }
+
+    private fun ensureExitHook() {
+        if (hookInstalled) return
+        hookInstalled = true
+        Runtime.getRuntime().addShutdownHook(Thread({
+            if (installOnExit && _state.value is UpdateState.Ready) runCatching { startInstaller(relaunchAfterInstall) }
+        }, "bitchord-update-installer"))
+    }
+
+    private fun startInstaller(relaunch: Boolean) {
+        val dir = installDir ?: return
+        val payload = File(File(workDir, "payload.txt").readText().trim())
+        if (!isAppFolder(payload)) return
+        val version = (_state.value as? UpdateState.Ready)?.info?.version.orEmpty()
+        val script = File(workDir, "install.ps1")
+        script.writeText(INSTALL_SCRIPT)
+        resultFile.delete()
+        ProcessBuilder(
+            "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-WindowStyle", "Hidden", "-File", script.absolutePath,
+            "-ProcId", ProcessHandle.current().pid().toString(),
+            "-Src", payload.absolutePath,
+            "-Dst", dir.absolutePath,
+            "-Backup", backupDir.absolutePath,
+            "-Relaunch", if (relaunch) "1" else "0",
+            "-Result", resultFile.absolutePath,
+            "-Version", version,
+        )
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start()
+    }
+
+    /**
+     * What the last update did, once, at the next launch: the version it put in, or why it could
+     * not. Null when there was none to report.
+     */
+    fun takeLastResult(): Result<String>? {
+        val file = resultFile
+        if (!file.exists()) return null
+        val text = runCatching { file.readText().trim().removePrefix("﻿") }.getOrDefault("")
+        file.delete()
+        runCatching { stagedDir.deleteRecursively() }
+        return when {
+            text.startsWith("ok") -> Result.success(text.removePrefix("ok").trim())
+            else -> Result.failure(IllegalStateException(text.removePrefix("failed").trim()))
+        }
+    }
+
+    private fun isAppFolder(dir: File): Boolean =
+        File(dir, "BitChord.exe").isFile && File(dir, "app/BitChord.cfg").isFile && File(dir, "runtime").isDirectory
 
     private class Parsed(val parts: List<Int>, val preRelease: Boolean)
 
@@ -515,6 +375,8 @@ internal object DesktopUpdateChecker {
 
     /** Numeric comparison, with a `-betaN` build counted as older than the plain release it leads up to. */
     internal fun isNewer(latest: String, current: String): Boolean {
+        // A build from Gradle has no version to compare; it is never offered one.
+        if (current == "dev") return false
         val l = parse(latest)
         val c = parse(current)
         for (i in 0 until maxOf(l.parts.size, c.parts.size)) {
@@ -524,4 +386,50 @@ internal object DesktopUpdateChecker {
         }
         return c.preRelease && !l.preRelease
     }
+
+    private const val PROGRESS_INTERVAL_NS = 150_000_000L
+
+    /**
+     * The swap, in PowerShell: wait for the app to exit, keep the old build aside, mirror the new
+     * one in, and put the old one back if anything fails. Plain ASCII, so the console's codepage
+     * does not matter; the paths come in as arguments.
+     */
+    private val INSTALL_SCRIPT = """
+        param([int]${'$'}ProcId, [string]${'$'}Src, [string]${'$'}Dst, [string]${'$'}Backup, [int]${'$'}Relaunch, [string]${'$'}Result, [string]${'$'}Version)
+        ${'$'}ErrorActionPreference = 'Stop'
+        ${'$'}log = ${'$'}Result + '.log'
+        function Log([string]${'$'}m) { Add-Content -LiteralPath ${'$'}log -Value ('[' + (Get-Date -Format s) + '] ' + ${'$'}m) }
+        function Mirror([string]${'$'}from, [string]${'$'}to) {
+            & robocopy ${'$'}from ${'$'}to /MIR /R:30 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+            if (${'$'}LASTEXITCODE -ge 8) { throw ('robocopy ' + ${'$'}from + ' failed with ' + ${'$'}LASTEXITCODE) }
+        }
+        function CopyTop([string]${'$'}from, [string]${'$'}to) {
+            New-Item -ItemType Directory -Force -Path ${'$'}to | Out-Null
+            Get-ChildItem -LiteralPath ${'$'}from -File | Copy-Item -Destination ${'$'}to -Force
+        }
+        Log ('installing ' + ${'$'}Version + ' into ' + ${'$'}Dst)
+        try { Wait-Process -Id ${'$'}ProcId -Timeout 120 -ErrorAction SilentlyContinue } catch {}
+        Start-Sleep -Milliseconds 800
+        ${'$'}ok = ${'$'}false
+        try {
+            foreach (${'$'}d in 'app', 'runtime') { Mirror (Join-Path ${'$'}Dst ${'$'}d) (Join-Path ${'$'}Backup ${'$'}d) }
+            CopyTop ${'$'}Dst ${'$'}Backup
+            foreach (${'$'}d in 'app', 'runtime') { Mirror (Join-Path ${'$'}Src ${'$'}d) (Join-Path ${'$'}Dst ${'$'}d) }
+            CopyTop ${'$'}Src ${'$'}Dst
+            ${'$'}ok = ${'$'}true
+            Set-Content -LiteralPath ${'$'}Result -Value ('ok ' + ${'$'}Version)
+            Log 'done'
+        } catch {
+            ${'$'}why = [string]${'$'}_
+            Log ('failed: ' + ${'$'}why)
+            try {
+                foreach (${'$'}d in 'app', 'runtime') { Mirror (Join-Path ${'$'}Backup ${'$'}d) (Join-Path ${'$'}Dst ${'$'}d) }
+                CopyTop ${'$'}Backup ${'$'}Dst
+                Log 'old build restored'
+            } catch { Log ('restore failed: ' + [string]${'$'}_) }
+            Set-Content -LiteralPath ${'$'}Result -Value ('failed ' + ${'$'}why)
+        }
+        if (${'$'}Relaunch -eq 1) { Start-Process -FilePath (Join-Path ${'$'}Dst 'BitChord.exe') }
+        if (${'$'}ok) { Remove-Item -LiteralPath ${'$'}Src -Recurse -Force -ErrorAction SilentlyContinue }
+    """.trimIndent()
 }

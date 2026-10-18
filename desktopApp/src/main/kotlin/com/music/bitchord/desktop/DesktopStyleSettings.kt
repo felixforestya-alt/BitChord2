@@ -9,6 +9,9 @@ internal enum class DesktopPlayerStyle { DISC, CLASSIC }
 /** What the disc player puts behind the music when a track has a music video. */
 internal enum class DesktopVisualMode { VIDEO, ARTWORK }
 
+/** Which version of a track starts when one is played: the song, or its music video. */
+internal enum class DesktopStartVersion { SONG, VIDEO }
+
 /** Where the main window shows what is playing. */
 internal enum class DesktopNowPlayingPlacement { BOTTOM, TOP }
 
@@ -51,6 +54,14 @@ internal object DesktopStyleSettings {
     private val _animatedHome = flag(KEY_ANIMATED_HOME, true)
     private val _heroVisualizer = choice(KEY_HERO_VISUALIZER, DesktopVisualizerStyle.AURORA)
     private val _heroLyrics = flag(KEY_HERO_LYRICS, true)
+    private val _startVersion = choice(KEY_START_VERSION, DesktopStartVersion.SONG)
+
+    /**
+     * Which version a track starts as. YouTube often hands back the music video for a song — its
+     * audio, its intro, its skits — so by default the song version is put in its place as it starts.
+     */
+    val startVersion: StateFlow<DesktopStartVersion> = _startVersion
+    fun setStartVersion(value: DesktopStartVersion) = save(KEY_START_VERSION, value, _startVersion)
 
     /** What moves in the home card, apart from the player's own. */
     val heroVisualizer: StateFlow<DesktopVisualizerStyle> = _heroVisualizer
@@ -125,6 +136,7 @@ internal object DesktopStyleSettings {
     private const val KEY_VISUALIZER_STYLE = "style_visualizer_kind"
     private const val KEY_LIQUID_GLASS = "style_liquid_glass"
     private const val KEY_ANIMATED_HOME = "style_animated_home"
+    private const val KEY_START_VERSION = "style_start_version"
     private const val KEY_HERO_VISUALIZER = "style_hero_visualizer_v2"
     private const val KEY_HERO_LYRICS = "style_hero_lyrics"
     private const val KEY_BAR_TINTED = "style_bar_tinted"

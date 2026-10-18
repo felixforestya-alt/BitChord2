@@ -29,6 +29,8 @@ import okio.Path.Companion.toOkioPath
 import org.jetbrains.compose.resources.painterResource
 
 fun main() {
+    // Already running — in the tray, say: bring that one forward rather than start a second.
+    if (!DesktopSingleInstance.claim()) kotlin.system.exitProcess(0)
     // Before the window, so skiko's first shader already goes through the disk cache.
     DesktopShaderCache.install()
     // The player's and Home's classes, loaded off the UI thread while the window comes up.
@@ -203,6 +205,8 @@ private fun desktopMain() = application {
                 DesktopWindowBackdrop.apply()
             }
         }
+        // The way out an update's restart takes, so the app ends as it always does.
+        LaunchedEffect(Unit) { DesktopUpdateChecker.exitApp = ::exitApplication }
         val actions = remember {
             DesktopWindowActions(
                 minimize = {

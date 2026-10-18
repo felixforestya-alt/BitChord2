@@ -531,34 +531,9 @@ fun BitChordDesktopApp() {
     var personalPositionStash by remember { mutableStateOf(0L) }
     var personalPlayingStash by remember { mutableStateOf(false) }
     val persistence = remember { DesktopPersistence() }
-    var availableUpdate by remember { mutableStateOf<DesktopUpdateChecker.UpdateInfo?>(null) }
-    LaunchedEffect(Unit) {
-        if (!DesktopUpdateChecker.customBuild) availableUpdate = DesktopUpdateChecker.check()
-    }
-    availableUpdate?.let { update ->
-        AlertDialog(
-            onDismissRequest = { availableUpdate = null },
-            title = { Text(DesktopStrings["d_update_available", "Update available"]) },
-            text = {
-                Text(
-                    "BitChord ${update.version} is out — you have ${DesktopUpdateChecker.currentVersion}." +
-                        (update.notes?.takeIf { it.isNotBlank() }?.let { "\n\n${it.take(600)}" } ?: ""),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val toDownload = update
-                    availableUpdate = null
-                    scope.launch { DesktopUpdateChecker.downloadAndApply(toDownload) }
-                }) { Text(if (DesktopStrings.resolvedTag() == "ru") "Обновить" else DesktopStrings["update", "Update"]) }
-            },
-            dismissButton = {
-                TextButton(onClick = { availableUpdate = null }) {
-                    Text(DesktopStrings["d_later", "Later"])
-                }
-            },
-        )
-    }
+    // The offer of a new version at launch, the note that one waits to go in, and how the last
+    // one went — see [DesktopUpdatePrompts].
+    DesktopUpdatePrompts()
     var destination by remember { mutableStateOf(DesktopDestination.LISTEN_NOW) }
     var query by remember { mutableStateOf("") }
     var searchFilter by remember { mutableStateOf(SearchFilter.ALL) }
@@ -1952,6 +1927,10 @@ fun BitChordDesktopApp() {
     // Each song and its video, both ways round, once found or switched between: the switch back
     // needs no search, and cannot come up empty — it did, and the switch then vanished.
     val versionPairs = remember { androidx.compose.runtime.mutableStateMapOf<String, Song>() }
+    // Tracks whose version was picked by hand, which the start-version setting then leaves alone.
+    val versionChosen = remember { mutableSetOf<String>() }
+    // A track found to be the wrong version to start as, for the switch further down to take up.
+    var startVersionDue by remember { mutableStateOf<String?>(null) }
 
     /**
      * [song] with its song version's sleeve when it is a music video and that version is known: the
@@ -1965,18 +1944,29 @@ fun BitChordDesktopApp() {
     // Once a track, and from the moment the player is wanted — the pointer on the way into it —
     // not from when it opens: the answer came a second into the opening, and the deck making
     // room for the switch then cost the slide a long frame. Kept when the player is put away.
-    LaunchedEffect(selectedSong?.videoId, playerStyle) {
+    val startVersion by DesktopStyleSettings.startVersion.collectAsState()
+    LaunchedEffect(selectedSong?.videoId, playerStyle, startVersion) {
         versionAlternate = null
         versionSearching = false
         val current = selectedSong ?: return@LaunchedEffect
-        if (playerStyle != DesktopPlayerStyle.DISC) return@LaunchedEffect
+        // Whether this track is the version tracks are to start as — if not, the other is looked
+        // for straight away, whichever player is in use, and put in its place.
+        val wrongVersion = current.videoId !in versionChosen && when (startVersion) {
+            DesktopStartVersion.SONG -> current.looksLikeVideo()
+            DesktopStartVersion.VIDEO -> !current.looksLikeVideo()
+        }
+        if (playerStyle != DesktopPlayerStyle.DISC && !wrongVersion) return@LaunchedEffect
         // A video at once — its sleeve is wanted on the home card and the bars too; a song only
         // once the player is.
-        if (!current.looksLikeVideo()) snapshotFlow { overlays.nowPlaying || DesktopPlayerWarmup.wanted }.first { it }
+        if (!current.looksLikeVideo() && !wrongVersion) snapshotFlow { overlays.nowPlaying || DesktopPlayerWarmup.wanted }.first { it }
         if (current.localPath != null || current.localUri != null || !DesktopSearchClient.isVideoId(current.videoId)) {
             return@LaunchedEffect
         }
-        versionPairs[current.videoId]?.let { versionAlternate = it; return@LaunchedEffect }
+        versionPairs[current.videoId]?.let {
+            versionAlternate = it
+            if (wrongVersion) startVersionDue = current.videoId
+            return@LaunchedEffect
+        }
         versionSearching = true
         val found = withContext(Dispatchers.IO) {
             runCatching {
@@ -1995,10 +1985,11 @@ fun BitChordDesktopApp() {
         }
         versionAlternate = found
         versionSearching = false
+        if (wrongVersion && found != null) startVersionDue = current.videoId
     }
 
     /** Swaps the playing track for its other version, in place in the queue, at the same moment. */
-    fun switchVersion() {
+    fun switchVersion(byHand: Boolean = true) {
         val current = selectedSong ?: return
         val target = versionAlternate ?: return
         if (partyTrackChangeBlocked()) return
@@ -2024,8 +2015,28 @@ fun BitChordDesktopApp() {
         versionPairs[replacement.videoId] = current
         versionPairs[current.videoId] = replacement
         versionAlternate = current
+        // Switched by hand: the start-version setting leaves this one as it was put, both ways.
+        if (byHand) {
+            versionChosen += current.videoId
+            versionChosen += replacement.videoId
+        }
         saveQueue()
         playbackEngine.load(replacement, playWhenReady = true, startAtMs = at)
+    }
+
+    /**
+     * [current] for the version tracks start as, while it is still just starting — never a track
+     * that has been playing a while, and never one switched by hand.
+     */
+    fun switchToStartVersion(current: Song) {
+        if (selectedSong?.videoId != current.videoId) return
+        if (playbackEngine.state.value.positionMs > START_VERSION_WINDOW_MS) return
+        switchVersion(byHand = false)
+    }
+    LaunchedEffect(startVersionDue) {
+        val due = startVersionDue ?: return@LaunchedEffect
+        startVersionDue = null
+        selectedSong?.takeIf { it.videoId == due }?.let(::switchToStartVersion)
     }
 
     // Lyrics and motion artwork follow whatever is *playing*, not whatever page happens to be open.
@@ -7531,6 +7542,17 @@ private fun DesktopSettingsScreen(
                             visualMode == DesktopVisualMode.VIDEO,
                         ) { DesktopStyleSettings.setVisualMode(if (it) DesktopVisualMode.VIDEO else DesktopVisualMode.ARTWORK) }
                     }
+                    val startVersion by DesktopStyleSettings.startVersion.collectAsState()
+                    StyleChoiceRow(
+                        DesktopStrings["d_start_version", "When a track starts"],
+                        DesktopStrings["d_start_version_subtitle", "Which version plays when a track has both: the song, or its music video. Either can still be switched to in the player"],
+                        listOf(
+                            DesktopStrings["d_version_song", "Song"] to DesktopStartVersion.SONG,
+                            DesktopStrings["d_version_video", "Video"] to DesktopStartVersion.VIDEO,
+                        ),
+                        startVersion,
+                        DesktopStyleSettings::setStartVersion,
+                    )
                     val placement by DesktopStyleSettings.nowPlayingPlacement.collectAsState()
                     StyleChoiceRow(
                         DesktopStrings["d_now_playing_placement", "Now playing in the main window"],
@@ -7879,9 +7901,8 @@ private fun DesktopSettingsScreen(
                 }
             }
             if (section == DesktopSettingsSection.UPDATES) item {
-                val groupTitle = if (DesktopStrings.resolvedTag() == "ru") "Обновление приложения" else DesktopStrings["updates", "Updates"]
-                SettingsGroup(groupTitle) {
-                    DesktopUpdateSettingsRow()
+                SettingsGroup(DesktopStrings["d_updates", "Updates"]) {
+                    DesktopUpdateSettingsRows()
                 }
             }
             }
@@ -7947,202 +7968,72 @@ private fun DesktopSettingsFooter(onLicenses: () -> Unit) {
     )
 }
 
-/**
- * Settings row that displays the current application version, checks for updates from GitHub,
- * downloads portable packages or installers with progress indication, and seamlessly restarts.
- */
+/** Settings' word on updates: this version, a check on demand, and how new ones are taken. */
 @Composable
-private fun DesktopUpdateSettingsRow() {
-    val updateState by DesktopUpdateChecker.state.collectAsState()
+private fun DesktopUpdateSettingsRows() {
     val scope = rememberCoroutineScope()
-    val isRussian = DesktopStrings.resolvedTag() == "ru"
-    val version = DesktopUpdateChecker.currentVersion
-
-    val title = if (isRussian) "Версия $version" else "Version $version"
-    val subtitle = when (val s = updateState) {
-        is DesktopUpdateChecker.UpdateState.Idle ->
-            if (isRussian) "Проверить наличие обновлений и установить"
-            else "Check for updates and install"
-        is DesktopUpdateChecker.UpdateState.Checking ->
-            if (isRussian) "Проверка обновлений…"
-            else "Checking for updates…"
-        is DesktopUpdateChecker.UpdateState.UpToDate ->
-            if (isRussian) "У вас установлена последняя версия ($version)"
-            else "You have the latest version ($version)"
-        is DesktopUpdateChecker.UpdateState.Available ->
-            if (isRussian) "Доступна новая версия: ${s.info.version}"
-            else "New version available: ${s.info.version}"
-        is DesktopUpdateChecker.UpdateState.Downloading -> {
-            val pct = if (s.progress >= 0f) "${(s.progress * 100).toInt()}%" else ""
-            val mb = if (s.totalBytes > 0) " (${s.downloadedBytes / (1024 * 1024)} / ${s.totalBytes / (1024 * 1024)} МБ)" else ""
-            if (isRussian) "Загрузка обновления… $pct$mb" else "Downloading update… $pct$mb"
-        }
-        is DesktopUpdateChecker.UpdateState.Extracting ->
-            if (isRussian) "Распаковка и подготовка файлов…"
-            else "Preparing update files…"
-        is DesktopUpdateChecker.UpdateState.ReadyToRestart ->
-            if (s.isDevMode) {
-                if (isRussian) "Обновление скачано в папку (режим разработки)"
-                else "Update downloaded to folder (dev mode)"
-            } else {
-                if (isRussian) "Обновление готово к установке!"
-                else "Update is ready to install!"
-            }
-        is DesktopUpdateChecker.UpdateState.Error ->
-            if (isRussian) "Ошибка: ${s.message}" else "Error: ${s.message}"
+    val state by DesktopUpdateChecker.state.collectAsState()
+    val autoUpdate by DesktopUpdateSettings.autoUpdate.collectAsState()
+    var showOffer by remember { mutableStateOf(false) }
+    val title = DesktopStrings["d_update_version", "Version %s"].format(DesktopUpdateChecker.currentVersion)
+    val subtitle = when (val s = state) {
+        DesktopUpdateChecker.UpdateState.Idle -> DesktopStrings["d_update_check_hint", "Look for a newer release on GitHub"]
+        DesktopUpdateChecker.UpdateState.Checking -> DesktopStrings["d_update_checking", "Checking…"]
+        DesktopUpdateChecker.UpdateState.UpToDate -> DesktopStrings["d_update_latest", "This is the latest version"]
+        is DesktopUpdateChecker.UpdateState.Available -> DesktopStrings["d_update_new", "%s is out"].format(s.info.version)
+        is DesktopUpdateChecker.UpdateState.Downloading -> DesktopStrings["d_update_downloading", "Downloading… %s"].format(sizeLine(s.downloadedBytes, s.totalBytes))
+        is DesktopUpdateChecker.UpdateState.Preparing -> DesktopStrings["d_update_preparing", "Checking and unpacking…"]
+        is DesktopUpdateChecker.UpdateState.Ready -> DesktopStrings["d_update_ready_short", "%s goes in when the app restarts"].format(s.info.version)
+        is DesktopUpdateChecker.UpdateState.Error -> s.message
     }
-
-    if (!settingsRowVisible(title, subtitle)) return
-
-    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+    if (settingsRowVisible(title, subtitle)) {
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Column(Modifier.weight(1f).padding(end = 16.dp)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                Spacer(Modifier.height(2.dp))
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = when (updateState) {
-                        is DesktopUpdateChecker.UpdateState.UpToDate,
-                        is DesktopUpdateChecker.UpdateState.Available,
-                        is DesktopUpdateChecker.UpdateState.ReadyToRestart -> DesktopAccent
-                        is DesktopUpdateChecker.UpdateState.Error -> MaterialTheme.colorScheme.error
-                        else -> DesktopSecondary
-                    },
+                    color = if (state is DesktopUpdateChecker.UpdateState.Error) MaterialTheme.colorScheme.error else DesktopSecondary,
                 )
             }
-
-            when (val s = updateState) {
-                is DesktopUpdateChecker.UpdateState.Idle,
-                is DesktopUpdateChecker.UpdateState.UpToDate -> {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val found = DesktopUpdateChecker.checkForUpdates(force = true)
-                                if (found != null) {
-                                    DesktopUpdateChecker.downloadAndApply(found)
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = DesktopAccent,
-                            contentColor = Color.White,
-                        ),
-                    ) {
-                        Text(if (isRussian) "Обновить" else "Update")
+            when (state) {
+                is DesktopUpdateChecker.UpdateState.Available -> UpdateButton(DesktopStrings["d_update_install", "Update"]) { showOffer = true }
+                is DesktopUpdateChecker.UpdateState.Ready -> UpdateButton(DesktopStrings["d_update_restart_now", "Restart now"]) { DesktopUpdateChecker.restartNow() }
+                is DesktopUpdateChecker.UpdateState.Downloading, is DesktopUpdateChecker.UpdateState.Preparing, DesktopUpdateChecker.UpdateState.Checking ->
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                else -> TextButton(onClick = {
+                    scope.launch {
+                        if (DesktopUpdateChecker.check(userAsked = true) != null) showOffer = true
                     }
-                }
-                is DesktopUpdateChecker.UpdateState.Checking -> {
-                    FilledTonalButton(
-                        onClick = {},
-                        enabled = false,
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = DesktopAccent,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (isRussian) "Проверка…" else "Checking…")
-                    }
-                }
-                is DesktopUpdateChecker.UpdateState.Available -> {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                DesktopUpdateChecker.downloadAndApply(s.info)
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = DesktopAccent,
-                            contentColor = Color.White,
-                        ),
-                    ) {
-                        Text(if (isRussian) "Обновить" else "Update")
-                    }
-                }
-                is DesktopUpdateChecker.UpdateState.Downloading -> {
-                    OutlinedButton(
-                        onClick = { DesktopUpdateChecker.cancelDownload() },
-                    ) {
-                        Text(if (isRussian) "Отмена" else "Cancel")
-                    }
-                }
-                is DesktopUpdateChecker.UpdateState.Extracting -> {
-                    FilledTonalButton(
-                        onClick = {},
-                        enabled = false,
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp,
-                            color = DesktopAccent,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (isRussian) "Распаковка…" else "Extracting…")
-                    }
-                }
-                is DesktopUpdateChecker.UpdateState.ReadyToRestart -> {
-                    Button(
-                        onClick = { DesktopUpdateChecker.applyAndRestart() },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = DesktopAccent,
-                            contentColor = Color.White,
-                        ),
-                    ) {
-                        Text(
-                            if (s.isDevMode) {
-                                if (isRussian) "Открыть папку" else "Open folder"
-                            } else {
-                                if (isRussian) "Перезапустить" else "Restart"
-                            }
-                        )
-                    }
-                }
-                is DesktopUpdateChecker.UpdateState.Error -> {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val found = DesktopUpdateChecker.checkForUpdates(force = true)
-                                if (found != null) {
-                                    DesktopUpdateChecker.downloadAndApply(found)
-                                }
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = DesktopAccent,
-                            contentColor = Color.White,
-                        ),
-                    ) {
-                        Text(if (isRussian) "Повторить" else "Retry")
-                    }
-                }
+                }) { Text(DesktopStrings["d_update_check", "Check for updates"], color = Color.White) }
             }
         }
-
-        if (updateState is DesktopUpdateChecker.UpdateState.Downloading) {
-            val s = updateState as DesktopUpdateChecker.UpdateState.Downloading
-            Spacer(Modifier.height(10.dp))
-            if (s.progress >= 0f) {
+        (state as? DesktopUpdateChecker.UpdateState.Downloading)?.let { downloading ->
+            if (downloading.progress >= 0f) {
                 LinearProgressIndicator(
-                    progress = { s.progress },
-                    modifier = Modifier.fillMaxWidth().height(4.dp),
-                    color = DesktopAccent,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    progress = { downloading.progress },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(3.dp),
+                    color = Color.White,
+                    trackColor = Color.White.copy(alpha = 0.15f),
                 )
-            } else {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().height(4.dp),
-                    color = DesktopAccent,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                )
+                Spacer(Modifier.height(10.dp))
             }
         }
     }
+    SettingsToggle(
+        DesktopStrings["d_update_auto", "Update automatically"],
+        if (DesktopUpdateChecker.canSelfUpdate) {
+            DesktopStrings["d_update_auto_subtitle", "Download new versions in the background and install them when the app is closed. Off: offered at launch"]
+        } else {
+            DesktopStrings["d_update_auto_unavailable", "This copy cannot update itself (it is not the portable build, or its folder is not writable) — new versions are offered with a link"]
+        },
+        autoUpdate,
+        DesktopUpdateSettings::setAutoUpdate,
+    )
+    if (showOffer) DesktopUpdateDialog(onDismiss = { showOffer = false })
 }
 
 /** Everything this build is assembled from, and the terms each part came under. A page of Settings. */
@@ -9662,3 +9553,6 @@ private const val WARMUP_CLOSE_MS = 380L
 private const val EXPLORE_PREFETCH_DELAY_MS = 4_000L
 private const val EXPLORE_ARTWORK_CONCURRENCY = 8
 private const val EXPLORE_BATCH_MS = 250L
+
+/** How far into a track it may still be swapped for the version tracks start as. */
+private const val START_VERSION_WINDOW_MS = 8_000L

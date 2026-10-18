@@ -204,4 +204,6 @@
     <string name="d_library_customize_hint">Switch off what you don\'t want on the page.</string>
     <string name="d_library_replay">Replay cards</string>
     <string name="d_library_on_device">Playlists on this computer</string>
+    <string name="wave_blocked">Not suggested (disliked)</string>
+    <string name="wave_unblock_all">Let them all back</string>
 </resources>

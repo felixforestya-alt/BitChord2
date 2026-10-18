@@ -110,6 +110,12 @@ internal fun DesktopPlayerSheet(
                 mounted = false
             }
         }
+        // Put away, it stays just below the window's edge whatever the window does: left at the old
+        // height, a window made larger — maximised, or full screen — showed the top of the player
+        // across its bottom.
+        LaunchedEffect(heightPx) {
+            if (!visible && !offset.isRunning) offset.snapTo(heightPx)
+        }
         // Once it fills the window, the window under it need not be drawn at all.
         LaunchedEffect(visible) {
             snapshotFlow { visible && offset.value <= 0.5f }.collect { DesktopPlayerCover.covering = it; if (DesktopFrameProfiler.enabled) DesktopFrameProfiler.mark("covering $it") }
@@ -194,8 +200,10 @@ internal fun DesktopPlayerSheet(
                 // while it was put away or on its way down.
                 .graphicsLayer {
                     translationY = when {
-                        !primingNow -> offset.value
-                        else -> primeOffset.value
+                        primingNow -> primeOffset.value
+                        // Hidden and still: below the edge as the window is now, not as it was.
+                        !visible && !offset.isRunning -> heightPx
+                        else -> offset.value
                     }
                     clip = true
                     alpha = if (primingNow && faint) 1f / 255f else 1f

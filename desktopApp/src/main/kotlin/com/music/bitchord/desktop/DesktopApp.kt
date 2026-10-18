@@ -673,6 +673,11 @@ fun BitChordDesktopApp() {
     // The track the queued station was built around, so a top-up is asked for once per song rather
     // than once per recomposition.
     var autoplaySeed by remember { mutableStateOf<String?>(null) }
+    // The jam's answer to a heart or a thumbs-down: a fresh tail for the queue, and for a
+    // thumbs-down on what is playing, the next track now. Counters, taken up further down where
+    // the queue's own functions are.
+    var jamRefill by remember { mutableStateOf(0) }
+    var jamSkip by remember { mutableStateOf(0) }
     var autoplayJob by remember { mutableStateOf<Job?>(null) }
     var automix by remember { mutableStateOf(persistence.boolean("automix", false)) }
     // A manual skip blends into the already-prepared next track over ~15s instead of cutting.
@@ -1051,6 +1056,26 @@ fun BitChordDesktopApp() {
                 page.likedSongs.filterNot { it.videoId == song.videoId }
             }
             if (liked != page.likedSongs) libraryState = UiState.Success(page.copy(likedSongs = liked))
+        }
+        // In a jam the rating also steers it, straight away: a thumbs-down takes the artist out of
+        // what is lined up (and the track off, if it is the one playing); a heart grows the next
+        // stretch from this track.
+        val jamming = liveQueue.current?.radioName == DesktopMyWave.radioName
+        if (jamming && (status != LikeStatus.INDIFFERENT || wasLiked)) {
+            DesktopMyWave.onRated(song, status)
+            val upcoming = liveQueue.songs.drop(liveQueue.index + 1)
+            val kept = when (status) {
+                LikeStatus.DISLIKE -> upcoming.filterNot { it.radioName == DesktopMyWave.radioName && DesktopMyWave.unwanted(it) }
+                // Two already lined up stay — they may be loading — and the rest is re-grown.
+                LikeStatus.LIKE -> upcoming.filterIndexed { i, it -> i < JAM_KEEP_AHEAD || it.radioName != DesktopMyWave.radioName || it.queueTier != QueueTier.AUTOPLAY }
+                else -> upcoming
+            }
+            if (kept.size != upcoming.size) {
+                liveQueue = liveQueue.copy(songs = liveQueue.songs.take(liveQueue.index + 1) + kept)
+                saveQueue()
+            }
+            if (status != LikeStatus.INDIFFERENT) jamRefill++
+            if (status == LikeStatus.DISLIKE && song.videoId == selectedSong?.videoId) jamSkip++
         }
         likedIds = if (status == LikeStatus.LIKE) likedIds + song.videoId else likedIds - song.videoId
         dislikedIds = if (status == LikeStatus.DISLIKE) {
@@ -1486,6 +1511,11 @@ fun BitChordDesktopApp() {
 
     fun playNext() {
         if (DesktopListenTogether.state.value.controlsLocked) return
+        // Skipped in its first seconds, in a jam: the jam takes that as a word on the artist.
+        selectedSong?.takeIf { it.radioName == DesktopMyWave.radioName }?.let { song ->
+            val state = playbackEngine.state.value
+            if (state.positionMs in 1 until JAM_EARLY_SKIP_MS && state.durationMs > JAM_EARLY_SKIP_MS * 2) DesktopMyWave.onSkipped(song)
+        }
         // Automix on skip: when enabled and the next deck is already prepared, blend into it over a
         // short crossfade instead of cutting. The blend's own hand-off advances the queue, so a
         // successful mix returns here without touching liveQueue; anything else falls through to the
@@ -1511,6 +1541,16 @@ fun BitChordDesktopApp() {
             DesktopAutoplay.enabled(DesktopListenTogether.state.value, autoplay) ->
                 loadAutoplaySongs(playFirst = true)
         }
+    }
+
+    LaunchedEffect(jamRefill) {
+        if (jamRefill == 0) return@LaunchedEffect
+        // A new tail, grown with what was just said: the one-request-per-seed guard let go.
+        autoplaySeed = null
+        loadAutoplaySongs()
+    }
+    LaunchedEffect(jamSkip) {
+        if (jamSkip > 0) playNext()
     }
 
     fun playPrevious() {
@@ -1791,6 +1831,7 @@ fun BitChordDesktopApp() {
         DesktopPlaybackEngine(
             onEnded = {
                 selectedSong?.let(DesktopScrobbling::onPlaybackEnded)
+                selectedSong?.takeIf { it.radioName == DesktopMyWave.radioName }?.let(DesktopMyWave::onFinished)
                 if (DesktopSleepTimer.afterTrack.value) {
                     DesktopSleepTimer.cancel()
                 } else if (repeatMode == DesktopRepeatMode.ONE) {
@@ -9778,3 +9819,9 @@ private const val LIKED_PLAYLIST_ID = "LM"
 
 /** How many tracks go into a playlist in one request when a whole list is added. */
 private const val PLAYLIST_ADD_BATCH = 100
+
+/** Jam tracks left lined up when a heart re-grows the rest. */
+private const val JAM_KEEP_AHEAD = 2
+
+/** A skip this early in a jam track counts against its artist. */
+private const val JAM_EARLY_SKIP_MS = 30_000L

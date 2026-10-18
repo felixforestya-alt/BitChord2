@@ -382,4 +382,6 @@
     <string name="d_library_customize_hint">Выключи то, что не хочешь видеть на странице.</string>
     <string name="d_library_replay">Карточки Replay</string>
     <string name="d_library_on_device">Плейлисты на этом компьютере</string>
+    <string name="wave_blocked">Не предлагать (дизлайк)</string>
+    <string name="wave_unblock_all">Вернуть всех</string>
 </resources>

@@ -360,6 +360,7 @@ internal fun DesktopWaveSettingsDialog(
     val seeds by DesktopMyWave.seeds.collectAsState()
     val playlist by DesktopMyWave.playlist.collectAsState()
     val onlyNew by DesktopMyWave.onlyNew.collectAsState()
+    val blocked by DesktopMyWave.blockedArtists.collectAsState()
     DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 460, popup = true) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp)) {
             DialogTitle(DesktopStrings["wave_settings", "Wave settings"])
@@ -420,6 +421,17 @@ internal fun DesktopWaveSettingsDialog(
                 onlyNew,
                 DesktopMyWave::setOnlyNew,
             )
+            // Who a thumbs-down took out of the jam, each to be let back in.
+            if (blocked.isNotEmpty()) {
+                Section(DesktopStrings["wave_blocked", "Not suggested (disliked)"])
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    blocked.sorted().forEach { artist ->
+                        Choice("$artist  ✕", selected = false) { DesktopMyWave.unblock(artist) }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                TextAction(DesktopStrings["wave_unblock_all", "Let them all back"]) { DesktopMyWave.unblockAll() }
+            }
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextAction(DesktopStrings["close", "Close"], onDismiss)

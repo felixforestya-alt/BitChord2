@@ -95,7 +95,10 @@ internal object DesktopFramePacing {
                 Blanks.follow(window)
             }
             GpuNeighbours.wanted()
-            period = refresh * (FORCED_DIVISOR ?: if (GpuNeighbours.busy) 2L else 1L)
+            // Every other refresh only while the window is not the one in use: in use, Windows puts
+            // its frames first, and recorded off the screen beside a game, Brave scrolled by the
+            // user came 115 times a second while this window, held to every other refresh, came 67.
+            period = refresh * (FORCED_DIVISOR ?: if (GpuNeighbours.busy && !window.isFocused) 2L else 1L)
             Blanks.wanted(refresh)
             last = waitForTurn(start)
             inner.onRender(canvas, width, height, last)
@@ -136,7 +139,8 @@ internal object DesktopFramePacing {
     /**
      * Whether another program — a game, open or only minimised — is keeping the GPU busy.
      *
-     * Then Windows shows a window's new frames on only about every other refresh, and at random
+     * Then, for a window that is not the one in use — a player beside the game, say — Windows
+     * shows its new frames on only about every other refresh, and at random
      * which: recorded off the screen beside Deadlock in its menu, frames drawn on every refresh
      * reached it one refresh apart and then two, the disc stepping 1, 2, 1, 1, 2 — a judder worse
      * to look at than a lower, even rate. Chromium is held to every other refresh there too, but

@@ -58,6 +58,8 @@ class BeatTracker(
     private val modelPath: () -> String,
     /** How many threads inference may use; the beat and downbeat pass is the expensive one. */
     private val inferenceThreads: () -> Int,
+    /** Called between chunks of the model's work — where a caller paces it, or lets it run on. */
+    private val betweenChunks: () -> Unit = {},
 ) {
 
     /** A tracked grid on the analysed audio's own timeline, in seconds. */
@@ -177,6 +179,7 @@ class BeatTracker(
 
         var start = 0
         while (start < spectrogram.frames) {
+            betweenChunks()
             val length = min(CHUNK_FRAMES, spectrogram.frames - start)
             // A chunk shorter than the border padding carries no usable centre.
             if (length <= 2 * BORDER_FRAMES && start > 0) break

@@ -61,8 +61,34 @@ internal class DesktopTrackAnalyzer(
     private val beats by lazy {
         BeatTracker(
             modelPath = { DesktopAnalysisRuntime.modelPath(BeatTracker.MODEL_ASSET) },
-            inferenceThreads = { performance().inferenceThreads },
+            // One thread, paced: see [Pacer]. Spread over several cores the model came in bursts
+            // that took whole cores from whatever else was running — a game, above all.
+            inferenceThreads = { 1 },
+            betweenChunks = { pacer.pace() },
         )
+    }
+
+    /**
+     * Keeps analysis to a quarter of one core on average: work in short stretches, then a rest
+     * three times as long. A track is still measured in well under a minute — long before the
+     * transition at its end that needs it — but never as a burst that shows up beside a game.
+     */
+    private val pacer = Pacer(DUTY)
+
+    private class Pacer(private val duty: Double) {
+        private var since = System.nanoTime()
+
+        fun reset() {
+            since = System.nanoTime()
+        }
+
+        fun pace() {
+            val busy = System.nanoTime() - since
+            if (busy < STRETCH_NANOS) return
+            val rest = (busy * (1 - duty) / duty / 1_000_000).toLong().coerceAtMost(MAX_REST_MS)
+            runCatching { Thread.sleep(rest) }
+            since = System.nanoTime()
+        }
     }
 
     /** What is known now, never a computation — the planner asks this every tick. */
@@ -129,8 +155,11 @@ internal class DesktopTrackAnalyzer(
                 }
                 // Android's rule: the lowest rung yields to playback rather than competing for a
                 // core, and the thread count stays the speed knob for the other two.
-                Thread.currentThread().priority =
-                    if (performance().yieldsToPlayback) Thread.MIN_PRIORITY else Thread.NORM_PRIORITY
+                // Background work in the system's own sense too: lowest CPU, disk and memory
+                // priority, so it waits for anything in the foreground rather than competing.
+                Thread.currentThread().priority = Thread.MIN_PRIORITY
+                enterBackgroundMode()
+                pacer.reset()
                 val analysis = runCatching {
                     val source = local ?: youTubeOpus(song) ?: return@runCatching null
                     analyse(trackId, source, durationSeconds)
@@ -184,7 +213,7 @@ internal class DesktopTrackAnalyzer(
         durationSeconds: Double,
     ): TrackAnalysis? {
         val features = decode(stream, TrackFeatures.sampleRate)
-            ?.let { TrackFeatures.analyze(it, durationSeconds) }
+            ?.let { pcm -> TrackFeatures.analyze(pcm, durationSeconds).also { pacer.pace() } }
             ?: return null
 
         if (stopped()) return null
@@ -242,6 +271,7 @@ internal class DesktopTrackAnalyzer(
             while (true) {
                 if (stopped()) return null
                 val block = decoder.readSamples() ?: break
+                pacer.pace()
                 val count = decoder.sampleCount
                 if (count <= 0) continue
                 out += block.copyOf(count)
@@ -304,3 +334,24 @@ internal fun String?.durationSeconds(): Double {
         else -> 0.0
     }
 }
+
+/** How much of one core analysis may use, on average. */
+private const val DUTY = 0.25
+
+/** How long a stretch of work runs before its rest. */
+private const val STRETCH_NANOS = 20_000_000L
+
+/** The longest single rest, so a long stretch does not stall the analysis for seconds. */
+private const val MAX_REST_MS = 400L
+
+/** Windows' background mode for the calling thread: low CPU, I/O and memory priority. */
+private fun enterBackgroundMode() {
+    if (!DesktopPlatform.isWindows) return
+    runCatching {
+        val kernel = com.sun.jna.NativeLibrary.getInstance("kernel32")
+        val thread = kernel.getFunction("GetCurrentThread").invokePointer(arrayOf())
+        kernel.getFunction("SetThreadPriority").invokeInt(arrayOf(thread, THREAD_MODE_BACKGROUND_BEGIN))
+    }
+}
+
+private const val THREAD_MODE_BACKGROUND_BEGIN = 0x00010000

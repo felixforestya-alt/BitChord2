@@ -208,6 +208,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.draw.alpha
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.draw.drawBehind
@@ -9431,22 +9432,35 @@ internal fun BoxScope.DesktopShelfArrow(
 private fun DesktopShelfCard(item: ShelfItem, onClick: (ShelfItem) -> Unit) {
     val width = 158.dp
     val shape = RoundedCornerShape(10.dp)
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val lift by animateFloatAsState(if (hovered) 1f else 0f, tween(140), label = "shelfLift")
     Column(
         Modifier
             .width(width)
             // The whole card answers the pointer, artwork and captions together, so the two do not
-            // move independently of each other.
-            .desktopHoverLift(shape)
-            .clickable { onClick(item) },
+            // move independently of each other. No stock highlight: it is a square over the
+            // whole card, cover and captions alike, beside a rounded cover. The pointer is
+            // answered by the cover alone, in its own shape — a lift, a shadow and a faint wash.
+            .hoverable(interaction)
+            .graphicsLayer {
+                val grown = 1f + 0.035f * lift
+                scaleX = grown
+                scaleY = grown
+            }
+            .clickable(interactionSource = interaction, indication = null) { onClick(item) }
+            .pointerHoverIcon(PointerIcon.Hand),
     ) {
         Box(
             Modifier
                 .size(width)
+                .shadow(18.dp * lift, shape)
                 .clip(shape)
                 .background(DesktopGlass)
-                .border(1.dp, Color.White.copy(alpha = 0.12f), shape),
+                .border(1.dp, Color.White.copy(alpha = 0.12f + 0.12f * lift), shape),
         ) {
             DesktopArtwork(item.thumbnailUrl, Modifier.fillMaxSize())
+            if (lift > 0.01f) Box(Modifier.matchParentSize().background(Color.White.copy(alpha = 0.08f * lift)))
         }
         Spacer(Modifier.height(8.dp))
         Text(item.title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)

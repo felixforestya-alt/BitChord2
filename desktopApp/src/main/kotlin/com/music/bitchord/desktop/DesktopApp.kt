@@ -8266,6 +8266,17 @@ private fun DesktopSettingsScreen(
             }
             if (section == DesktopSettingsSection.ADVANCED) item {
                 SettingsGroup(DesktopStrings["advanced_options", "Advanced options"]) {
+                    val graphicsApi by DesktopGraphicsSettings.api.collectAsState()
+                    if (DesktopPlatform.isWindows) StyleChoiceRow(
+                        DesktopStrings["d_graphics_api", "Graphics"],
+                        DesktopStrings["d_graphics_api_subtitle", "What the window is drawn through. Direct3D keeps frames on time best; OpenGL if Direct3D misbehaves on this computer. Applies after a restart"],
+                        listOf(
+                            "Direct3D" to DesktopGraphicsApi.DIRECT3D,
+                            "OpenGL" to DesktopGraphicsApi.OPENGL,
+                        ),
+                        graphicsApi,
+                        DesktopGraphicsSettings::setApi,
+                    )
                     val bypass by DesktopNetworkSettings.bypass.collectAsState()
                     SettingsToggle(
                         DesktopStrings["d_dpi_bypass", "Get round YouTube blocking"],

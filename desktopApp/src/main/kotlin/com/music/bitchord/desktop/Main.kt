@@ -31,6 +31,8 @@ import org.jetbrains.compose.resources.painterResource
 fun main() {
     // Already running — in the tray, say: bring that one forward rather than start a second.
     if (!DesktopSingleInstance.claim()) kotlin.system.exitProcess(0)
+    // The graphics API Skia draws through — OpenGL unless set otherwise, see DesktopGraphicsSettings.
+    DesktopGraphicsSettings.apply()
     // Before the window, so skiko's first shader already goes through the disk cache.
     DesktopShaderCache.install()
     // The player's and Home's classes, loaded off the UI thread while the window comes up.

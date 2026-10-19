@@ -248,6 +248,7 @@ private fun DiscPlayerLayout(
     onListenTogether: () -> Unit,
     onOpenPlaybackSource: () -> Unit,
 ) {
+    if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("discLayout") }
     val showDisc by DesktopStyleSettings.showDisc.collectAsState()
     val lyricsScale by DesktopStyleSettings.lyricsScale.collectAsState()
     val backdropText by DesktopStyleSettings.backdropText.collectAsState()
@@ -601,6 +602,7 @@ private fun NowPlayingWords(
     onOpenAlbum: (() -> Unit)?,
     onOpenSource: () -> Unit,
 ) {
+    if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("words") }
     val display = MaterialTheme.typography.displayLarge.fontFamily
     Column(Modifier.padding(vertical = 18.dp)) {
         // Where the session came from, as the classic player captions it — a click goes back there.
@@ -948,6 +950,7 @@ private fun ControlDeck(
     onListenTogether: () -> Unit,
     modifier: Modifier,
 ) {
+    if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("deck") }
     val shape = RoundedCornerShape(32.dp)
     // The level the mute button brings back.
     var lastAudible by remember { mutableFloatStateOf(volume.takeIf { it > MUTE_FLOOR } ?: 0.6f) }

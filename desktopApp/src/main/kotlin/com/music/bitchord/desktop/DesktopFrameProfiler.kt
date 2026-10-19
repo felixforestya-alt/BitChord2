@@ -113,14 +113,34 @@ internal object DesktopFrameProfiler {
             override fun onEndComposition(composition: androidx.compose.runtime.tooling.ObservableComposition) {}
             override fun onScopeInvalidated(scope: androidx.compose.runtime.RecomposeScope, value: Any?) {
                 if (!counting) return
-                val site = value?.let { readSites[ReadKey(scope, it)] } ?: "?"
-                val what = value?.javaClass?.simpleName ?: "null"
+                var site = value?.let { readSites[ReadKey(scope, it)] } ?: "?"
+                var what = value?.javaClass?.simpleName ?: "null"
+                // Where an invalidation with no state came from, and what a derived state holds.
+                if (value == null || site == "?") {
+                    val stack = Thread.currentThread().stackTrace
+                    site = stack.drop(2).filter { it.className.startsWith("com.music.bitchord") && !it.className.contains("DesktopFrameProfiler") }
+                        .take(3).joinToString(" < ") { "${it.fileName}:${it.lineNumber}" }.ifEmpty {
+                            stack.drop(2).filterNot { it.className.startsWith("androidx.compose.runtime") || it.className.startsWith("java.") || it.className.startsWith("kotlin") }
+                                .take(2).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+                        }
+                }
+                if (value is androidx.compose.runtime.State<*>) {
+                    what += "=" + runCatching { value.value?.javaClass?.simpleName }.getOrNull()
+                }
                 invalidations.merge("${scopeName(scope)} <- $what read at $site", 1, Int::plus)
             }
             override fun onScopeDisposed(scope: androidx.compose.runtime.RecomposeScope) {}
         }
         runCatching { with(composition) { setObserver(observer) } }
             .onFailure { DesktopTrackLog.log("profile recompositions unavailable: ${it.message}") }
+    }
+
+    /** How often each probed place recomposed while [measure] ran — see [count]. */
+    private val probes = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    /** Called from a SideEffect at a probed place: one more recomposition of it. */
+    fun count(where: String) {
+        if (counting) probes.merge(where, 1, Int::plus)
     }
 
     /** Logs [what] with the time on the same clock as the stalls. */
@@ -255,6 +275,8 @@ internal object DesktopFrameProfiler {
             }
         }
         counting = false
+        if (probes.isNotEmpty()) DesktopTrackLog.log("profile $label probes " + probes.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
+        probes.clear()
         invalidations.entries.sortedByDescending { it.value }.take(25).forEach { (what, count) ->
             DesktopTrackLog.log("profile $label recomposed x$count  $what")
         }

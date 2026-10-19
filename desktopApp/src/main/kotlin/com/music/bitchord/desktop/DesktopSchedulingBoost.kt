@@ -75,8 +75,35 @@ internal object DesktopSchedulingBoost {
     }
 
     private const val ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
+    private const val NORMAL_PRIORITY_CLASS = 0x00000020
+    private const val GPU_PRIORITY_NORMAL = 2
     private const val GPU_PRIORITY_ABOVE_NORMAL = 3
     private const val GPU_PRIORITY_HIGH = 4
+
+    @Volatile
+    private var inFront = true
+
+    /**
+     * Ahead of other programs only while the window is the one being used. Behind something else —
+     * a game, above all — the app goes back to an ordinary process's place on the CPU and the
+     * GPU: raised then, it took its frames out of the game's, and the two fought over the GPU
+     * with both of them stuttering. The sound is unaffected: its thread keeps its own priority.
+     */
+    fun setInFront(front: Boolean) {
+        if (!DesktopPlatform.isWindows || front == inFront) return
+        inFront = front
+        runCatching {
+            val kernel = Native.load("kernel32", Kernel32::class.java)
+            val gdi = Native.load("gdi32", Gdi32::class.java)
+            val process = kernel.GetCurrentProcess()
+            kernel.SetPriorityClass(process, if (front) ABOVE_NORMAL_PRIORITY_CLASS else NORMAL_PRIORITY_CLASS)
+            val gpu = if (front) GPU_PRIORITY_HIGH else GPU_PRIORITY_NORMAL
+            if (gdi.D3DKMTSetProcessSchedulingPriorityClass(process, gpu) != 0 && front) {
+                gdi.D3DKMTSetProcessSchedulingPriorityClass(process, GPU_PRIORITY_ABOVE_NORMAL)
+            }
+            DesktopTrackLog.log("scheduling: ${if (front) "in front, raised" else "behind another window, ordinary priority"}")
+        }.onFailure { DesktopTrackLog.log("scheduling: priority change failed: ${it.message}") }
+    }
 
     /** Raises the whole process; call once at start. */
     fun boostProcess() {
@@ -108,13 +135,13 @@ internal object DesktopSchedulingBoost {
         }.onFailure { DesktopTrackLog.log("scheduling: GPU priority unavailable: ${it.message}") }
     }
 
-    /** Registers the calling thread — the one that draws — with MMCSS. */
+    /**
+     * Keeps the calling thread — one that draws — out of power throttling. Not registered with
+     * MMCSS as a game's thread any more: that put the app's drawing ahead of a real game's at a
+     * near-real-time priority, whichever window was in front.
+     */
     fun boostRenderThread() {
         if (!DesktopPlatform.isWindows) return
-        runCatching {
-            val avrt = Native.load("avrt", Avrt::class.java)
-            avrt.AvSetMmThreadCharacteristicsW(WString("Games"), IntByReference(0))
-        }.onFailure { DesktopTrackLog.log("scheduling: MMCSS unavailable: ${it.message}") }
         noThreadPowerThrottling()
     }
 

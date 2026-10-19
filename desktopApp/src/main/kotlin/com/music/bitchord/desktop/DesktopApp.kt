@@ -327,6 +327,8 @@ import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.system.exitProcess
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -518,6 +520,7 @@ private enum class DesktopRepeatMode {
 
 @Composable
 fun BitChordDesktopApp() {
+    if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("root") }
     if (DesktopFrameProfiler.recompositions) {
         val composition = androidx.compose.runtime.currentComposer.composition
         remember { DesktopFrameProfiler.observe(composition) }
@@ -2148,7 +2151,16 @@ fun BitChordDesktopApp() {
             }
         }
     }
-    val playback by playbackEngine.state.collectAsState()
+    // The engine's state without the playhead, for everything at this level: the playhead moves
+    // many times a second, and read here it recomposed the whole window with it — the sidebar,
+    // the top bar, the page under the player and the player itself, a dozen times a second for
+    // nothing. What draws the position reads it where it draws it (see PlaybackPosition).
+    val playbackShape = remember(playbackEngine) {
+        playbackEngine.state
+            .map { it.copy(positionMs = 0L, positionSampledAtNanos = 0L) }
+            .distinctUntilChanged()
+    }
+    val playback by playbackShape.collectAsState(playbackEngine.state.value.copy(positionMs = 0L, positionSampledAtNanos = 0L))
 
     // The shared player reads the playhead off this one object, and only where it
     // draws it — see PlaybackPosition — so a tick never recomposes the player.
@@ -2473,7 +2485,7 @@ fun BitChordDesktopApp() {
     LaunchedEffect(playback.song?.videoId, playback.isPlaying) {
         val songId = playback.song?.videoId ?: return@LaunchedEffect
         if (!playback.isPlaying) return@LaunchedEffect
-        var previousPosition = playback.positionMs
+        var previousPosition = playbackEngine.state.value.positionMs
         var countedAsPlay = songId in statsCountedSongs
         while (currentCoroutineContext().isActive) {
             delay(STATS_SAMPLE_MS)
@@ -3889,31 +3901,43 @@ fun BitChordDesktopApp() {
             // plays — the processor, in whole cores, and frames drawn — on Home, with the player
             // open, and minimised. The volume is the profile's own, set to nothing beforehand.
             if (System.getenv("BITCHORD_PROFILE_LOAD") == "1") {
-                val os = java.lang.management.ManagementFactory.getOperatingSystemMXBean() as com.sun.management.OperatingSystemMXBean
+                // The packaged runtime has no jdk.management: the process's CPU time from ProcessHandle.
+                fun cpuNanos(): Long = ProcessHandle.current().info().totalCpuDuration().map { it.toNanos() }.orElse(0L)
+                val threads = java.lang.management.ManagementFactory.getThreadMXBean()
+                fun threadTimes(): Map<String, Long> = threads.allThreadIds.toList().mapNotNull { id ->
+                    threads.getThreadInfo(id)?.threadName?.let { it to threads.getThreadCpuTime(id) }
+                }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
                 suspend fun phase(label: String) {
                     kotlinx.coroutines.delay(4_000)
-                    val cpu0 = os.processCpuTime
+                    val threads0 = threadTimes()
+                    val cpu0 = cpuNanos()
                     val wall0 = System.nanoTime()
                     val frames0 = DesktopPrefetch.framesDrawn
                     kotlinx.coroutines.delay(14_000)
                     DesktopFrameProfiler.countIdleFrames(label, 6_000)
-                    val cores = (os.processCpuTime - cpu0).toDouble() / (System.nanoTime() - wall0)
+                    val cores = (cpuNanos() - cpu0).toDouble() / (System.nanoTime() - wall0)
                     val focused = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow != null
                     DesktopTrackLog.log(
                         "load %-16s cpu=%.2f cores  frames=%d  playing=%s focused=%s".format(
                             label, cores, DesktopPrefetch.framesDrawn - frames0, playbackEngine.state.value.isPlaying, focused,
                         ),
                     )
-                    val threads = java.lang.management.ManagementFactory.getThreadMXBean()
-                    val busiest = ArrayList<Pair<String, Long>>()
-                    for (id in threads.allThreadIds) {
-                        val info: java.lang.management.ThreadInfo = threads.getThreadInfo(id) ?: continue
-                        busiest += info.threadName to threads.getThreadCpuTime(id)
-                    }
-                    busiest.sortByDescending { it.second }
-                    DesktopTrackLog.log("load   threads: " + busiest.take(10).joinToString { "${it.first}=${it.second / 1_000_000}ms" })
+                    // Each thread's share over the phase alone, in thousandths of a core.
+                    val seconds = (System.nanoTime() - wall0) / 1e9
+                    val busiest = threadTimes().map { (name, ns) -> name to (ns - (threads0[name] ?: 0L)) }.sortedByDescending { it.second }
+                    DesktopTrackLog.log("load   threads: " + busiest.take(8).joinToString { "${it.first}=%.2f".format(it.second / 1e9 / seconds) })
                 }
                 if (!playbackEngine.state.value.isPlaying) togglePlayPauseFromUser()
+                // BITCHORD_PROFILE_LOAD_PLAYER=1: the open player alone, quickly — for comparing
+                // what its layers cost, one launch per layer switched off.
+                if (System.getenv("BITCHORD_PROFILE_LOAD_PLAYER") == "1") {
+                    overlays.nowPlaying = true
+                    phase("player-only")
+                    // And how even its frames are: gaps, misses, and the GPU's share of each.
+                    DesktopFrameProfiler.measure("player-even", hz) { kotlinx.coroutines.delay(10_000) }
+                    DesktopTrackLog.log("profile done")
+                    return@LaunchedEffect
+                }
                 phase("home-playing")
                 overlays.nowPlaying = true
                 phase("player-playing")
@@ -4177,15 +4201,18 @@ fun BitChordDesktopApp() {
                     }
                 },
                 topBar = { compact ->
+                    // The live state here alone: its progress line is the one thing up here that
+                    // follows the playhead.
+                    val live by playbackEngine.state.collectAsState()
                     DesktopTopBar(
                         compact = compact,
                         song = selectedSong,
                         isPlaying = playback.isPlaying,
                         isLoading = playback.isLoading,
                         previousEnabled = liveQueue.hasPrevious ||
-                            playback.positionMs > BACK_RESTARTS_AFTER_MS,
-                        progress = if (playback.durationMs > 0L) {
-                            playback.positionMs.toFloat() / playback.durationMs.toFloat()
+                            live.positionMs > BACK_RESTARTS_AFTER_MS,
+                        progress = if (live.durationMs > 0L) {
+                            live.positionMs.toFloat() / live.durationMs.toFloat()
                         } else {
                             0f
                         },
@@ -4457,6 +4484,7 @@ fun BitChordDesktopApp() {
                                     }
                                 },
                                 lyricsPanel = { panelModifier ->
+                                    if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("lyricsPanel") }
                                     LyricsSidePanel(
                                         song = current,
                                         isPlaying = playback.isPlaying,
@@ -4471,6 +4499,7 @@ fun BitChordDesktopApp() {
                                     )
                                 },
                                 queuePanel = { panelModifier ->
+                                    if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("queuePanel") }
                                     QueueSidePanel(
                                         queue = liveQueue.songs,
                                         queueIndex = liveQueue.index,
@@ -6074,6 +6103,7 @@ private fun DesktopSidebar(
     onSearchFocused: () -> Unit,
     onImportPlaylist: () -> Unit,
 ) {
+    if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("sidebar") }
     val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(focusSearch) {
         if (focusSearch) {
@@ -6638,6 +6668,7 @@ private fun DesktopFrame(
     overlay: @Composable () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
+    if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("frame") }
     // Held out here rather than inside the constraints box.
     val haze = remember { HazeState() }
     // A frame every half minute at least: Skiko's drawing thread is pooled, and a thread left

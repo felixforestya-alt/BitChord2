@@ -81,17 +81,22 @@ internal object DesktopFramePacing {
     private class Paced(private val inner: SkikoRenderDelegate, private val window: Window) : SkikoRenderDelegate {
 
         private var last = 0L
+        /** The monitor's refresh period. */
+        private var refresh = 6_250_000L
+        /** A frame's: the refresh, or two of them beside a busy GPU — see [GpuNeighbours]. */
         private var period = 6_250_000L
         private var periodCheckedAt = Long.MIN_VALUE / 2
 
         override fun onRender(canvas: Canvas, width: Int, height: Int, nanoTime: Long) {
             val start = System.nanoTime()
             if (start - periodCheckedAt > PERIOD_CHECK_NANOS) {
-                period = periodNanos(window)
+                refresh = periodNanos(window)
                 periodCheckedAt = start
                 Blanks.follow(window)
             }
-            Blanks.wanted(period)
+            GpuNeighbours.wanted()
+            period = refresh * (FORCED_DIVISOR ?: if (GpuNeighbours.busy) 2L else 1L)
+            Blanks.wanted(refresh)
             last = waitForTurn(start)
             inner.onRender(canvas, width, height, last)
         }
@@ -113,6 +118,130 @@ internal object DesktopFramePacing {
             // got round to waking it, a fraction of a millisecond either way: everything that
             // moves steps by exactly one refresh's worth a frame, as the screen shows it.
             return if (due == next && woke - due in 0..period / 2) due else woke
+        }
+    }
+
+    /**
+     * Whether another program — a game, open or only minimised — is keeping the GPU busy.
+     *
+     * Then Windows shows a window's new frames on only about every other refresh, and at random
+     * which: recorded off the screen beside Deadlock in its menu, frames drawn on every refresh
+     * reached it one refresh apart and then two, the disc stepping 1, 2, 1, 1, 2 — a judder worse
+     * to look at than a lower, even rate. Chromium is held to every other refresh there too, but
+     * evenly, and scrolls smoothly. So beside a busy GPU the frames are drawn on every other
+     * refresh, in step, and each lands: the disc steps 2, 2, 2 (97% of its steps, recorded),
+     * as Chromium's does; with the GPU to itself again, every refresh.
+     *
+     * Read from Windows' own per-process GPU counters every two seconds, on a thread of its own,
+     * only while frames are being drawn.
+     */
+    private object GpuNeighbours {
+        @Volatile var busy = false
+            private set
+        @Volatile private var askedAt = 0L
+        private val lock = Object()
+        private val ownPid = ProcessHandle.current().pid()
+        private var high = 0
+        private var low = 0
+
+        init {
+            Thread(::run, "BitChord-GpuNeighbours").apply { isDaemon = true; priority = Thread.MIN_PRIORITY; start() }
+        }
+
+        fun wanted() {
+            val now = System.nanoTime()
+            val idle = now - askedAt > IDLE_NANOS
+            askedAt = now
+            if (idle) synchronized(lock) { lock.notifyAll() }
+        }
+
+        private fun run() {
+            val pdh = runCatching { Pdh.open() }.getOrNull() ?: return
+            while (true) {
+                synchronized(lock) {
+                    while (System.nanoTime() - askedAt > IDLE_NANOS) {
+                        high = 0
+                        lock.wait()
+                    }
+                }
+                Thread.sleep(SAMPLE_MS)
+                val others = runCatching { pdh.busiestOther(ownPid) }.getOrNull() ?: continue
+                if (others >= BUSY_PERCENT) {
+                    high++
+                    low = 0
+                } else if (others < CALM_PERCENT) {
+                    low++
+                    high = 0
+                }
+                val next = if (busy) low < CALM_SAMPLES else high >= BUSY_SAMPLES
+                if (next != busy) {
+                    busy = next
+                    DesktopTrackLog.log(
+                        if (next) "frames: another program keeps the GPU busy (%.0f%%); every other refresh, evenly".format(others)
+                        else "frames: the GPU to ourselves again; every refresh",
+                    )
+                }
+            }
+        }
+
+        private const val SAMPLE_MS = 2_000L
+        private const val IDLE_NANOS = 3_000_000_000L
+        private const val BUSY_PERCENT = 10.0
+        private const val CALM_PERCENT = 5.0
+        private const val BUSY_SAMPLES = 1
+        private const val CALM_SAMPLES = 2
+    }
+
+    /** Windows' performance counters for the GPU's 3D engines, per process. */
+    private class Pdh private constructor(private val query: Pointer, private val counter: Pointer) {
+
+        private val dwm: Set<Long> = ProcessHandle.allProcesses()
+            .filter { it.info().command().orElse("").endsWith("dwm.exe", ignoreCase = true) }
+            .map { it.pid() }.toList().toSet()
+
+        /** The 3D engine use, in percent, of the busiest process other than [own] and the desktop. */
+        fun busiestOther(own: Long): Double {
+            if (collect.invokeInt(arrayOf(query)) != 0) return 0.0
+            val size = com.sun.jna.ptr.IntByReference(0)
+            val count = com.sun.jna.ptr.IntByReference(0)
+            getArray.invokeInt(arrayOf(counter, PDH_FMT_DOUBLE, size, count, null))
+            if (size.value <= 0) return 0.0
+            val buffer = Memory(size.value.toLong())
+            if (getArray.invokeInt(arrayOf(counter, PDH_FMT_DOUBLE, size, count, buffer)) != 0) return 0.0
+            val perProcess = HashMap<Long, Double>()
+            for (i in 0 until count.value) {
+                // PDH_FMT_COUNTERVALUE_ITEM_W: the name, then status, padding and the double.
+                val at = i * ITEM_SIZE
+                val name = buffer.getPointer(at)?.getWideString(0) ?: continue
+                if (buffer.getInt(at + Native.POINTER_SIZE) != 0) continue
+                val value = buffer.getDouble(at + Native.POINTER_SIZE + 8L)
+                val pid = PID.find(name)?.groupValues?.get(1)?.toLongOrNull() ?: continue
+                if (pid == own || pid in dwm) continue
+                perProcess.merge(pid, value, Double::plus)
+            }
+            return perProcess.values.maxOrNull() ?: 0.0
+        }
+
+        companion object {
+            private val pdh = NativeLibrary.getInstance("pdh")
+            private val openQuery = pdh.getFunction("PdhOpenQueryW")
+            private val addCounter = pdh.getFunction("PdhAddEnglishCounterW")
+            private val collect = pdh.getFunction("PdhCollectQueryData")
+            private val getArray = pdh.getFunction("PdhGetFormattedCounterArrayW")
+            private val PID = Regex("""pid_(\d+)_""")
+            private const val PDH_FMT_DOUBLE = 0x00000200
+            private val ITEM_SIZE = Native.POINTER_SIZE + 16L
+
+            fun open(): Pdh? {
+                val q = com.sun.jna.ptr.PointerByReference()
+                if (openQuery.invokeInt(arrayOf(null, Pointer.NULL, q)) != 0) return null
+                val c = com.sun.jna.ptr.PointerByReference()
+                val path = com.sun.jna.WString("\\GPU Engine(*engtype_3D)\\Utilization Percentage")
+                if (addCounter.invokeInt(arrayOf(q.value, path, Pointer.NULL, c)) != 0) return null
+                // A rate needs two readings: the first one now.
+                collect.invokeInt(arrayOf(q.value))
+                return Pdh(q.value, c.value)
+            }
         }
     }
 
@@ -306,5 +435,7 @@ internal object DesktopFramePacing {
     private const val PHASE_FRESH_NANOS = 200_000_000L
     /** Shorter than this, not worth a wait. */
     private const val MIN_WAIT_NANOS = 150_000L
+    /** BITCHORD_PACE_DIVISOR, for measuring: a frame every so many refreshes, whatever else runs. */
+    private val FORCED_DIVISOR = System.getenv("BITCHORD_PACE_DIVISOR")?.toLongOrNull()?.takeIf { it in 1..4 }
     private const val CHECK_MS = 2_000
 }

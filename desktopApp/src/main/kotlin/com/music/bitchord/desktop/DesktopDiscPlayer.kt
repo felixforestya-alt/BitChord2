@@ -409,6 +409,10 @@ private fun DiscPlayerLayout(
 
                 // The disc — or, with it off, the cover as a card. Always the song's cover.
                 val discProgress = { entrance.value }
+                // Room round the disc for its shadow and glow, which reach past its edge: the
+                // slide's fade and the entrance draw it into layers its own size, and the glow was
+                // cut off in straight lines at the edges of that square as it came and went.
+                val discRoom = 64.dp + discSize * 0.06f
                 AnimatedContent(
                     targetState = cover,
                     transitionSpec = {
@@ -420,6 +424,7 @@ private fun DiscPlayerLayout(
                         // The disc's centre sits just inside the left edge, so a little over half of it
                         // shows — the way it slides out of the frame in a broadcast ident.
                         .offset(x = if (showDisc) discCentreX - discSize / 2 else width * 0.07f)
+                        .overhang(discRoom)
                         .graphicsLayer {
                             val p = discProgress()
                             if (DesktopFrameProfiler.on("move-disc")) {
@@ -430,6 +435,7 @@ private fun DiscPlayerLayout(
                         },
                     label = "disc",
                 ) { art ->
+                    Box(Modifier.padding(discRoom)) {
                     if (showDisc) {
                         SpinningDisc(
                             artUrl = art,
@@ -444,6 +450,7 @@ private fun DiscPlayerLayout(
                             clock = { clock.floatValue },
                             modifier = Modifier.size((height * 0.56f).coerceAtMost(width * 0.33f)),
                         )
+                    }
                     }
                 }
 

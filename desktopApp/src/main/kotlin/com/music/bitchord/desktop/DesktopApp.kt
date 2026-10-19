@@ -10261,8 +10261,16 @@ private fun String.isUnknownArtist(): Boolean =
         isBlank()
 
 private val SHELF_DURATION = Regex("""\d{1,2}:\d{2}(?::\d{2})?""")
-private val SHELF_TALLY = Regex("[0-9,.]+\\s*(?:views?|likes?|songs?)", RegexOption.IGNORE_CASE)
-private val SHELF_TYPE_WORDS = setOf("song", "video", "album", "ep", "single", "playlist", "mix")
+// In English and in Russian: the service answers in the account's language, and a Russian
+// "Композиция • Artist" put the word for "song" where the artist goes.
+private val SHELF_TALLY = Regex(
+    "[0-9,.\\s]+(?:тыс\\.?|млн|млрд|K|M|B)?\\s*(?:views?|likes?|songs?|просмотр\\w*|отмет\\w*|трек\\w*|композици\\w*)",
+    RegexOption.IGNORE_CASE,
+)
+private val SHELF_TYPE_WORDS = setOf(
+    "song", "video", "album", "ep", "single", "playlist", "mix",
+    "композиция", "песня", "трек", "видео", "клип", "альбом", "мини-альбом", "сингл", "плейлист", "микс",
+)
 
 private fun formatTime(ms: Long): String {
     val totalSeconds = (ms / 1_000L).coerceAtLeast(0L)

@@ -82,6 +82,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -117,6 +118,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -743,12 +745,18 @@ private fun CurrentLyricLine(
             }
         },
         label = "lyricLine",
-        modifier = Modifier.padding(top = 10.dp),
+        // Room all round for the words' soft shadow (see below), taken back out here so the
+        // line sits where it always did.
+        modifier = Modifier.padding(top = 10.dp).overhang(LYRIC_SHADOW_ROOM),
     ) { shown -> Column(
         // One layer, faded whole: faded as it was, letters and their soft shadow each went
         // half-clear on their own, and the shadow showed through the letters' edges as a faint
-        // outline while the line came in.
-        Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
+        // outline while the line came in. The layer — and the transition's own, which clips to
+        // its content — reaches past the words by [LYRIC_SHADOW_ROOM]: cut at the words' own
+        // edges, the shadow ended in a hard-edged box.
+        Modifier
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .padding(LYRIC_SHADOW_ROOM),
     ) {
         DesktopSungLine(
             timed = timed,
@@ -822,6 +830,21 @@ internal fun DesktopSungLine(
             modifier = modifier,
             maxLines = 2,
         )
+    }
+}
+
+/** Room around a lyric line for its shadow's blur to fade out in, not be cut. */
+private val LYRIC_SHADOW_ROOM = 28.dp
+
+/**
+ * Lays this out [room] larger on every side than it reports, and places it back by as much: what
+ * it draws there (a shadow's blur) has room in its layers, and the layout around it is as before.
+ */
+private fun Modifier.overhang(room: Dp): Modifier = layout { measurable, constraints ->
+    val r = room.roundToPx()
+    val placeable = measurable.measure(constraints.offset(2 * r, 2 * r))
+    layout((placeable.width - 2 * r).coerceAtLeast(0), (placeable.height - 2 * r).coerceAtLeast(0)) {
+        placeable.place(-r, -r)
     }
 }
 

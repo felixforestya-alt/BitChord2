@@ -744,7 +744,12 @@ private fun CurrentLyricLine(
         },
         label = "lyricLine",
         modifier = Modifier.padding(top = 10.dp),
-    ) { shown -> Column {
+    ) { shown -> Column(
+        // One layer, faded whole: faded as it was, letters and their soft shadow each went
+        // half-clear on their own, and the shadow showed through the letters' edges as a faint
+        // outline while the line came in.
+        Modifier.graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
+    ) {
         DesktopSungLine(
             timed = timed,
             index = shown,

@@ -106,8 +106,16 @@ internal object DesktopFramePacing {
             val blank = Blanks.phase
             val from = maxOf(start, last + period * 3 / 4)
             val next = if (blank != 0L && from - blank < PHASE_FRESH_NANOS) {
-                // The blanks come every period from one known to have been.
-                blank + (from - blank + period - 1) / period * period
+                // A frame's period after the last, put on the refresh nearest it: the blanks come
+                // every refresh from one known to have been. Counted on from the last frame rather
+                // than taken as the next slot of a frame's period from the blanks, so that drawing
+                // every other refresh keeps to the same ones — the blanks' phase, estimated afresh,
+                // could fall on the others, and a frame then came a refresh early or late: the
+                // page stepped 2, 2, 3, 1, 2 refreshes' worth.
+                val ideal = if (last != 0L && start - last < period * 2) last + period else from
+                var slot = blank + Math.floorDiv(ideal - blank + refresh / 2, refresh) * refresh
+                while (slot < from) slot += refresh
+                slot
             } else {
                 from
             }

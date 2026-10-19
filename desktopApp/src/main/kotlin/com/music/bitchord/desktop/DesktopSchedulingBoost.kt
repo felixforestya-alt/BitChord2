@@ -168,7 +168,6 @@ internal object DesktopSchedulingBoost {
         if (boosted.get()) return
         boosted.set(true)
         val thread = Thread.currentThread()
-        thread.priority = Thread.MAX_PRIORITY
         boostRenderThread()
         DesktopTrackLog.log("scheduling: drawing thread '${thread.name}' raised")
     }

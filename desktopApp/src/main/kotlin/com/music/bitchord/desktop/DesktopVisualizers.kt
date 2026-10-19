@@ -1,5 +1,7 @@
 package com.music.bitchord.desktop
 
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -56,6 +58,31 @@ internal fun DesktopVisualizer(
     modifier: Modifier,
 ) {
     if (style == DesktopVisualizerStyle.NONE) return
+    if (style == DesktopVisualizerStyle.AURORA) {
+        // Soft lights and broad ribbons, drawn at half the window's size into a layer of their
+        // own and laid over the page once, stretched back up. Drawn straight at full size, each of
+        // the eight passes blended over the whole window: on a 4K screen the aurora alone was
+        // about half the GPU's work for a frame, and beside a game the frames came late. Screen
+        // is as good over the layer as over each light (screening is associative), and what is
+        // all soft gradients looks the same stretched.
+        androidx.compose.foundation.layout.BoxWithConstraints(modifier) {
+            Canvas(
+                Modifier
+                    .size(maxWidth / AURORA_SCALE, maxHeight / AURORA_SCALE)
+                    .graphicsLayer {
+                        scaleX = AURORA_SCALE
+                        scaleY = AURORA_SCALE
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                        compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen
+                        blendMode = BlendMode.Screen
+                    },
+            ) {
+                val bands = DesktopAudioAnalyzer.bandsAt(System.nanoTime())
+                aurora(clock(), energyOf(bands), accent)
+            }
+        }
+        return
+    }
     val particles = remember { ParticleField(220) }
     Canvas(modifier) {
         val t = clock()
@@ -98,6 +125,12 @@ internal fun rgbToHsvInto(r: Float, g: Float, b: Float, out: FloatArray) {
 
 // ---- Aurora: soft lights drifting in the artwork's colours, swelling with the music ----------
 
+/** Points each aurora ribbon's curve passes through. */
+private const val RIBBON_POINTS = 24
+
+/** How much smaller than the window the aurora is drawn; see [DesktopVisualizer]. */
+private const val AURORA_SCALE = 2f
+
 private fun DrawScope.aurora(t: Float, energy: Energy, accent: Color) {
     val lights = listOf(
         accent.hueShifted(0f, 0.95f) to energy.bass,
@@ -128,13 +161,17 @@ private fun DrawScope.aurora(t: Float, energy: Energy, accent: Color) {
     for (k in 0 until 3) {
         val path = Path()
         val base = size.height * (0.28f + k * 0.14f)
-        var x = 0f
-        path.moveTo(0f, base)
-        while (x <= size.width) {
-            val y = base + sin(x / size.width * 5f + t * (0.25f + k * 0.08f) + k) * size.height * (0.05f + energy.mid * 0.06f)
-            path.lineTo(x, y)
-            x += 16f
+        fun yAt(x: Float) = base + sin(x / size.width * 5f + t * (0.25f + k * 0.08f) + k) * size.height * (0.05f + energy.mid * 0.06f)
+        // Under one turn of the wave across the window: a smooth curve through a couple of dozen
+        // points draws it as well as a line through hundreds, at a fraction of the stroking.
+        val step = size.width / RIBBON_POINTS
+        path.moveTo(0f, yAt(0f))
+        for (i in 1 until RIBBON_POINTS) {
+            val x = i * step
+            val next = x + step
+            path.quadraticTo(x, yAt(x), (x + next) / 2f, (yAt(x) + yAt(next)) / 2f)
         }
+        path.lineTo(size.width, yAt(size.width))
         drawPath(
             path,
             brush = Brush.horizontalGradient(

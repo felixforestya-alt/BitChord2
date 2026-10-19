@@ -54,9 +54,6 @@ internal object DesktopActivityWatch {
             val active = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().activeWindow
             val ours = active != null && (active === window || SwingUtilities.getWindowAncestor(active) === window || active.owner === window)
             val hidden = !window.isShowing || minimised || (!ours && DesktopPlatform.isWindows && covered(window))
-            // In use, the app draws ahead of others; seen beside a game, its frames still keep
-            // their place on the GPU; out of sight, it gives way entirely.
-            DesktopSchedulingBoost.setInFront(ours && !minimised, visible = !hidden)
             // BITCHORD_NEVER_QUIET=1, for measuring: the window always counts as seen.
             val quiet = hidden && System.getenv("BITCHORD_NEVER_QUIET") != "1"
             if (AppActivity.quiet != quiet) {

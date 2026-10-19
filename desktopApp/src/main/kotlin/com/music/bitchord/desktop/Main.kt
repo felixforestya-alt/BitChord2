@@ -140,15 +140,8 @@ private fun installImageLoader() {
 }
 
 private fun desktopMain() = application {
-    // The thread that composes and draws every frame goes first: at 160 Hz a frame has six
-    // milliseconds, and background work at the same priority — decoding the next track, the
-    // analysis, artwork — was taking enough of them to drop frames while the page moved.
-    LaunchedEffect(Unit) {
-        Thread.currentThread().priority = Thread.MAX_PRIORITY
-        DesktopSchedulingBoost.boostProcess()
-        DesktopSchedulingBoost.boostRenderThread()
-        DesktopSchedulingBoost.boostGpu()
-    }
+    // No priorities raised over other programs: the app is made light enough not to need them.
+    LaunchedEffect(Unit) { DesktopSchedulingBoost.boostRenderThread() }
     // Closing puts the window away rather than ending the process, while there is a tray icon to
     // bring it back from — see [DesktopWindowVisibility].
     val visible by DesktopWindowVisibility.visible.collectAsState()

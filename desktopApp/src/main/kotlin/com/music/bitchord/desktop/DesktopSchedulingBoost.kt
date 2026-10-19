@@ -89,19 +89,29 @@ internal object DesktopSchedulingBoost {
      * GPU: raised then, it took its frames out of the game's, and the two fought over the GPU
      * with both of them stuttering. The sound is unaffected: its thread keeps its own priority.
      */
-    fun setInFront(front: Boolean) {
-        if (!DesktopPlatform.isWindows || front == inFront) return
+    @Volatile
+    private var seen = true
+
+    /**
+     * [front]: the window is the one in use. [visible]: it can be seen at all. The processor's
+     * priority is raised only in front; the GPU's whenever the window can be seen — its frames are
+     * small and due every few milliseconds, and behind a game's large ones in the GPU's queue they
+     * came late, which is what made the disc stutter beside a game. Out of sight, nothing is raised.
+     */
+    fun setInFront(front: Boolean, visible: Boolean = front) {
+        if (!DesktopPlatform.isWindows || (front == inFront && visible == seen)) return
         inFront = front
+        seen = visible
         runCatching {
             val kernel = Native.load("kernel32", Kernel32::class.java)
             val gdi = Native.load("gdi32", Gdi32::class.java)
             val process = kernel.GetCurrentProcess()
             kernel.SetPriorityClass(process, if (front) ABOVE_NORMAL_PRIORITY_CLASS else NORMAL_PRIORITY_CLASS)
-            val gpu = if (front) GPU_PRIORITY_HIGH else GPU_PRIORITY_NORMAL
-            if (gdi.D3DKMTSetProcessSchedulingPriorityClass(process, gpu) != 0 && front) {
+            val gpu = if (visible) GPU_PRIORITY_HIGH else GPU_PRIORITY_NORMAL
+            if (gdi.D3DKMTSetProcessSchedulingPriorityClass(process, gpu) != 0 && visible) {
                 gdi.D3DKMTSetProcessSchedulingPriorityClass(process, GPU_PRIORITY_ABOVE_NORMAL)
             }
-            DesktopTrackLog.log("scheduling: ${if (front) "in front, raised" else "behind another window, ordinary priority"}")
+            DesktopTrackLog.log("scheduling: ${if (front) "in front" else "behind"}, ${if (visible) "seen" else "out of sight"}")
         }.onFailure { DesktopTrackLog.log("scheduling: priority change failed: ${it.message}") }
     }
 

@@ -8278,6 +8278,13 @@ private fun DesktopSettingsScreen(
                         DesktopGraphicsSettings::setApi,
                     )
                     val bypass by DesktopNetworkSettings.bypass.collectAsState()
+                    val normalize by DesktopLoudnessSettings.enabled.collectAsState()
+                    SettingsToggle(
+                        DesktopStrings["d_loudness", "Even out loudness"],
+                        DesktopStrings["d_loudness_subtitle", "Brings every track to about the same volume, by YouTube's own measure of each: loud masters turned down, quiet ones up a little"],
+                        normalize,
+                        DesktopLoudnessSettings::setEnabled,
+                    )
                     SettingsToggle(
                         DesktopStrings["d_dpi_bypass", "Get round YouTube blocking"],
                         DesktopStrings["d_dpi_bypass_subtitle", "Without a VPN, for networks that slow YouTube down (as in Russia): looks up addresses over encrypted DNS and splits the site's name in the first packet so the filter does not recognise it"],

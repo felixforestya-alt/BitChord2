@@ -176,6 +176,8 @@ class DesktopPlaybackEngine(
         var tempoDrained = false
         /** Brings this track to the output stream's rate, when the two differ; see [readSource]. */
         var converter: DesktopRateConverter? = null
+        /** This track's own loudness normalization; see [DesktopLoudness]. */
+        var loudness: DesktopLoudness? = null
 
         /** Back to the decoder at the listener's speed, dropping any beatmatch stretch. */
         fun dropTempo() {
@@ -1062,7 +1064,7 @@ class DesktopPlaybackEngine(
         if (from <= 0 || to <= 0 || from == to) {
             track.converter = null
             sourceReadCount = count
-            return block
+            return level(track, block, count)
         }
         val converter = track.converter?.takeIf { it.fromRate == from && it.toRate == to }
             ?: DesktopRateConverter(from, to, sink.format.channels.coerceAtLeast(1)).also {
@@ -1071,7 +1073,15 @@ class DesktopPlaybackEngine(
             }
         val converted = converter.process(block, count)
         sourceReadCount = converter.outputCount
-        return converted
+        return level(track, converted, converter.outputCount)
+    }
+
+    /** [samples] at [track]'s normalized loudness — the track's own, before anything is mixed. */
+    private fun level(track: Track, samples: FloatArray, count: Int): FloatArray {
+        val rate = sink.format.sampleRate
+        val loudness = track.loudness ?: DesktopLoudness(track.song.videoId, rate).also { track.loudness = it }
+        loudness.process(samples, count, sink.format.channels.coerceAtLeast(1))
+        return samples
     }
 
     /** Eases a promoted beatmatch stretch back by at most 0.75% on each beat. */

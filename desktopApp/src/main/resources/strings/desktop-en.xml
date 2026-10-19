@@ -223,4 +223,6 @@
     <string name="d_tracks_many">%d songs</string>
     <string name="d_graphics_api">Graphics</string>
     <string name="d_graphics_api_subtitle">What the window is drawn through. Direct3D keeps frames on time best; OpenGL if Direct3D misbehaves on this computer. Applies after a restart</string>
+    <string name="d_loudness">Even out loudness</string>
+    <string name="d_loudness_subtitle">Brings every track to about the same volume, by YouTube\'s own measure of each: loud masters turned down, quiet ones up a little</string>
 </resources>

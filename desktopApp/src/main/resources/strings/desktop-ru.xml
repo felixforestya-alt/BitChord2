@@ -401,4 +401,6 @@
     <string name="d_tracks_many">%d треков</string>
     <string name="d_graphics_api">Графика</string>
     <string name="d_graphics_api_subtitle">Через что рисуется окно. Direct3D держит кадры ровнее; OpenGL — если с Direct3D на этом компьютере что-то не так. Применяется после перезапуска</string>
+    <string name="d_loudness">Выравнивание громкости</string>
+    <string name="d_loudness_subtitle">Все треки звучат примерно одинаково громко, по замеру громкости самого YouTube: громкие тише, тихие чуть громче</string>
 </resources>

@@ -5481,6 +5481,9 @@ fun BitChordDesktopApp() {
                         )
                         destination == DesktopDestination.LISTEN_NOW -> HomeScreen(
                             state = visibleHomeState,
+                            // What plays now: its card shows the pause button and the playing bars.
+                            currentSong = selectedSong,
+                            isPlaying = playback.isPlaying,
                             listState = homeListState,
                             onItemClick = { item, shelfTitle -> openShelfItem(item, shelfTitle) },
                             onRetry = ::loadHome,

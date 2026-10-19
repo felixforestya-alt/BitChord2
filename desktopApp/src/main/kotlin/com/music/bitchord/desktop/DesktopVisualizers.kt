@@ -157,31 +157,65 @@ private fun DrawScope.aurora(t: Float, energy: Energy, accent: Color) {
             blendMode = BlendMode.Screen,
         )
     }
-    // Ribbons of light: the curtains an aurora is named for.
+    // Ribbons of light: the curtains an aurora is named for. Each a band of triangles with its
+    // colours at the corners, which the GPU fills as it is: stroked as a wide curved path, as they
+    // were, Skia rebuilt each ribbon's outline on every frame, and the three cost more than the
+    // whole of the rest of the player. A band also has soft edges, as light does.
     for (k in 0 until 3) {
-        val path = Path()
         val base = size.height * (0.28f + k * 0.14f)
-        fun yAt(x: Float) = base + sin(x / size.width * 5f + t * (0.25f + k * 0.08f) + k) * size.height * (0.05f + energy.mid * 0.06f)
-        // Under one turn of the wave across the window: a smooth curve through a couple of dozen
-        // points draws it as well as a line through hundreds, at a fraction of the stroking.
-        val step = size.width / RIBBON_POINTS
-        path.moveTo(0f, yAt(0f))
-        for (i in 1 until RIBBON_POINTS) {
-            val x = i * step
-            val next = x + step
-            path.quadraticTo(x, yAt(x), (x + next) / 2f, (yAt(x) + yAt(next)) / 2f)
-        }
-        path.lineTo(size.width, yAt(size.width))
-        drawPath(
-            path,
-            brush = Brush.horizontalGradient(
-                listOf(Color.Transparent, accent.hueShifted(k * 30f - 30f, 1f).copy(alpha = 0.22f + energy.high * 0.3f), Color.Transparent),
-            ),
-            style = Stroke(width = size.height * (0.03f + energy.bass * 0.03f), cap = StrokeCap.Round),
-            blendMode = BlendMode.Screen,
-        )
+        val amplitude = size.height * (0.05f + energy.mid * 0.06f)
+        val half = size.height * (0.03f + energy.bass * 0.03f) / 2f
+        val colour = accent.hueShifted(k * 30f - 30f, 1f)
+        val peak = (0.22f + energy.high * 0.3f).coerceAtMost(1f)
+        ribbon(base, amplitude, half, t * (0.25f + k * 0.08f) + k, colour, peak)
     }
 }
+
+/**
+ * One aurora ribbon: a sine across the width, [half] thick either side of it, fading out toward
+ * both ends and along its edges. Four rows of points across it — clear, full, full, clear — so it
+ * has a body and a soft edge; [RIBBON_POINTS] + 1 columns along it.
+ */
+private fun DrawScope.ribbon(base: Float, amplitude: Float, half: Float, phase: Float, colour: Color, peak: Float) {
+    val columns = RIBBON_POINTS + 1
+    val positions = ArrayList<Offset>(columns * 4)
+    val colours = ArrayList<Color>(columns * 4)
+    val rows = floatArrayOf(-1f, -0.4f, 0.4f, 1f)
+    for (c in 0 until columns) {
+        val x = size.width * c / RIBBON_POINTS
+        val y = base + sin(x / size.width * 5f + phase) * amplitude
+        // Clear at the ends, full in the middle, as the gradient it was stroked with.
+        val along = 1f - abs(c * 2f / RIBBON_POINTS - 1f)
+        for (r in rows.indices) {
+            positions += Offset(x, y + rows[r] * half)
+            val edge = if (r == 0 || r == rows.size - 1) 0f else 1f
+            colours += colour.copy(alpha = peak * along * edge)
+        }
+    }
+    val indices = ArrayList<Int>(RIBBON_POINTS * 3 * 6)
+    for (c in 0 until RIBBON_POINTS) {
+        for (r in 0 until rows.size - 1) {
+            val a = c * rows.size + r
+            val b = a + rows.size
+            indices += a; indices += b; indices += a + 1
+            indices += a + 1; indices += b; indices += b + 1
+        }
+    }
+    drawContext.canvas.drawVertices(
+        androidx.compose.ui.graphics.Vertices(
+            androidx.compose.ui.graphics.VertexMode.Triangles,
+            positions,
+            positions,
+            colours,
+            indices,
+        ),
+        BlendMode.Dst,
+        ribbonPaint,
+    )
+}
+
+/** Vertex colours alone, screened over what is beneath. */
+private val ribbonPaint = androidx.compose.ui.graphics.Paint().apply { blendMode = BlendMode.Screen }
 
 // ---- Ring: a spectrum radiating from the disc's edge -------------------------------------
 

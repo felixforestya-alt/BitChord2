@@ -1366,97 +1366,52 @@ private fun SpinningDisc(
                 radius = size.minDimension / 2,
             )
         }
-        // The disc itself, turning.
-        Canvas(
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    rotationZ = angle()
-                    // Offscreen, so the centre hole can be cut clean through to what is behind.
-                    compositingStrategy = CompositingStrategy.Offscreen
-                },
-        ) {
-            val radius = size.minDimension / 2f
-            val disc = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, radius)) }
-            clipPath(disc) {
-                val image = art
-                if (image != null) {
-                    drawSquareCrop(image)
-                } else {
-                    drawRect(Brush.linearGradient(listOf(Color(0xFF2B2B35), Color(0xFF55556A))))
-                }
-                // The data side's rainbow, turning with the disc.
-                drawCircle(
-                    Brush.sweepGradient(
-                        listOf(
-                            Color(0xFF7CF7FF), Color(0xFFFF7CE5), Color(0xFFFFF27C), Color(0xFF7CFF9B),
-                            Color(0xFF7C9BFF), Color(0xFFFF7C7C), Color(0xFF7CF7FF),
-                        ),
-                    ),
-                    radius = radius,
-                    alpha = 0.16f,
-                    blendMode = BlendMode.Screen,
-                )
-                // Grooves.
-                var r = radius * 0.40f
-                while (r < radius * 0.985f) {
-                    drawCircle(Color.Black, radius = r, alpha = 0.035f, style = Stroke(0.8f))
-                    r += 3.2f
+        // The disc itself, turning. Its face is drawn once into a picture of its own, and each
+        // frame only turns that picture: drawn afresh, the face was the print clipped to a circle,
+        // a sweep, some 145 groove rings and a window-high offscreen buffer for the hole, on every
+        // frame of the display, for a picture whose only change is its angle. Beside a game that
+        // takes the GPU, a frame that heavy missed its refresh; one turned texture does not.
+        var side by remember { mutableStateOf(0) }
+        val face = rememberDiscFace(art, side)
+        if (face != null && face.width == side) {
+            Canvas(Modifier.fillMaxSize().onSizeChanged { side = min(it.width, it.height) }) {
+                val edge = face.width.toFloat()
+                rotate(angle(), pivot = center) {
+                    drawImage(
+                        image = face,
+                        dstOffset = IntOffset(((size.width - edge) / 2f).roundToInt(), ((size.height - edge) / 2f).roundToInt()),
+                        dstSize = IntSize(face.width, face.height),
+                        filterQuality = FilterQuality.Low,
+                    )
                 }
             }
-            // The clear hub, to a real disc's proportions (120 mm across, a 15 mm hole, the clear
-            // zone out to 46 mm): see-through polycarbonate over the print, the stacking ring
-            // moulded into it, a smoky clamping area, then the hole.
-            drawCircle(
-                Brush.radialGradient(
-                    0f to Color.White.copy(alpha = 0.30f),
-                    0.6f to Color(0xFFB8C4CC).copy(alpha = 0.22f),
-                    1f to Color.White.copy(alpha = 0.10f),
-                    radius = radius * 0.38f,
-                    center = center,
-                ),
-                radius = radius * 0.38f,
-            )
-            drawCircle(Color.White.copy(alpha = 0.60f), radius = radius * 0.38f, style = Stroke(1.2f))
-            drawCircle(Color.Black.copy(alpha = 0.10f), radius = radius * 0.30f, style = Stroke(radius * 0.035f))
-            drawCircle(Color.White.copy(alpha = 0.35f), radius = radius * 0.285f, style = Stroke(1f))
-            drawCircle(Color(0xFF20242A).copy(alpha = 0.45f), radius = radius * 0.21f)
-            drawCircle(Color.White.copy(alpha = 0.22f), radius = radius * 0.21f, style = Stroke(1f))
-            drawCircle(Color.Black, radius = radius * 0.125f, blendMode = BlendMode.Clear)
-            drawCircle(Color.White.copy(alpha = 0.45f), radius = radius * 0.125f, style = Stroke(1.4f))
-            // The rim.
-            drawCircle(Color.White.copy(alpha = 0.65f), radius = radius - 0.75f, style = Stroke(1.5f))
+        } else {
+            // Until the face is ready — the first frames, or a new cover — drawn as it always was.
+            Canvas(
+                Modifier
+                    .fillMaxSize()
+                    .onSizeChanged { side = min(it.width, it.height) }
+                    .graphicsLayer {
+                        rotationZ = angle()
+                        // Offscreen, so the centre hole can be cut clean through to what is behind.
+                        compositingStrategy = CompositingStrategy.Offscreen
+                    },
+            ) { discFace(art) }
         }
-        // The reflection, fixed in the room while the disc turns under it.
+        // The reflection, fixed in the room while the disc turns under it — drawn once too.
+        // White screened over the disc is white laid over it, so one plain picture does.
+        val reflection = rememberDiscReflection(side)
         Canvas(Modifier.fillMaxSize()) {
-            val radius = size.minDimension / 2f
-            val disc = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, radius)) }
-            val hole = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, radius * 0.125f)) }
-            clipPath(disc) {
-                clipPath(hole, clipOp = androidx.compose.ui.graphics.ClipOp.Difference) {
-                    drawCircle(
-                        Brush.sweepGradient(
-                            0.00f to Color.White.copy(alpha = 0.0f),
-                            0.08f to Color.White.copy(alpha = 0.34f),
-                            0.16f to Color.White.copy(alpha = 0.0f),
-                            0.50f to Color.White.copy(alpha = 0.0f),
-                            0.58f to Color.White.copy(alpha = 0.22f),
-                            0.66f to Color.White.copy(alpha = 0.0f),
-                            1.00f to Color.White.copy(alpha = 0.0f),
-                        ),
-                        radius = radius,
-                        blendMode = BlendMode.Screen,
-                    )
-                    drawCircle(
-                        Brush.linearGradient(
-                            0f to Color.White.copy(alpha = 0.18f),
-                            0.5f to Color.Transparent,
-                            start = Offset(0f, 0f),
-                            end = Offset(size.width, size.height),
-                        ),
-                        radius = radius,
-                    )
-                }
+            val image = reflection
+            if (image != null && image.width == side) {
+                drawImage(
+                    image = image,
+                    dstOffset = IntOffset(((size.width - image.width) / 2f).roundToInt(), ((size.height - image.height) / 2f).roundToInt()),
+                    dstSize = IntSize(image.width, image.height),
+                    filterQuality = FilterQuality.None,
+                )
+            } else {
+                discReflection()
             }
         }
     }
@@ -1504,6 +1459,138 @@ private fun DrawScope.drawSquareCrop(image: ImageBitmap) {
         dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
         filterQuality = FilterQuality.High,
     )
+}
+
+
+/**
+ * The disc's face — the print, the rainbow, the grooves, the hub, the hole — for [art]. Drawn
+ * once into a picture of its own (see [rememberDiscFace]), not on every frame: only its angle
+ * changes as it turns.
+ */
+private fun DrawScope.discFace(art: ImageBitmap?) {
+    val radius = size.minDimension / 2f
+    val disc = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, radius)) }
+    clipPath(disc) {
+        val image = art
+        if (image != null) {
+            drawSquareCrop(image)
+        } else {
+            drawRect(Brush.linearGradient(listOf(Color(0xFF2B2B35), Color(0xFF55556A))))
+        }
+        // The data side's rainbow, turning with the disc.
+        drawCircle(
+            Brush.sweepGradient(
+                listOf(
+                    Color(0xFF7CF7FF), Color(0xFFFF7CE5), Color(0xFFFFF27C), Color(0xFF7CFF9B),
+                    Color(0xFF7C9BFF), Color(0xFFFF7C7C), Color(0xFF7CF7FF),
+                ),
+            ),
+            radius = radius,
+            alpha = 0.16f,
+            blendMode = BlendMode.Screen,
+        )
+        // Grooves.
+        var r = radius * 0.40f
+        while (r < radius * 0.985f) {
+            drawCircle(Color.Black, radius = r, alpha = 0.035f, style = Stroke(0.8f))
+            r += 3.2f
+        }
+    }
+    // The clear hub, to a real disc's proportions (120 mm across, a 15 mm hole, the clear
+    // zone out to 46 mm): see-through polycarbonate over the print, the stacking ring
+    // moulded into it, a smoky clamping area, then the hole.
+    drawCircle(
+        Brush.radialGradient(
+            0f to Color.White.copy(alpha = 0.30f),
+            0.6f to Color(0xFFB8C4CC).copy(alpha = 0.22f),
+            1f to Color.White.copy(alpha = 0.10f),
+            radius = radius * 0.38f,
+            center = center,
+        ),
+        radius = radius * 0.38f,
+    )
+    drawCircle(Color.White.copy(alpha = 0.60f), radius = radius * 0.38f, style = Stroke(1.2f))
+    drawCircle(Color.Black.copy(alpha = 0.10f), radius = radius * 0.30f, style = Stroke(radius * 0.035f))
+    drawCircle(Color.White.copy(alpha = 0.35f), radius = radius * 0.285f, style = Stroke(1f))
+    drawCircle(Color(0xFF20242A).copy(alpha = 0.45f), radius = radius * 0.21f)
+    drawCircle(Color.White.copy(alpha = 0.22f), radius = radius * 0.21f, style = Stroke(1f))
+    drawCircle(Color.Black, radius = radius * 0.125f, blendMode = BlendMode.Clear)
+    drawCircle(Color.White.copy(alpha = 0.45f), radius = radius * 0.125f, style = Stroke(1.4f))
+    // The rim.
+    drawCircle(Color.White.copy(alpha = 0.65f), radius = radius - 0.75f, style = Stroke(1.5f))
+}
+
+/** The light on the disc: a sheen on the print, a gleam toward the top left, round the hole. */
+private fun DrawScope.discReflection() {
+    val radius = size.minDimension / 2f
+    val disc = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, radius)) }
+    val hole = Path().apply { addOval(androidx.compose.ui.geometry.Rect(center, radius * 0.125f)) }
+    clipPath(disc) {
+        clipPath(hole, clipOp = androidx.compose.ui.graphics.ClipOp.Difference) {
+            drawCircle(
+                Brush.sweepGradient(
+                    0.00f to Color.White.copy(alpha = 0.0f),
+                    0.08f to Color.White.copy(alpha = 0.34f),
+                    0.16f to Color.White.copy(alpha = 0.0f),
+                    0.50f to Color.White.copy(alpha = 0.0f),
+                    0.58f to Color.White.copy(alpha = 0.22f),
+                    0.66f to Color.White.copy(alpha = 0.0f),
+                    1.00f to Color.White.copy(alpha = 0.0f),
+                ),
+                radius = radius,
+                blendMode = BlendMode.Screen,
+            )
+            drawCircle(
+                Brush.linearGradient(
+                    0f to Color.White.copy(alpha = 0.18f),
+                    0.5f to Color.Transparent,
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, size.height),
+                ),
+                radius = radius,
+            )
+        }
+    }
+}
+
+/** [discReflection] at [side] pixels square, drawn once off the UI thread. */
+@Composable
+private fun rememberDiscReflection(side: Int): ImageBitmap? {
+    var image by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(side) {
+        if (side <= 0) return@LaunchedEffect
+        image = withContext(Dispatchers.Default) {
+            val bitmap = ImageBitmap(side, side)
+            androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
+                Density(1f),
+                androidx.compose.ui.unit.LayoutDirection.Ltr,
+                androidx.compose.ui.graphics.Canvas(bitmap),
+                Size(side.toFloat(), side.toFloat()),
+            ) { discReflection() }
+            bitmap.frozen()
+        }
+    }
+    return image
+}
+
+/** [art]'s disc face at [side] pixels square, drawn off the UI thread; the last one until a new one is ready. */
+@Composable
+private fun rememberDiscFace(art: ImageBitmap?, side: Int): ImageBitmap? {
+    var face by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(art, side) {
+        if (side <= 0) return@LaunchedEffect
+        face = withContext(Dispatchers.Default) {
+            val bitmap = ImageBitmap(side, side)
+            androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
+                Density(1f),
+                androidx.compose.ui.unit.LayoutDirection.Ltr,
+                androidx.compose.ui.graphics.Canvas(bitmap),
+                Size(side.toFloat(), side.toFloat()),
+            ) { discFace(art) }
+            bitmap.frozen()
+        }
+    }
+    return face
 }
 
 // ---- The room --------------------------------------------------------------------------------

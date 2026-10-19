@@ -218,6 +218,12 @@
     <string name="d_network">Network</string>
     <string name="d_system">System</string>
     <string name="d_tap_to_change">Tap to change</string>
+    <string name="d_cat_listening">Listening</string>
+    <string name="d_cat_look">Look</string>
+    <string name="d_cat_library">Music &amp; library</string>
+    <string name="d_cat_general">Account &amp; system</string>
+    <string name="d_sources">Sources</string>
+    <string name="d_sources_order">Tried in this order, top to bottom</string>
     <string name="d_dns">DNS server</string>
     <string name="d_dns_subtitle">Who the app asks for websites' addresses, over encrypted DNS (DNS over HTTPS). System uses your network's own; if the chosen server does not answer, the system's is asked instead</string>
     <string name="d_dns_system">System</string>

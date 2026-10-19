@@ -396,6 +396,12 @@
     <string name="d_network">Сеть</string>
     <string name="d_system">Система</string>
     <string name="d_tap_to_change">нажмите, чтобы сменить</string>
+    <string name="d_cat_listening">Прослушивание</string>
+    <string name="d_cat_look">Оформление</string>
+    <string name="d_cat_library">Музыка и библиотека</string>
+    <string name="d_cat_general">Аккаунт и система</string>
+    <string name="d_sources">Источники</string>
+    <string name="d_sources_order">Пробуются по порядку, сверху вниз</string>
     <string name="d_dns">DNS-сервер</string>
     <string name="d_dns_subtitle">У кого приложение спрашивает адреса сайтов, через зашифрованный DNS (DNS over HTTPS). «Системный» — DNS вашей сети; если выбранный сервер не отвечает, спрашивается системный</string>
     <string name="d_dns_system">Системный</string>

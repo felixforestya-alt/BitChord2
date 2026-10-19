@@ -104,35 +104,39 @@ internal object DesktopFramePacing {
             inner.onRender(canvas, width, height, last)
         }
 
-        /** Until the monitor's next refresh after the last frame; returns the time it is. */
+        /**
+         * Until the frame's refresh; returns the time the frame is drawn as of — always a refresh
+         * of the monitor's while its phase is known, so the frames never leave the refreshes.
+         *
+         * The refresh is a frame's period after the last one's, put on the nearest of the
+         * monitor's (the blanks come every refresh from one known to have been): counted on from
+         * the last frame, so that drawing every other refresh keeps to the same ones. A frame
+         * that comes after its refresh has gone is drawn at once, but timed as of that refresh,
+         * and the next counts on from it: let go on a timer instead, a late frame left the
+         * refreshes, and every frame after it — recorded in the user's own session, frames crept
+         * across the refreshes 6.7 ms apart and the page stepped one refresh, then two, then one.
+         */
         private fun waitForTurn(start: Long): Long {
             val blank = Blanks.phase
-            val from = maxOf(start, last + period * 3 / 4)
-            val next = if (blank != 0L && from - blank < PHASE_FRESH_NANOS) {
-                // A frame's period after the last, put on the refresh nearest it: the blanks come
-                // every refresh from one known to have been. Counted on from the last frame rather
-                // than taken as the next slot of a frame's period from the blanks, so that drawing
-                // every other refresh keeps to the same ones — the blanks' phase, estimated afresh,
-                // could fall on the others, and a frame then came a refresh early or late: the
-                // page stepped 2, 2, 3, 1, 2 refreshes' worth.
-                val ideal = if (last != 0L && start - last < period * 2) last + period else from
-                var slot = blank + Math.floorDiv(ideal - blank + refresh / 2, refresh) * refresh
-                while (slot < from) slot += refresh
-                slot
-            } else {
-                from
+            if (blank == 0L || start - blank > PHASE_FRESH_NANOS) {
+                // No phase to keep to: a period after the last frame.
+                val due = maxOf(start, last + period)
+                if (due - start > MIN_WAIT_NANOS) Win.sleepFor(due - start)
+                return System.nanoTime()
             }
-            val due = minOf(next, maxOf(start, last + period + period / 16))
+            val ideal = if (last != 0L && start - last < period * 4) last + period else start
+            var slot = blank + Math.floorDiv(ideal - blank + refresh / 2, refresh) * refresh
+            if (last != 0L && slot < last + period * 3 / 4) slot += refresh
+            if (start >= slot) {
+                // Late: drawn now, as of the latest refresh that has gone.
+                return blank + Math.floorDiv(start - blank, refresh) * refresh
+            }
             // The wait is the frame's spare time: what the lists want built ahead is built in it,
             // up to a little before the refresh, and the rest of it slept.
-            if (due - start > PREFETCH_MIN_NANOS) DesktopPrefetch.workUntil(due - PREFETCH_MARGIN_NANOS)
+            if (slot - start > PREFETCH_MIN_NANOS) DesktopPrefetch.workUntil(slot - PREFETCH_MARGIN_NANOS)
             val now = System.nanoTime()
-            if (due - now > MIN_WAIT_NANOS) Win.sleepFor(due - now)
-            val woke = System.nanoTime()
-            // The frame is timed as of the refresh it was started on, not as of when the timer
-            // got round to waking it, a fraction of a millisecond either way: everything that
-            // moves steps by exactly one refresh's worth a frame, as the screen shows it.
-            return if (due == next && woke - due in 0..period / 2) due else woke
+            if (slot - now > MIN_WAIT_NANOS) Win.sleepFor(slot - now)
+            return slot
         }
     }
 

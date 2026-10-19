@@ -208,6 +208,16 @@
     <string name="wave_unblock_all">Let them all back</string>
     <string name="d_dpi_bypass">Get round YouTube blocking</string>
     <string name="d_dpi_bypass_subtitle">Without a VPN, for networks that slow YouTube down (as in Russia): looks up addresses over encrypted DNS and splits the site\'s name in the first packet so the filter does not recognise it</string>
+    <string name="d_main_window">Main window</string>
+    <string name="d_player_group">Player</string>
+    <string name="d_transitions">Transitions</string>
+    <string name="d_sound">Sound</string>
+    <string name="d_streaming_quality">Streaming quality</string>
+    <string name="d_download_quality">Download quality</string>
+    <string name="d_downloads_storage">Downloads &amp; storage</string>
+    <string name="d_network">Network</string>
+    <string name="d_system">System</string>
+    <string name="d_tap_to_change">Tap to change</string>
     <string name="d_dns">DNS server</string>
     <string name="d_dns_subtitle">Who the app asks for websites' addresses, over encrypted DNS (DNS over HTTPS). System uses your network's own; if the chosen server does not answer, the system's is asked instead</string>
     <string name="d_dns_system">System</string>

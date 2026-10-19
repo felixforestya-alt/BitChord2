@@ -328,6 +328,7 @@ import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.system.exitProcess
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CancellationException
@@ -535,6 +536,16 @@ private enum class DesktopRepeatMode {
 @Composable
 fun BitChordDesktopApp() {
     if (DesktopFrameProfiler.recompositions) androidx.compose.runtime.SideEffect { DesktopFrameProfiler.count("root") }
+    // BITCHORD_PROFILE_ROOT_TICK=1, for measuring: the whole window recomposed twice a second.
+    if (DesktopFrameProfiler.enabled && System.getenv("BITCHORD_PROFILE_ROOT_TICK") == "1") {
+        val tick = remember { androidx.compose.runtime.mutableIntStateOf(0) }
+        LaunchedEffect(Unit) { while (true) { delay(500); tick.intValue++ } }
+        tick.intValue
+    }
+    if (DesktopFrameProfiler.recompositions) {
+        val scope = androidx.compose.runtime.currentRecomposeScope
+        androidx.compose.runtime.SideEffect { DesktopFrameProfiler.rootScope = scope }
+    }
     if (DesktopFrameProfiler.recompositions) {
         val composition = androidx.compose.runtime.currentComposer.composition
         remember { DesktopFrameProfiler.observe(composition) }
@@ -2536,8 +2547,13 @@ fun BitChordDesktopApp() {
             previousPosition = position
         }
     }
-    LaunchedEffect(statsRevision) {
-        replaySummary = withContext(Dispatchers.IO) { DesktopListeningStats.summary(replayPeriod) }
+    // Followed here rather than keyed on: a key is read by the window's root, and the counter moves
+    // every five seconds while a track plays — each a recomposition of the whole window, and a
+    // dropped frame of the disc or the page with it.
+    LaunchedEffect(Unit) {
+        snapshotFlow { statsRevision }.drop(1).collect {
+            replaySummary = withContext(Dispatchers.IO) { DesktopListeningStats.summary(replayPeriod) }
+        }
     }
     DisposableEffect(playbackEngine) {
         onDispose { playbackEngine.release() }
@@ -3610,14 +3626,15 @@ fun BitChordDesktopApp() {
     // saved order, not just the enabled ones — each carrying what its last race
     // turned up so the row can read "Found", "Not found" or "Searching…". The
     // winner is the one the sheet shows now.
+    // Derived, and read only by the menu that shows it: each source's answer arrives on its own,
+    // and read here every one of them recomposed the whole window.
     val menuLyricsProviders = remember(
         lyricsOrder,
         lyricsOn,
         lyricsOnly,
         lyricsLoading,
         lyrics?.source,
-        lyricsProviderResults.value,
-    ) {
+    ) { derivedStateOf {
         val currentLabel = lyrics?.source
         val asked = lyricsOnly?.let { listOf(it) } ?: DesktopLyricsClient.enabledSources(lyricsOrder, lyricsOn)
         lyricsOrder.map { label ->
@@ -3630,7 +3647,7 @@ fun BitChordDesktopApp() {
             }
             DesktopLyricsProviderRow(label, state, label == currentLabel)
         }
-    }
+    } }
 
     // The queue's edits, for the player's queue and the queue column alike.
     fun removeFromQueue(at: Int) {
@@ -4005,6 +4022,7 @@ fun BitChordDesktopApp() {
             kotlinx.coroutines.delay(1_500)
             // BITCHORD_PROFILE_HOME_SCROLL=1: Home scrolled steadily up and down, and nothing else.
             if (System.getenv("BITCHORD_PROFILE_HOME_SCROLL") == "1") {
+                DesktopTrackLog.log("profile cards composed before the scroll: ${com.music.bitchord.ui.screens.HomeDiagnostics.cardsComposed}")
                 DesktopFrameProfiler.measure("home-scroll", hz) {
                     repeat(4) {
                         homeListState.animateScrollBy(2_400f, tween(1_000, easing = androidx.compose.animation.core.LinearEasing))
@@ -4734,7 +4752,7 @@ fun BitChordDesktopApp() {
                                     },
                                     showingTranslation = playerShowingTranslation.value,
                                     translateEnabled = !sharedLyrics.isNullOrEmpty(),
-                                    lyricsProviders = menuLyricsProviders,
+                                    lyricsProviders = menuLyricsProviders.value,
                                     onSelectLyricsProvider = { label -> lyricsOnly = label },
                                     onSearchLyrics = { title, artist -> searchLyrics(title, artist) },
                                     lyricsOffsetMs = lyricsOffsetMs,

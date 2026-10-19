@@ -155,7 +155,9 @@ fun HomeScreen(
     lead: (@Composable () -> Unit)? = null,
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
+    val cardLabels = rememberCardSubtitleLabels()
 
+    androidx.compose.runtime.CompositionLocalProvider(LocalCardSubtitleLabels provides cardLabels) {
     PullToRefresh(
         refreshing = refreshing,
         onRefresh = onRefresh,
@@ -234,6 +236,7 @@ fun HomeScreen(
                 }
             }
         }
+    }
     }
 
     if (onLoadMore != null && state is UiState.Success) {
@@ -720,41 +723,84 @@ internal fun localizeShelfSubtitle(subtitle: String): String {
     }
 }
 
+/**
+ * The words a card's subtitle is put into the app's language with, loaded once for a page. Read
+ * by each card as it was, these were half a dozen resource lookups a card — each a blocking load
+ * the first time its card composed — and a shelf of fourteen cards scrolling into view composed
+ * them all in that one frame.
+ */
+internal class CardSubtitleLabels(
+    val song: String,
+    val single: String,
+    val chart: String,
+    val playlist: String,
+    private val viewsFormat: String,
+    private val playsFormat: String,
+    private val songsFormat: String,
+) {
+    fun views(count: String) = viewsFormat.replace(SLOT, count)
+    fun plays(count: String) = playsFormat.replace(SLOT, count)
+    fun songs(count: String) = songsFormat.replace(SLOT, count)
+
+    companion object {
+        /** Stands in for the count while the formats are loaded, and is swapped for it after. */
+        const val SLOT = "\u0001"
+    }
+}
+
+@Composable
+internal fun rememberCardSubtitleLabels(): CardSubtitleLabels {
+    val song = stringResource(Res.string.shelf_song_item)
+    val single = stringResource(Res.string.shelf_single)
+    val chart = stringResource(Res.string.shelf_chart)
+    val playlist = stringResource(Res.string.playlist)
+    val views = stringResource(Res.string.card_views_format, CardSubtitleLabels.SLOT)
+    val plays = stringResource(Res.string.card_plays_format, CardSubtitleLabels.SLOT)
+    val songs = stringResource(Res.string.card_songs_format, CardSubtitleLabels.SLOT)
+    return remember(song, single, chart, playlist, views, plays, songs) {
+        CardSubtitleLabels(song, single, chart, playlist, views, plays, songs)
+    }
+}
+
+/** The page's [CardSubtitleLabels], where a page has provided them. */
+internal val LocalCardSubtitleLabels = androidx.compose.runtime.staticCompositionLocalOf<CardSubtitleLabels?> { null }
+
 @Composable
 internal fun localizeCardSubtitle(subtitle: String): String {
     if (subtitle.isBlank()) return subtitle
+    val labels = LocalCardSubtitleLabels.current ?: rememberCardSubtitleLabels()
+    return remember(subtitle, labels) { localizeCardSubtitle(subtitle, labels) }
+}
+
+internal fun localizeCardSubtitle(subtitle: String, labels: CardSubtitleLabels): String {
     val delimiter = " • "
     val parts = subtitle.split(delimiter)
-    val songLabel = stringResource(Res.string.shelf_song_item)
-    val singleLabel = stringResource(Res.string.shelf_single)
-    val chartLabel = stringResource(Res.string.shelf_chart)
-    val playlistLabel = stringResource(Res.string.playlist)
     val localizedParts = parts.map { part ->
         val trimmed = part.trim()
         val lower = trimmed.lowercase(Locale.ROOT)
         when {
             trimmed.equals("Song", ignoreCase = true) || trimmed.equals("Titre", ignoreCase = true) ||
-                trimmed.equals("Bài hát", ignoreCase = true) || trimmed.equals("曲", ignoreCase = true) -> songLabel
+                trimmed.equals("Bài hát", ignoreCase = true) || trimmed.equals("曲", ignoreCase = true) -> labels.song
             trimmed.equals("Single", ignoreCase = true) || trimmed.equals("Đĩa đơn", ignoreCase = true) ||
-                trimmed.equals("シングル", ignoreCase = true) -> singleLabel
+                trimmed.equals("シングル", ignoreCase = true) -> labels.single
             trimmed.equals("Chart", ignoreCase = true) || trimmed.equals("Bảng xếp hạng", ignoreCase = true) ||
-                trimmed.equals("チャート", ignoreCase = true) -> chartLabel
+                trimmed.equals("チャート", ignoreCase = true) -> labels.chart
             trimmed.equals("Playlist", ignoreCase = true) || trimmed.equals("Danh sách phát", ignoreCase = true) ||
-                trimmed.equals("再生リスト", ignoreCase = true) -> playlistLabel
+                trimmed.equals("再生リスト", ignoreCase = true) -> labels.playlist
             lower.endsWith(" views") || lower.endsWith(" view") || lower.endsWith(" lượt xem") ||
                 lower.endsWith(" 回視聴") || lower.endsWith("回視聴") -> {
                 val count = trimmed.substringBeforeLast(' ', "").trim()
-                if (count.any { it.isDigit() }) stringResource(Res.string.card_views_format, count) else part
+                if (count.any { it.isDigit() }) labels.views(count) else part
             }
             lower.endsWith(" plays") || lower.endsWith(" play") || lower.endsWith(" lượt phát") ||
                 lower.endsWith(" 回再生") || lower.endsWith("回再生") -> {
                 val count = trimmed.substringBeforeLast(' ', "").trim()
-                if (count.any { it.isDigit() }) stringResource(Res.string.card_plays_format, count) else part
+                if (count.any { it.isDigit() }) labels.plays(count) else part
             }
             lower.endsWith(" songs") || lower.endsWith(" song") || lower.endsWith(" bài hát") ||
                 lower.endsWith(" 曲") || lower.endsWith("曲") -> {
                 val count = trimmed.substringBeforeLast(' ', "").trim()
-                if (count.any { it.isDigit() }) stringResource(Res.string.card_songs_format, count) else part
+                if (count.any { it.isDigit() }) labels.songs(count) else part
             }
             else -> part
         }
@@ -993,6 +1039,9 @@ private fun ServiceCard(colors: List<Color>, trackKey: String, icon: ImageVector
     }
 }
 
+/** For measuring: how many shelf cards have been composed so far. */
+object HomeDiagnostics { @Volatile @JvmField var cardsComposed = 0 }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ShelfCard(
@@ -1005,6 +1054,7 @@ internal fun ShelfCard(
     isCurrent: Boolean = false,
     isPlaying: Boolean = false,
 ) {
+    remember { HomeDiagnostics.cardsComposed++ }
     val hover = rememberCardHover()
     Column(
         modifier = modifier

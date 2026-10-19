@@ -130,6 +130,13 @@ internal object DesktopFrameProfiler {
                     what += "=" + runCatching { value.value?.javaClass?.simpleName }.getOrNull()
                 }
                 invalidations.merge("${scopeName(scope)} <- $what read at $site", 1, Int::plus)
+                if (scope === rootScope) {
+                    val shown = runCatching { (value as? androidx.compose.runtime.State<*>)?.value?.toString()?.take(60) }.getOrNull()
+                    val writer = Thread.currentThread().stackTrace.drop(2)
+                        .filter { it.className.startsWith("com.music") && !it.className.contains("DesktopFrameProfiler") }
+                        .take(4).joinToString(" < ") { "${it.fileName}:${it.lineNumber}" }
+                    rootInvalidations.merge("${System.identityHashCode(value)} $what=$shown read at $site, set from $writer", 1, Int::plus)
+                }
             }
             override fun onScopeDisposed(scope: androidx.compose.runtime.RecomposeScope) {}
         }
@@ -141,6 +148,26 @@ internal object DesktopFrameProfiler {
     private val probes = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     /** Called from a SideEffect at a probed place: one more recomposition of it. */
+    private val rootInvalidations = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    /** The window's root recompose scope, for [dumpRootReads]. */
+    @Volatile var rootScope: Any? = null
+
+    /** Every state the root scope reads: what can recompose the whole window. */
+    fun dumpRootReads(label: String) {
+        val scope = rootScope ?: return
+        runCatching {
+            val field = scope.javaClass.getDeclaredField("trackedInstances").apply { isAccessible = true }
+            val map = field.get(scope) ?: return
+            val keysField = map.javaClass.superclass.getDeclaredField("keys").apply { isAccessible = true }
+            val keys = keysField.get(map) as Array<*>
+            keys.filterNotNull().forEach { state ->
+                val value = runCatching { (state as? androidx.compose.runtime.State<*>)?.value }.getOrNull()
+                DesktopTrackLog.log("profile $label root reads ${System.identityHashCode(state)} ${state.javaClass.simpleName} = ${value.toString().take(80)}")
+            }
+        }.onFailure { DesktopTrackLog.log("profile $label root reads unavailable: $it") }
+    }
+
     fun count(where: String) {
         if (counting) probes.merge(where, 1, Int::plus)
         // BITCHORD_PROFILE_ROOT_CAUSE=1: what changed just before the window's root recomposed.
@@ -263,6 +290,18 @@ internal object DesktopFrameProfiler {
             }
             phases.clear()
             notingPhases = true
+            // BITCHORD_PROFILE_WRITES=1: who writes a Boolean state through the measure.
+            val writers = java.util.concurrent.ConcurrentHashMap<String, Int>()
+            val writeHandle = if (System.getenv("BITCHORD_PROFILE_WRITES") == "1") {
+                androidx.compose.runtime.snapshots.Snapshot.registerGlobalWriteObserver { state ->
+                    if (state is androidx.compose.runtime.State<*>) {
+                        val where = Thread.currentThread().stackTrace
+                            .filter { it.className.startsWith("com.music") && !it.className.contains("FrameProfiler") }
+                            .take(3).joinToString(" < ") { "${it.fileName}:${it.lineNumber}" }
+                        writers.merge("${System.identityHashCode(state)} ${state.javaClass.simpleName} $where", 1, Int::plus)
+                    }
+                }
+            } else null
             val timer = launch {
                 var last = withFrameNanos { it }
                 var lastWall = System.nanoTime()
@@ -284,6 +323,8 @@ internal object DesktopFrameProfiler {
             if (NATIVE) DesktopNativeSampler.around(label) { action() } else action()
             timer.cancel()
             notingPhases = false
+            writeHandle?.dispose()
+            writers.entries.sortedByDescending { it.value }.take(400).forEach { (k, v) -> DesktopTrackLog.log("profile $label state written x$v at $k") }
             val all = phases.toList()
             longFrames.forEach { (from, to) ->
                 val around = all.filter { it.second in (from - 3_000_000L)..(to + 1_000_000L) }
@@ -327,6 +368,8 @@ internal object DesktopFrameProfiler {
         }
         counting = false
         if (ROOT_CAUSE) dumpRootCauses(label)
+        rootInvalidations.entries.sortedByDescending { it.value }.take(20).forEach { (k, v) -> DesktopTrackLog.log("profile $label root invalidated x$v by $k") }
+        rootInvalidations.clear()
         if (probes.isNotEmpty()) DesktopTrackLog.log("profile $label probes " + probes.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
         probes.clear()
         invalidations.entries.sortedByDescending { it.value }.take(25).forEach { (what, count) ->
@@ -352,6 +395,6 @@ internal object DesktopFrameProfiler {
         DesktopTrackLog.log("profile %-14s draw %s | frame-cpu %s | gpu+present %s".format(label, summary(drawTimes.toList()), summary(cpuTimes.toList()), summary(presentTimes.toList())))
         if (stalls.isNotEmpty()) DesktopTrackLog.log("profile $label stalls " + stalls.joinToString(" "))
         DesktopShaderCache.counts()?.let { (hit, miss) -> DesktopTrackLog.log("profile $label shaders so far: $hit from disk, $miss compiled") }
-        DesktopTrackLog.log("profile $label prefetched so far: ${DesktopPrefetch.built}")
+        DesktopTrackLog.log("profile $label cards composed so far: ${com.music.bitchord.ui.screens.HomeDiagnostics.cardsComposed}; prefetched so far: ${DesktopPrefetch.built} of ${DesktopPrefetch.scheduled} asked; refused moving ${DesktopPrefetch.refusedMoving}, still ${DesktopPrefetch.refusedStill}; %.0f ms building".format(DesktopPrefetch.busyNanos / 1e6))
     }
 }

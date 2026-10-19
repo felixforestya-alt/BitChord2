@@ -112,7 +112,11 @@ internal object DesktopFramePacing {
                 from
             }
             val due = minOf(next, maxOf(start, last + period + period / 16))
-            if (due - start > MIN_WAIT_NANOS) Win.sleepFor(due - start)
+            // The wait is the frame's spare time: what the lists want built ahead is built in it,
+            // up to a little before the refresh, and the rest of it slept.
+            if (due - start > PREFETCH_MIN_NANOS) DesktopPrefetch.workUntil(due - PREFETCH_MARGIN_NANOS)
+            val now = System.nanoTime()
+            if (due - now > MIN_WAIT_NANOS) Win.sleepFor(due - now)
             val woke = System.nanoTime()
             // The frame is timed as of the refresh it was started on, not as of when the timer
             // got round to waking it, a fraction of a millisecond either way: everything that
@@ -435,6 +439,9 @@ internal object DesktopFramePacing {
     private const val PHASE_FRESH_NANOS = 200_000_000L
     /** Shorter than this, not worth a wait. */
     private const val MIN_WAIT_NANOS = 150_000L
+    /** Spare time worth building in, and how long before the refresh building stops. */
+    private const val PREFETCH_MIN_NANOS = 1_000_000L
+    private const val PREFETCH_MARGIN_NANOS = 400_000L
     /** BITCHORD_PACE_DIVISOR, for measuring: a frame every so many refreshes, whatever else runs. */
     private val FORCED_DIVISOR = System.getenv("BITCHORD_PACE_DIVISOR")?.toLongOrNull()?.takeIf { it in 1..4 }
     private const val CHECK_MS = 2_000

@@ -401,6 +401,19 @@ internal fun desktopSwitchColors() = SwitchDefaults.colors(
 )
 internal val DesktopSecondary = Color(0xFF8E8E93)
 internal val DesktopDivider = Color(0xFF2C2C2E)
+/**
+ * The playback state as the window's root reads it: without what moves on its own — the playhead,
+ * Automix's progress, whether a seek's audio has arrived — which those who show it read directly.
+ */
+private fun rootShape(state: DesktopPlaybackState) = state.copy(
+    positionMs = 0L,
+    positionSampledAtNanos = 0L,
+    awaitingAudio = false,
+    mixing = false,
+    transitionWindow = null,
+    smartAnalysis = com.music.bitchord.data.settings.SmartAnalysis(),
+)
+
 private const val STATS_SAMPLE_MS = 5_000L
 
 /** How often the playhead is offered to the history tracker. */
@@ -2161,12 +2174,22 @@ fun BitChordDesktopApp() {
     // many times a second, and read here it recomposed the whole window with it — the sidebar,
     // the top bar, the page under the player and the player itself, a dozen times a second for
     // nothing. What draws the position reads it where it draws it (see PlaybackPosition).
+    // Nor what Automix reports as it goes: its analysis moves on several times a second while a
+    // track is worked through, and read here, each step recomposed the whole window — the disc
+    // and the page under it caught on every one. It goes to the player's settings directly below.
     val playbackShape = remember(playbackEngine) {
         playbackEngine.state
-            .map { it.copy(positionMs = 0L, positionSampledAtNanos = 0L) }
+            .map(::rootShape)
             .distinctUntilChanged()
     }
-    val playback by playbackShape.collectAsState(playbackEngine.state.value.copy(positionMs = 0L, positionSampledAtNanos = 0L))
+    val playback by playbackShape.collectAsState(rootShape(playbackEngine.state.value))
+    LaunchedEffect(playbackEngine) {
+        playbackEngine.state.collect {
+            DesktopPlayerSettings.smartAnalysis.value = it.smartAnalysis
+            DesktopPlayerSettings.smartMixInProgress.value = it.mixing
+            DesktopPlayerSettings.smartTransitionWindow.value = it.transitionWindow
+        }
+    }
 
     // The shared player reads the playhead off this one object, and only where it
     // draws it — see PlaybackPosition — so a tick never recomposes the player.
@@ -3533,9 +3556,6 @@ fun BitChordDesktopApp() {
         DesktopPlayerSettings.syncedLyrics.value = syncedLyrics
         DesktopPlayerSettings.showNerdStats.value = showNerdStats
         DesktopPlayerSettings.smartFadeEnabled.value = automix
-        DesktopPlayerSettings.smartAnalysis.value = playback.smartAnalysis
-        DesktopPlayerSettings.smartMixInProgress.value = playback.mixing
-        DesktopPlayerSettings.smartTransitionWindow.value = playback.transitionWindow
         DesktopPlayerSettings.lyricsSourceOrder.value =
             DesktopLyricsClient.enabledSources(lyricsOrder, lyricsOn).mapNotNull(::lyricsSourceNamed)
         DesktopPlayerHost.volumeLevel.value = volume
@@ -3983,6 +4003,17 @@ fun BitChordDesktopApp() {
             DesktopTrackLog.log("profile off=$off song=${selectedSong?.title} placement=${nowPlayingPlacement}")
             homeListState.scrollToItem(0)
             kotlinx.coroutines.delay(1_500)
+            // BITCHORD_PROFILE_HOME_SCROLL=1: Home scrolled steadily up and down, and nothing else.
+            if (System.getenv("BITCHORD_PROFILE_HOME_SCROLL") == "1") {
+                DesktopFrameProfiler.measure("home-scroll", hz) {
+                    repeat(4) {
+                        homeListState.animateScrollBy(2_400f, tween(1_000, easing = androidx.compose.animation.core.LinearEasing))
+                        homeListState.animateScrollBy(-2_400f, tween(1_000, easing = androidx.compose.animation.core.LinearEasing))
+                    }
+                }
+                DesktopTrackLog.log("profile done")
+                return@LaunchedEffect
+            }
             DesktopFrameProfiler.measure("home-still", hz) { kotlinx.coroutines.delay(2_000) }
             DesktopFrameProfiler.measure("morph-cold", hz) {
                 homeListState.animateScrollBy(900f, tween(1_200))

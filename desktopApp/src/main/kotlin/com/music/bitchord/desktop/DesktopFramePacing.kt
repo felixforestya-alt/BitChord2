@@ -11,8 +11,7 @@ import org.jetbrains.skiko.SkiaLayer
 import org.jetbrains.skiko.SkikoRenderDelegate
 
 /**
- * Frames started on the monitor's vertical blank, with a precise timer to stand in when the blanks
- * come irregularly — rather than held to Direct3D's vsync.
+ * Frames started in step with the monitor's refresh — rather than held to Direct3D's vsync.
  *
  * Skia presents each frame with a sync interval of one and waits for its buffer back. Alone on
  * the GPU that holds the screen's rate; with a game running — in front, behind, or minimised —
@@ -20,15 +19,19 @@ import org.jetbrains.skiko.SkikoRenderDelegate
  * frames a second while drawing one took four milliseconds of the six it had. Measured with
  * Deadlock open: 78 fps with Skia's vsync; 233–258 drawn with none.
  *
- * So Skia presents without waiting, and each frame waits at its start:
- *  - for the monitor's next vertical blank, asked of the driver. A frame started there is on
- *    screen at the blank after, every time: the motion is as even as the display. A timer alone
- *    keeps the count but not the phase — frames drifting across the blanks land two in one
- *    refresh and none in the next, which looks like a lower rate than it is.
- *  - but no longer than a refresh after the last frame, on a high-resolution waitable timer. With
- *    G-SYNC the monitor refreshes when a game presents, and in a match its blanks came 127 a
- *    second with gaps of 20 ms: frames waiting on them alone ran at 83.
- * And never sooner than three quarters of a refresh after the last, so two never share one.
+ * So Skia presents without waiting, and each frame waits at its start, on a high-resolution
+ * waitable timer, for the monitor's next refresh: when the last vertical blank seen fell, plus
+ * as many refresh periods as reach past the frame before. A frame started there is on screen at
+ * the refresh after, every time, so the motion is as even as the display; a timer at the right
+ * rate but not in step keeps the count and not the phase — frames drifting across the refreshes
+ * land two in one and none in the next, which looks like a lower rate than it is.
+ *
+ * The blanks are followed on a thread of their own, only for their phase: it sees one in two of
+ * them (the driver's wait comes back too late for the next), which is phase enough, and frames
+ * waiting on the blanks themselves came in step only half the time. Never sooner than three
+ * quarters of a refresh after the last frame, so two never share one, and never later than a
+ * refresh after it: under G-SYNC the monitor refreshes when a game presents, and its blanks in a
+ * match came 127 a second with gaps of 20 ms.
  *
  * A frame is still only drawn when something on screen changes; nothing here asks for frames, so
  * an idle window stays idle, and the thread following the blanks sleeps.
@@ -45,7 +48,7 @@ internal object DesktopFramePacing {
         if (System.getProperty("skiko.vsync.enabled") != null) return
         if (System.getProperty("skiko.renderApi") != DesktopGraphicsApi.DIRECT3D.skikoName) return
         // Only with a timer precise enough; otherwise Skia keeps its own vsync.
-        if (Win.timer == null || Win.blankEvent == null) return
+        if (Win.timer == null) return
         System.setProperty("skiko.vsync.enabled", "false")
         active = true
     }
@@ -64,7 +67,7 @@ internal object DesktopFramePacing {
         val inner = layer.renderDelegate ?: return
         if (inner is Paced) return
         layer.renderDelegate = Paced(inner, window)
-        DesktopTrackLog.log("frames: started on the vertical blank, a precise timer standing in")
+        DesktopTrackLog.log("frames: started in step with the monitor's refresh")
     }
 
     private fun findLayer(container: Container): SkiaLayer? {
@@ -88,42 +91,46 @@ internal object DesktopFramePacing {
                 periodCheckedAt = start
                 Blanks.follow(window)
             }
-            Blanks.wanted()
+            Blanks.wanted(period)
             last = waitForTurn(start)
             inner.onRender(canvas, width, height, last)
         }
 
-        /** Until a blank comes after the last frame's start, or a refresh has passed; returns the time. */
+        /** Until the monitor's next refresh after the last frame; returns the time it is. */
         private fun waitForTurn(start: Long): Long {
-            val earliest = last + period * 3 / 4
-            val deadline = last + period + period / 16
-            var timerSetFor = 0L
-            var now = start
-            while (true) {
-                val blank = Blanks.lastAt
-                if (blank > last && now >= earliest) return now
-                if (now >= deadline) return now
-                // A blank before the earliest a frame may start: wait out the rest on the timer.
-                val until = if (blank > last) earliest else deadline
-                if (until != timerSetFor) {
-                    Win.setTimer(until - now)
-                    timerSetFor = until
-                }
-                Win.waitForBlankOrTimer()
-                now = System.nanoTime()
+            val blank = Blanks.phase
+            val from = maxOf(start, last + period * 3 / 4)
+            val next = if (blank != 0L && from - blank < PHASE_FRESH_NANOS) {
+                // The blanks come every period from one known to have been.
+                blank + (from - blank + period - 1) / period * period
+            } else {
+                from
             }
+            val due = minOf(next, maxOf(start, last + period + period / 16))
+            if (due - start > MIN_WAIT_NANOS) Win.sleepFor(due - start)
+            return System.nanoTime()
         }
     }
 
     /**
      * The blanks, followed on a thread of their own: the driver's call has no timeout, and a
-     * monitor switched off could hold it indefinitely; the frame, meanwhile, never waits past its
-     * timer. Each blank sets an event the frame can wait on beside its timer. The thread follows
-     * while frames are coming, and a quarter of a second after the last it sleeps.
+     * monitor switched off could hold it indefinitely, where the frame waits only on its timer.
+     * The thread follows while frames are coming, and a quarter of a second after the last it
+     * sleeps.
      */
     private object Blanks {
-        @Volatile var lastAt = 0L
+        /**
+         * When a blank fell — to within the thread's waking, at best a fraction of a millisecond.
+         * The thread wakes late by anything up to two: each blank is taken as when it was seen,
+         * less as far into the refresh as the earliest of the last few was seen. Lateness only
+         * ever adds, so the earliest is the nearest to true.
+         */
+        @Volatile var phase = 0L
             private set
+        @Volatile private var period = 6_250_000L
+        private var anchor = 0L
+        private val offsets = LongArray(PHASE_SAMPLES)
+        private var seen = 0
         private val lock = Object()
         @Volatile private var askedAt = 0L
         @Volatile private var output: Output? = null
@@ -133,7 +140,8 @@ internal object DesktopFramePacing {
             Thread(::run, "BitChord-VBlank").apply { isDaemon = true; start() }
         }
 
-        fun wanted() {
+        fun wanted(period: Long) {
+            this.period = period
             val now = System.nanoTime()
             val idle = now - askedAt > FOLLOW_NANOS
             askedAt = now
@@ -146,7 +154,13 @@ internal object DesktopFramePacing {
             val now = runCatching { Win.monitorFromWindow.invokePointer(arrayOf(hwnd, MONITOR_DEFAULTTONEAREST)) }.getOrNull() ?: return
             if (now == monitor && output != null) return
             monitor = now
-            val opened = runCatching { Output.open(now) }.getOrNull() ?: return
+            val attempt = runCatching { Output.open(now) }
+            val opened = attempt.getOrNull()
+            if (opened == null) {
+                DesktopTrackLog.log("frames: no vertical blank for this monitor (${attempt.exceptionOrNull()?.message ?: "the driver said no"}); the timer alone paces them")
+                return
+            }
+            DesktopTrackLog.log("frames: following this monitor's vertical blank")
             output?.let { old -> output = opened; old.close() } ?: run { output = opened }
         }
 
@@ -161,12 +175,34 @@ internal object DesktopFramePacing {
                     Thread.sleep(50)
                     continue
                 }
-                lastAt = System.nanoTime()
-                Win.signalBlank()
+                note(System.nanoTime())
+                count++
             }
         }
 
+        private fun note(at: Long) {
+            val p = period
+            // The anchor half a refresh ahead of the first blank seen, so lateness never carries
+            // an offset round past the end of the refresh; set again should it drift toward one.
+            if (anchor == 0L) anchor = at - p / 2
+            offsets[seen % PHASE_SAMPLES] = Math.floorMod(at - anchor, p)
+            seen++
+            var earliest = Long.MAX_VALUE
+            for (i in 0 until minOf(seen, PHASE_SAMPLES)) earliest = minOf(earliest, offsets[i])
+            val blank = at - Math.floorMod(at - anchor - earliest, p)
+            phase = blank
+            if (earliest < p / 4 || earliest > p * 3 / 4) {
+                anchor = blank - p / 2
+                seen = 0
+            }
+        }
+
+        /** Blanks seen so far, for measuring. */
+        @Volatile var count = 0L
+            private set
+
         private const val FOLLOW_NANOS = 250_000_000L
+        private const val PHASE_SAMPLES = 24
     }
 
     /**
@@ -237,8 +273,7 @@ internal object DesktopFramePacing {
         val waitForVerticalBlank = gdi32.getFunction("D3DKMTWaitForVerticalBlankEvent")
         val closeAdapter = gdi32.getFunction("D3DKMTCloseAdapter")
         private val setWaitableTimer = kernel32.getFunction("SetWaitableTimer")
-        private val setEvent = kernel32.getFunction("SetEvent")
-        private val waitForMultiple = kernel32.getFunction("WaitForMultipleObjects")
+        private val waitForSingle = kernel32.getFunction("WaitForSingleObject")
 
         /** High resolution: waits to well under a millisecond without spinning. Used by the UI thread alone. */
         val timer: Pointer? = runCatching {
@@ -246,29 +281,14 @@ internal object DesktopFramePacing {
                 .invokePointer(arrayOf<Any?>(null, null, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS))
         }.getOrNull()
 
-        /** Auto-reset, set at each blank. */
-        val blankEvent: Pointer? = runCatching {
-            kernel32.getFunction("CreateEventW").invokePointer(arrayOf<Any?>(null, 0, 0, null))
-        }.getOrNull()
-
         private val due = Memory(8)
-        private val handles = Memory(Native.POINTER_SIZE * 2L).apply {
-            setPointer(0, blankEvent)
-            setPointer(Native.POINTER_SIZE.toLong(), timer)
-        }
 
-        fun setTimer(nanos: Long) {
+        fun sleepFor(nanos: Long) {
+            val timer = timer ?: return
             // Relative times are negative, in units of 100 ns.
             due.setLong(0, -(nanos.coerceIn(1_000, 20_000_000) / 100))
-            setWaitableTimer.invokeInt(arrayOf(timer, due, 0, null, null, 0))
-        }
-
-        fun signalBlank() {
-            setEvent.invokeInt(arrayOf(blankEvent))
-        }
-
-        fun waitForBlankOrTimer() {
-            waitForMultiple.invokeInt(arrayOf(2, handles, 0, WAIT_LIMIT_MS))
+            if (setWaitableTimer.invokeInt(arrayOf(timer, due, 0, null, null, 0)) == 0) return
+            waitForSingle.invokeInt(arrayOf(timer, WAIT_LIMIT_MS))
         }
     }
 
@@ -278,5 +298,9 @@ internal object DesktopFramePacing {
     private const val WAIT_LIMIT_MS = 50
     private const val TIMING_INFO_SIZE = 292
     private const val PERIOD_CHECK_NANOS = 2_000_000_000L
+    /** How long the last blank seen still gives the phase. */
+    private const val PHASE_FRESH_NANOS = 200_000_000L
+    /** Shorter than this, not worth a wait. */
+    private const val MIN_WAIT_NANOS = 150_000L
     private const val CHECK_MS = 2_000
 }

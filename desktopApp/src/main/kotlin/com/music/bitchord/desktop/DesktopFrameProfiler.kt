@@ -53,11 +53,13 @@ internal object DesktopFrameProfiler {
                 { r -> Thread(r, "skiko-dispatcher-to-block-on").apply { isDaemon = true } },
             ) {
                 override fun beforeExecute(t: Thread?, r: Runnable?) {
+                    note('D')
                     DesktopSchedulingBoost.boostDrawingThread()
                     if (NATIVE) DesktopNativeSampler.noteRenderThread()
                     started.set(System.nanoTime())
                 }
                 override fun afterExecute(r: Runnable?, t: Throwable?) {
+                    note('d')
                     started.get()?.let {
                         val now = System.nanoTime()
                         val d = now - it
@@ -141,6 +143,30 @@ internal object DesktopFrameProfiler {
     /** Called from a SideEffect at a probed place: one more recomposition of it. */
     fun count(where: String) {
         if (counting) probes.merge(where, 1, Int::plus)
+        // BITCHORD_PROFILE_ROOT_CAUSE=1: what changed just before the window's root recomposed.
+        if (counting && where == "root" && ROOT_CAUSE) {
+            val now = System.nanoTime()
+            val recent = rootChanges.filter { now - it.first < 40_000_000L }.map { it.second }.distinct().take(12)
+            rootCauses.merge(recent.joinToString(" | "), 1, Int::plus)
+        }
+    }
+
+    private val ROOT_CAUSE = enabled && System.getenv("BITCHORD_PROFILE_ROOT_CAUSE") == "1"
+    private val rootChanges = java.util.concurrent.ConcurrentLinkedDeque<Pair<Long, String>>()
+    private val rootCauses = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    init {
+        if (ROOT_CAUSE) androidx.compose.runtime.snapshots.Snapshot.registerApplyObserver { changed, _ ->
+            val at = System.nanoTime()
+            changed.forEach { state ->
+                val text = runCatching { state.toString() }.getOrDefault("?").replace('\n', ' ').take(140)
+                rootChanges.addLast(at to text)
+            }
+            while (rootChanges.size > 400) rootChanges.pollFirst()
+        }
+    }
+    fun dumpRootCauses(label: String) {
+        rootCauses.entries.sortedByDescending { it.value }.take(12).forEach { (k, v) -> DesktopTrackLog.log("profile $label root x$v after: $k") }
+        rootCauses.clear()
     }
 
     /** Logs [what] with the time on the same clock as the stalls. */
@@ -149,6 +175,11 @@ internal object DesktopFrameProfiler {
     }
 
     /** When the current frame's callbacks started, and the draw passes measured since. */
+    /** Frame phases with their times, while measuring: F frame starts, D drawing starts, d drawing ends. */
+    private val phases = java.util.concurrent.ConcurrentLinkedQueue<Pair<Char, Long>>()
+    @Volatile private var notingPhases = false
+    fun note(phase: Char) { if (notingPhases) phases += phase to System.nanoTime() }
+
     @Volatile private var frameStart = 0L
     @Volatile private var lastCpu = 0L
     @Volatile private var lastPresent = 0L
@@ -213,6 +244,9 @@ internal object DesktopFrameProfiler {
                     applied += at to text.take(110)
                 }
             } else null
+            // And the drawing thread's, through the same frames.
+            val drawer = if (EDT) Thread.getAllStackTraces().keys.firstOrNull { it.name.startsWith("skiko-dispatcher-to-block-on") } else null
+            val drawSamples = java.util.concurrent.ConcurrentLinkedQueue<Pair<Long, List<String>>>()
             val sampler = edt?.let { thread ->
                 Thread({
                     while (sampling.get()) {
@@ -220,16 +254,22 @@ internal object DesktopFrameProfiler {
                         if (stack.isNotEmpty()) {
                             edtSamples += System.nanoTime() to stack.take(60).map { "${it.className.substringAfterLast('.')}.${it.methodName}" }
                         }
+                        drawer?.stackTrace?.takeIf { it.isNotEmpty() }?.let { s ->
+                            drawSamples += System.nanoTime() to s.take(12).map { "${it.className.substringAfterLast('.')}.${it.methodName}" }
+                        }
                         Thread.sleep(1)
                     }
                 }, "bitchord-edt-sampler").apply { isDaemon = true; start() }
             }
+            phases.clear()
+            notingPhases = true
             val timer = launch {
                 var last = withFrameNanos { it }
                 var lastWall = System.nanoTime()
                 while (true) {
                     withFrameNanos { now ->
                         frameStart = System.nanoTime()
+                        note('F')
                         val gap = now - last
                         gaps += gap
                         if (gap > budgetNanos * 3 / 2 && stalls.size < 40) {
@@ -243,6 +283,12 @@ internal object DesktopFrameProfiler {
             }
             if (NATIVE) DesktopNativeSampler.around(label) { action() } else action()
             timer.cancel()
+            notingPhases = false
+            val all = phases.toList()
+            longFrames.forEach { (from, to) ->
+                val around = all.filter { it.second in (from - 3_000_000L)..(to + 1_000_000L) }
+                DesktopTrackLog.log("profile $label phases %.1fms: ".format((to - from) / 1e6) + around.joinToString(" ") { "${it.first}%+.1f".format((it.second - from) / 1e6) })
+            }
             sampling.set(false)
             sampler?.join(100)
             applyHandle?.dispose()
@@ -250,6 +296,11 @@ internal object DesktopFrameProfiler {
             // code that the samples share, most first.
             longFrames.forEach { (from, to) ->
                 val inside = edtSamples.filter { it.first in from..to }
+                val drawing = drawSamples.filter { it.first in from..to }
+                if (drawing.isNotEmpty()) {
+                    val drawTop = drawing.groupingBy { it.second.take(4).joinToString(" < ") }.eachCount().entries.sortedByDescending { it.value }.take(4)
+                    DesktopTrackLog.log("profile $label drawing %.1fms: ".format((to - from) / 1e6) + drawTop.joinToString(" ; ") { "${it.value}x ${it.key}" })
+                }
                 if (inside.isEmpty()) return@forEach
                 val counts = HashMap<String, Int>()
                 inside.forEach { (_, stack) ->
@@ -275,6 +326,7 @@ internal object DesktopFrameProfiler {
             }
         }
         counting = false
+        if (ROOT_CAUSE) dumpRootCauses(label)
         if (probes.isNotEmpty()) DesktopTrackLog.log("profile $label probes " + probes.entries.sortedByDescending { it.value }.joinToString { "${it.key}=${it.value}" })
         probes.clear()
         invalidations.entries.sortedByDescending { it.value }.take(25).forEach { (what, count) ->

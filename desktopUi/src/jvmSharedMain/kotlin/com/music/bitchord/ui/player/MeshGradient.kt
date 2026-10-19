@@ -125,9 +125,8 @@ fun MeshGradientBackground(
     // Held as states and read only while drawing: a fade then redraws the mesh alone, where read
     // here it recomposed all of this on every frame of it.
     //
-    // The fade is stepped on the shared ambient beat (see AppActivity) rather than animated per
-    // colour: five colour animations asked for every frame the display has, for as long as a
-    // palette that changes on a timer kept fading — on a fast monitor, most of what it drew.
+    // One fade for all five colours, stepped in the frame's callback and stopped while nobody can
+    // see the window (see AppActivity) — rather than five animations of their own.
     val targets = tuned + tuned.first().dimmed()
     val snapColors = reduceAnimation || !animated
     val fadeFrom = remember { mutableStateOf(targets) }
@@ -184,7 +183,7 @@ fun MeshGradientBackground(
             // Stepped by hand at the ambient rate rather than animated, which would ask for
             // every frame the display has.
             continuous -> {
-                var last = System.nanoTime()
+                var last = androidx.compose.runtime.withFrameNanos { it }
                 while (isActive) {
                     com.music.bitchord.ui.awaitAmbientFrame { now ->
                         val turn = (now - last) / 1_000_000f / (driftMillis * 4) * (2 * PI).toFloat()

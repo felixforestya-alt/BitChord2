@@ -368,7 +368,7 @@ internal fun rememberFrameClock(running: Boolean): androidx.compose.runtime.Muta
     val quiet = com.music.bitchord.ui.AppActivity.quiet
     LaunchedEffect(running, quiet) {
         if (!running || quiet) return@LaunchedEffect
-        var last = System.nanoTime()
+        var last = withFrameNanos { it }
         while (true) {
             com.music.bitchord.ui.awaitAmbientFrame { now ->
                 clock.floatValue += (now - last) / 1_000_000_000f

@@ -277,7 +277,7 @@ private fun DiscPlayerLayout(
     val quiet = com.music.bitchord.ui.AppActivity.quiet
     LaunchedEffect(reduceAnimation, sheetShown, quiet) {
         if (!sheetShown || quiet) return@LaunchedEffect
-        var last = System.nanoTime()
+        var last = withFrameNanos { it }
         var velocity = 0f
         while (true) {
             com.music.bitchord.ui.awaitAmbientFrame { now ->

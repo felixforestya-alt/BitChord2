@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.automirrored.rounded.Undo
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ArrowBack
@@ -194,6 +195,8 @@ internal fun DesktopSongMenuFor(
      */
     lyricsOffsetMs: Int = 0,
     onSetLyricsOffset: ((Int) -> Unit)? = null,
+    /** Takes the track out of the playlist it was opened from; null where that is not ours to edit. */
+    onRemoveFromList: (() -> Unit)? = null,
 ) {
     val close = onDismiss
     DesktopSongMenu(
@@ -239,6 +242,7 @@ internal fun DesktopSongMenuFor(
         onSearchLyrics = onSearchLyrics,
         lyricsOffsetMs = lyricsOffsetMs,
         onSetLyricsOffset = onSetLyricsOffset,
+        onRemoveFromList = onRemoveFromList?.let { { it(); close() } },
         onDismiss = close,
     )
 }
@@ -288,6 +292,7 @@ internal fun DesktopSongMenu(
     /** The player's lyrics offset and its setter; a null setter hides the "Lyrics offset" row. */
     lyricsOffsetMs: Int = 0,
     onSetLyricsOffset: ((Int) -> Unit)? = null,
+    onRemoveFromList: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     var pickingSleepTimer by remember { mutableStateOf(false) }
@@ -370,7 +375,7 @@ internal fun DesktopSongMenu(
         (onRevertToOriginal ?: onUpgradeQuality)?.let { action ->
             DesktopMenuRow(
                 icon = if (onRevertToOriginal != null) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.HighQuality,
-                label = if (onRevertToOriginal != null) "Revert to original" else "Upgrade quality",
+                label = if (onRevertToOriginal != null) DesktopStrings["d_revert_original", "Revert to original"] else DesktopStrings["d_upgrade_quality", "Upgrade quality"],
                 onClick = action,
             )
             DesktopMenuDivider()
@@ -379,19 +384,27 @@ internal fun DesktopSongMenu(
         if (signedIn && !isOffline) {
             DesktopMenuRow(
                 icon = if (liked) BitChordIcons.HeartFilled else BitChordIcons.Heart,
-                label = if (liked) "Remove from liked" else "Like",
+                label = if (liked) DesktopStrings["d_remove_from_liked", "Remove from liked"] else DesktopStrings["d_like", "Like"],
                 tint = if (liked) DesktopAccent else null,
                 onClick = onToggleLike,
             )
             DesktopMenuRow(
                 icon = if (disliked) Icons.Rounded.ThumbDown else Icons.Rounded.ThumbDownOffAlt,
-                label = if (disliked) "Undo dislike" else "Dislike",
+                label = if (disliked) DesktopStrings["d_undo_dislike", "Undo dislike"] else DesktopStrings["d_dislike", "Dislike"],
                 tint = if (disliked) DesktopAccent else null,
                 onClick = onToggleDislike,
             )
         }
         if (!isOffline) {
             DesktopMenuRow(Icons.AutoMirrored.Rounded.PlaylistAdd, DesktopStrings["add_to_playlist", "Add to playlist"], onClick = onAddToPlaylist)
+            onRemoveFromList?.let { remove ->
+                DesktopMenuRow(
+                    Icons.Rounded.RemoveCircleOutline,
+                    DesktopStrings["d_remove_from_playlist", "Remove from playlist"],
+                    tint = MaterialTheme.colorScheme.error,
+                    onClick = remove,
+                )
+            }
         }
         if (signedIn || !isOffline) DesktopMenuDivider()
 

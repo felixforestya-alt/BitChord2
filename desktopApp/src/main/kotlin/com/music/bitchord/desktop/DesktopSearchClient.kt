@@ -112,6 +112,13 @@ object DesktopSearchClient {
 
     suspend fun deletePlaylist(playlistId: String): Result<Unit> = YtMusicRepository.deletePlaylist(playlistId)
 
+    suspend fun editPlaylistDetails(
+        playlistId: String,
+        title: String?,
+        description: String?,
+        privacy: PlaylistPrivacy?,
+    ): Result<Unit> = YtMusicRepository.editPlaylistDetails(playlistId, title, description, privacy)
+
     suspend fun renamePlaylist(playlistId: String, title: String): Result<Unit> =
         YtMusicRepository.renamePlaylist(playlistId, title)
 

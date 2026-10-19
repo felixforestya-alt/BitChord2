@@ -28,11 +28,14 @@ data class DesktopRankedEntry(
 )
 
 /** The stretches a Replay can cover. Months and years, because that is how the listening is kept. */
-enum class DesktopReplayPeriod(val chip: String) {
-    THIS_MONTH("This month"),
-    THIS_YEAR("This year"),
-    ALL_TIME("All time"),
+enum class DesktopReplayPeriod(val chip: String, private val key: String) {
+    THIS_MONTH("This month", "d_replay_this_month"),
+    THIS_YEAR("This year", "d_replay_this_year"),
+    ALL_TIME("All time", "d_replay_all_time"),
     ;
+
+    /** [chip] in the app's language. */
+    val title: String get() = DesktopStrings[key, chip]
 
     fun covers(month: String, today: LocalDate): Boolean = when (this) {
         // Anything migrated from the store that predates monthly buckets.
@@ -193,9 +196,10 @@ object DesktopListeningStats {
 
     private fun labelFor(period: DesktopReplayPeriod, today: LocalDate): String = when (period) {
         DesktopReplayPeriod.THIS_MONTH ->
-            today.month.name.lowercase(Locale.ROOT).replaceFirstChar(Char::uppercase)
+            today.month.getDisplayName(java.time.format.TextStyle.FULL_STANDALONE, replayLocale())
+                .replaceFirstChar(Char::uppercase)
         DesktopReplayPeriod.THIS_YEAR -> today.year.toString()
-        DesktopReplayPeriod.ALL_TIME -> "All time"
+        DesktopReplayPeriod.ALL_TIME -> period.title
     }
 
     internal fun mergeSong(old: Song?, current: Song): Song = old?.copy(
@@ -345,3 +349,6 @@ object DesktopListeningStats {
     private const val KEY_BUCKETS = "buckets"
     private const val KEY_ENTRIES = "entries"
 }
+
+/** The app's chosen language as a locale, for the names of months and days. */
+internal fun replayLocale(): Locale = Locale.forLanguageTag(DesktopStrings.resolvedTag().ifBlank { "en" })

@@ -414,7 +414,7 @@ internal fun DesktopSignInDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    Text("Sign in with Google", color = Color.White)
+                                    Text(DesktopStrings["d_sign_in_google", "Sign in with Google"], color = Color.White)
                                     Text(
                                         if (busy == WEB_SIGN_IN) {
                                             "Finish in the sign-in window, then choose \"Use this profile\""

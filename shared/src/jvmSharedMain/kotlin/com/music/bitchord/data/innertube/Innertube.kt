@@ -1085,6 +1085,39 @@ object Innertube {
         }
     }
 
+    /**
+     * Changes any of a playlist's name, description and who can see it, in one edit; a null
+     * leaves that part as it is.
+     */
+    suspend fun editPlaylistDetails(
+        playlistId: String,
+        title: String?,
+        description: String?,
+        privacy: PlaylistPrivacy?,
+    ) {
+        if (title == null && description == null && privacy == null) return
+        editPlaylist(playlistId) {
+            title?.let {
+                addJsonObject {
+                    put("action", "ACTION_SET_PLAYLIST_NAME")
+                    put("playlistName", it)
+                }
+            }
+            description?.let {
+                addJsonObject {
+                    put("action", "ACTION_SET_PLAYLIST_DESCRIPTION")
+                    put("playlistDescription", it)
+                }
+            }
+            privacy?.let {
+                addJsonObject {
+                    put("action", "ACTION_SET_PLAYLIST_PRIVACY")
+                    put("playlistPrivacy", it.apiValue)
+                }
+            }
+        }
+    }
+
     suspend fun renamePlaylist(playlistId: String, title: String) {
         editPlaylist(playlistId) {
             addJsonObject {

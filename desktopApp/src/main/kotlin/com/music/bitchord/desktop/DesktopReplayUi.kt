@@ -97,7 +97,7 @@ internal fun DesktopReplayPage(
                             color = Color.White,
                         )
                         Text(
-                            summary.label.ifBlank { period.chip },
+                            summary.label.ifBlank { period.title },
                             style = MaterialTheme.typography.titleMedium,
                             color = Color.White.copy(alpha = 0.6f),
                         )
@@ -173,7 +173,7 @@ private fun PeriodPicker(selected: DesktopReplayPeriod, onSelect: (DesktopReplay
                 label = "periodChip",
             )
             Text(
-                period.chip,
+                period.title,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.W700,
                 color = if (active) Color.Black else Color.White.copy(alpha = 0.75f),
@@ -303,17 +303,17 @@ private fun Habits(summary: DesktopReplaySummary) {
             modifier = Modifier.padding(top = 8.dp, bottom = 10.dp),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatTile("SONGS", summary.distinctSongs.toString(), Modifier.weight(1f))
-            StatTile("ARTISTS", summary.distinctArtists.toString(), Modifier.weight(1f))
-            StatTile("ALBUMS", summary.distinctAlbums.toString(), Modifier.weight(1f))
+            StatTile(DesktopStrings["d_stat_songs", "SONGS"], summary.distinctSongs.toString(), Modifier.weight(1f))
+            StatTile(DesktopStrings["d_stat_artists", "ARTISTS"], summary.distinctArtists.toString(), Modifier.weight(1f))
+            StatTile(DesktopStrings["d_stat_albums", "ALBUMS"], summary.distinctAlbums.toString(), Modifier.weight(1f))
         }
         summary.peakHour?.let {
             Spacer(Modifier.height(10.dp))
-            Note("You listen most around ${formatHour(it)}.")
+            Note(DesktopStrings["d_replay_peak_hour", "You listen most around %s."].replace("%s", formatHour(it)))
         }
         summary.busiestDay?.let {
             Spacer(Modifier.height(6.dp))
-            Note("Your biggest day was ${formatDay(it)} — ${formatListening(summary.busiestDayMs)}.")
+            Note(DesktopStrings["d_replay_busiest_day", "Your biggest day was %1\$s — %2\$s."].replace("%1\$s", formatDay(it)).replace("%2\$s", formatListening(summary.busiestDayMs)))
         }
     }
 }
@@ -374,8 +374,8 @@ private fun EmptyReplay(period: DesktopReplayPeriod) {
         Spacer(Modifier.height(8.dp))
         Text(
             when (period) {
-                DesktopReplayPeriod.THIS_MONTH -> "Nothing this month. Play some music and it will fill up."
-                else -> "Play some music and your Replay will build itself."
+                DesktopReplayPeriod.THIS_MONTH -> DesktopStrings["d_replay_empty_month", "Nothing this month. Play some music and it will fill up."]
+                else -> DesktopStrings["d_replay_empty", "Play some music and your Replay will build itself."]
             },
             style = MaterialTheme.typography.bodyMedium,
             color = Color.White.copy(alpha = 0.6f),
@@ -470,7 +470,7 @@ internal fun DesktopReplaySummary.heroCards(): List<DesktopReplayHeroCard> = bui
         DesktopReplayHeroCard(
             label = DesktopStrings["minutes_listened", "Minutes listened"],
             value = grouped(minutes),
-            detail = "${plays(totalPlays)} · ${label.ifBlank { period.chip }}",
+            detail = "${plays(totalPlays)} · ${label.ifBlank { period.title }}",
             artworkUrl = songs.firstOrNull()?.song?.thumbnailUrl,
         ),
     )
@@ -515,17 +515,33 @@ internal fun DesktopReplaySummary.memberSince(): String? = since
 
 internal fun grouped(value: Long): String = String.format(Locale.US, "%,d", value)
 
-private fun plays(count: Int): String = if (count == 1) "1 play" else "${grouped(count.toLong())} plays"
+private fun plays(count: Int): String {
+    val key = if (DesktopStrings.resolvedTag() == "ru") {
+        val mod10 = count % 10
+        val mod100 = count % 100
+        when {
+            mod10 == 1 && mod100 != 11 -> "d_plays_one"
+            mod10 in 2..4 && mod100 !in 12..14 -> "d_plays_few"
+            else -> "d_plays_many"
+        }
+    } else {
+        if (count == 1) "d_plays_one" else "d_plays_many"
+    }
+    val word = DesktopStrings[key, if (count == 1) "play" else "plays"]
+    return "${grouped(count.toLong())} $word"
+}
 
 internal fun formatListening(ms: Long): String {
     val minutes = ms / 60_000L
-    if (minutes < 60) return if (minutes == 1L) "1 min" else "$minutes mins"
+    val min = DesktopStrings["d_unit_min", "min"]
+    if (minutes < 60) return "$minutes $min"
     val hours = minutes / 60
     val rest = minutes % 60
-    return if (rest == 0L) "${grouped(hours)} hr" else "${grouped(hours)} hr $rest min"
+    val hr = DesktopStrings["d_unit_hr", "hr"]
+    return if (rest == 0L) "${grouped(hours)} $hr" else "${grouped(hours)} $hr $rest $min"
 }
 
-private fun formatHour(hour: Int): String = when (hour) {
+private fun formatHour(hour: Int): String = if (DesktopStrings.resolvedTag() != "en") "$hour:00" else when (hour) {
     0 -> "midnight"
     12 -> "midday"
     in 1..11 -> "$hour am"
@@ -533,7 +549,7 @@ private fun formatHour(hour: Int): String = when (hour) {
 }
 
 private fun formatDay(iso: String): String = runCatching {
-    LocalDate.parse(iso).format(DateTimeFormatter.ofPattern("d MMMM", Locale.getDefault()))
+    LocalDate.parse(iso).format(DateTimeFormatter.ofPattern("d MMMM", replayLocale()))
 }.getOrDefault(iso)
 
 /** How far down each chart the page goes. A top five is a result; a top ten is a list. */

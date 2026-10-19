@@ -151,15 +151,15 @@ private fun SpotifySection(spotify: DesktopSpotifyConnection) {
             DesktopCardRule()
             PanelActionRow(
                 title = DesktopStrings["spotify_disconnect", "Disconnect"],
-                subtitle = "Forgets the sp_dc cookie; Canvas stops until you sign in again",
+                subtitle = DesktopStrings["d_spotify_forget_sub", "Forgets the sp_dc cookie; Canvas stops until you sign in again"],
                 destructive = true,
                 onClick = spotify.onDisconnect,
             )
         } else if (spotify.canSignIn && !spotify.signingIn) {
             DesktopCardRule()
             PanelActionRow(
-                title = "Paste a cookie instead",
-                subtitle = "Copy sp_dc from open.spotify.com yourself",
+                title = DesktopStrings["d_spotify_paste", "Paste a cookie instead"],
+                subtitle = DesktopStrings["d_spotify_paste_sub", "Copy sp_dc from open.spotify.com yourself"],
                 destructive = false,
                 onClick = spotify.onPasteCookie,
             )

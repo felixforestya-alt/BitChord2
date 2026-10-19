@@ -647,10 +647,15 @@ fun RowMoreButton(
     modifier: Modifier = Modifier,
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     iconSize: Dp = 20.dp,
+    /**
+     * Whether to reach into the gutter. Not in a row that clips to its own rounded shape: there
+     * the circle under the pointer was cut off at the row's edge.
+     */
+    hang: Boolean = true,
 ) {
     Box(
         modifier = modifier
-            .hangIntoGutter(ROW_MORE_OUTSET)
+            .then(if (hang) Modifier.hangIntoGutter(ROW_MORE_OUTSET) else Modifier)
             .size(36.dp)
             .clip(CircleShape)
             .clickable(onClick = onClick),

@@ -1015,6 +1015,13 @@ object YtMusicRepository {
 
     private const val MOVE_BATCH = 50
 
+    suspend fun editPlaylistDetails(
+        playlistId: String,
+        title: String?,
+        description: String?,
+        privacy: PlaylistPrivacy?,
+    ): Result<Unit> = call("playlist:edit") { Innertube.editPlaylistDetails(playlistId, title, description, privacy) }
+
     suspend fun renamePlaylist(playlistId: String, title: String): Result<Unit> =
         call("playlist:rename") { Innertube.renamePlaylist(playlistId, title) }
 

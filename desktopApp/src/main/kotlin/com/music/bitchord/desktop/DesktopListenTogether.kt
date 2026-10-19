@@ -276,7 +276,7 @@ internal object DesktopListenTogether {
     suspend fun joinParty(code: String, nickname: String = nickname()): Result<String> {
         val trimmed = cleanCode(code)
         if (trimmed.length != CODE_LENGTH) {
-            return Result.failure(PartyException("bad_code", "A party code is six letters or digits."))
+            return Result.failure(PartyException("bad_code", DesktopStrings["lt_bad_code", "A party code is six letters or digits."]))
         }
         return runCatching { refuseIfRecentlyKicked(trimmed) }.fold(
             onSuccess = {
@@ -689,7 +689,7 @@ internal object DesktopListenTogether {
         val cleaned = cleanCode(code)
         if (cleaned.length != CODE_LENGTH) {
             return@withContext Result.failure(
-                PartyException("bad_code", "A party code is six letters or digits."),
+                PartyException("bad_code", DesktopStrings["lt_bad_code", "A party code is six letters or digits."]),
             )
         }
         runCatching {

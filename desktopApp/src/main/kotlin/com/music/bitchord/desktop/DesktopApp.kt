@@ -1695,7 +1695,7 @@ fun BitChordDesktopApp() {
             DesktopCollection(
                 browseId = playlist.id,
                 title = playlist.title,
-                subtitle = "Playlist • ${playlist.songs.size} songs",
+                subtitle = DesktopStrings["d_type_playlist", "Playlist"] + " • " + trackCount(playlist.songs.size),
                 thumbnailUrl = playlist.songs.firstOrNull()?.thumbnailUrl,
                 type = BrowseType.PLAYLIST,
                 songs = playlist.songs,
@@ -2902,7 +2902,7 @@ fun BitChordDesktopApp() {
         playlists.map { playlist ->
             ShelfItem(
                 title = playlist.title,
-                subtitle = "Playlist • ${playlist.songs.size} songs",
+                subtitle = DesktopStrings["d_type_playlist", "Playlist"] + " • " + trackCount(playlist.songs.size),
                 thumbnailUrl = playlist.songs.firstOrNull()?.thumbnailUrl,
                 videoId = null,
                 browseId = LOCAL_PLAYLIST_PREFIX + playlist.id,
@@ -3291,13 +3291,18 @@ fun BitChordDesktopApp() {
         loadMoreCollectionSongs()
     }
 
-    fun renameOpenPlaylist(title: String) {
+    fun renameOpenPlaylist(title: String?, description: String?, privacy: PlaylistPrivacy?) {
         val collection = openedCollection ?: return
         playlistBusy = true
         playlistError = null
         scope.launch {
-            DesktopSearchClient.renamePlaylist(collection.playlistId, title)
+            DesktopSearchClient.editPlaylistDetails(collection.playlistId, title, description, privacy)
                 .onSuccess {
+                    if (title == null) {
+                        closePlaylistDialogs()
+                        libraryStale = true
+                        return@onSuccess
+                    }
                     // Renamed in place as well as re-fetched: the page that ordered it is still on
                     // screen showing the old name, and the library reload behind it takes a moment.
                     openedCollection = openedCollection
@@ -3312,7 +3317,7 @@ fun BitChordDesktopApp() {
                 }
                 .onFailure {
                     playlistBusy = false
-                    playlistError = it.message ?: "Could not rename the playlist"
+                    playlistError = it.message ?: DesktopStrings["d_playlist_edit_failed", "Could not change the playlist"]
                 }
         }
     }
@@ -4959,7 +4964,7 @@ fun BitChordDesktopApp() {
                             current = openedCollection?.title.orEmpty(),
                             busy = playlistBusy,
                             error = playlistError,
-                            onRename = ::renameOpenPlaylist,
+                            onSave = ::renameOpenPlaylist,
                             onDismiss = ::closePlaylistDialogs,
                         )
                     }
@@ -5048,6 +5053,12 @@ fun BitChordDesktopApp() {
                             onRevertToOriginal = null,
                             onUpgradeQuality = null,
                             onDismiss = onDismiss,
+                            // On a row of a playlist of one's own, the way out of it — the row's
+                            // own (−) button, offered where the right click is.
+                            onRemoveFromList = openedCollection
+                                ?.takeIf { it.owned == true && song.setVideoId != null }
+                                ?.takeIf { page -> page.songs.any { it.setVideoId == song.setVideoId } }
+                                ?.let { { removeFromOpenPlaylist(song) } },
                         )
                     },
                 ) { openMenu ->
@@ -8696,7 +8707,7 @@ private fun DesktopSourceEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isNew) "Add a source" else config.displayName) },
+        title = { Text(if (isNew) DesktopStrings["d_add_source", "Add a source"] else config.displayName) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -8747,7 +8758,7 @@ private fun DesktopSourceEditorDialog(
                     },
                     enabled = candidate.baseUrl.isNotBlank() && !checking,
                 ) {
-                    Text(if (checking) "Checking…" else "Test")
+                    Text(if (checking) DesktopStrings["d_dns_checking", "Checking…"] else DesktopStrings["d_dns_check", "Check"])
                 }
                 TextButton(
                     onClick = { identify(thenSave = true) },
@@ -8802,25 +8813,43 @@ private fun DesktopCollectionPage(
                 song.albumName.orEmpty().contains(needle, ignoreCase = true)
         }
     }
+    // Sorted by a column of the table when its heading is clicked: once ascending, again
+    // descending, a third time back to the list's own order.
+    var sort by remember(collection.browseId) { mutableStateOf<Pair<CollectionColumn, Boolean>?>(null) }
+    val sortedSongs = remember(shownSongs, sort) {
+        val (column, ascending) = sort ?: return@remember shownSongs
+        val byColumn: Comparator<IndexedValue<Song>> = when (column) {
+            CollectionColumn.NUMBER -> compareBy { it.index }
+            CollectionColumn.TITLE -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.value.title }
+            CollectionColumn.ARTIST -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.value.artist }
+            CollectionColumn.ALBUM -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.value.albumName.orEmpty() }
+            CollectionColumn.DURATION -> compareBy { it.value.durationText.durationMillis() }
+        }
+        shownSongs.sortedWith(if (ascending) byColumn else byColumn.reversed())
+    }
     var moreOpen by remember(collection.browseId) { mutableStateOf(false) }
     val subtitleParts = collection.subtitle
         .split(" • ", " · ", " | ")
         .map(String::trim)
         .filter(String::isNotBlank)
+    val typeLabel = when (collection.type) {
+        BrowseType.ALBUM -> DesktopStrings["d_type_album", "Album"]
+        BrowseType.PLAYLIST -> DesktopStrings["d_type_playlist", "Playlist"]
+        BrowseType.ARTIST -> DesktopStrings["d_type_artist", "Artist"]
+        BrowseType.OTHER -> DesktopStrings["d_type_collection", "Collection"]
+    }
+    val typeWords = setOf(
+        "album", "single", "ep", "playlist", "artist", "collection",
+        "альбом", "сингл", "плейлист", "исполнитель", "подборка", "мини-альбом",
+        typeLabel.lowercase(),
+    )
     val credit = subtitleParts.firstOrNull {
-        it.lowercase() !in setOf("album", "single", "ep", "playlist", "artist") &&
+        it.lowercase() !in typeWords &&
             !it.matches(Regex("\\d{4}")) &&
             !it.matches(Regex("\\d{1,2}:\\d{2}(?::\\d{2})?")) &&
             !it.matches(Regex("[0-9,.]+\\s*(?:songs?|tracks?)", RegexOption.IGNORE_CASE))
     }.orEmpty()
-    val typeLabel = when (collection.type) {
-        BrowseType.ALBUM -> "Album"
-        BrowseType.PLAYLIST -> "Playlist"
-        BrowseType.ARTIST -> "Artist"
-        BrowseType.OTHER -> "Collection"
-    }
     val metadata = buildList {
-        add(typeLabel.uppercase())
         subtitleParts.firstOrNull { it.matches(Regex("\\d{4}")) }?.let(::add)
         if (songs.isNotEmpty()) add(trackCount(songs.size))
         val seconds = songs.sumOf { it.durationText.durationMillis() / 1_000L }
@@ -8937,7 +8966,7 @@ private fun DesktopCollectionPage(
                                     }
                                     if (onRename != null || onReorder != null || onShuffleOrder != null || onDelete != null) DesktopMenuDivider()
                                     onRename?.let { rename ->
-                                        DesktopMenuRow(Icons.Rounded.Edit, DesktopStrings["rename", "Rename"]) { pick(rename) }
+                                        DesktopMenuRow(Icons.Rounded.Edit, DesktopStrings["d_edit_playlist", "Edit playlist"]) { pick(rename) }
                                     }
                                     onReorder?.let { reorder ->
                                         DesktopMenuRow(Icons.Rounded.DragHandle, DesktopStrings["reorder_playlist", "Edit order"]) { pick(reorder) }
@@ -8970,7 +8999,21 @@ private fun DesktopCollectionPage(
                     )
                 }
             }
-            itemsIndexed(shownSongs, key = { _, (index, song) -> "${song.videoId}-$index" }) { position, (index, song) ->
+            item(key = "collection-columns") {
+                CollectionColumnHeadings(
+                    collectionType = collection.type,
+                    hasRemove = onRemoveFromPlaylist != null && songs.any { it.setVideoId != null },
+                    sort = sort,
+                    onSort = { column ->
+                        sort = when {
+                            sort?.first != column -> column to true
+                            sort?.second == true -> column to false
+                            else -> null
+                        }
+                    },
+                )
+            }
+            itemsIndexed(sortedSongs, key = { _, (index, song) -> "${song.videoId}-$index" }) { position, (index, song) ->
                 DesktopCollectionSongRow(
                     // Striped by place on screen, not track number, so a filtered list still
                     // alternates.
@@ -8979,7 +9022,9 @@ private fun DesktopCollectionPage(
                     isCurrent = isCurrentRow(song),
                     collectionType = collection.type,
                     liked = song.videoId in likedIds,
-                    onClick = { _ -> onPlaySongs(songs, index) },
+                    onClick = { _ ->
+                        if (sort == null) onPlaySongs(songs, index) else onPlaySongs(sortedSongs.map { it.value }, position)
+                    },
                     onToggleLike = onToggleLike,
                     onDownload = onDownload,
                     onAddToPlaylist = onAddToPlaylist,
@@ -9008,6 +9053,91 @@ private fun DesktopCollectionPage(
                 }
             }
         }
+    }
+}
+
+/** The columns of a collection's table that its headings sort by. */
+private enum class CollectionColumn { NUMBER, TITLE, ARTIST, ALBUM, DURATION }
+
+/**
+ * The headings over a collection's rows — number, title, artist, album, length — laid out to the
+ * same widths as [DesktopCollectionSongRow], each one sorting the table by its column.
+ */
+@Composable
+private fun CollectionColumnHeadings(
+    collectionType: BrowseType,
+    hasRemove: Boolean,
+    sort: Pair<CollectionColumn, Boolean>?,
+    onSort: (CollectionColumn) -> Unit,
+) {
+    @Composable
+    fun RowScope.Heading(
+        column: CollectionColumn,
+        label: String,
+        modifier: Modifier,
+        alignEnd: Boolean = false,
+    ) {
+        val active = sort?.first == column
+        val interaction = remember { MutableInteractionSource() }
+        val hovered by interaction.collectIsHoveredAsState()
+        Row(
+            modifier
+                .clip(RoundedCornerShape(6.dp))
+                .hoverable(interaction)
+                .clickable(interactionSource = interaction, indication = null) { onSort(column) }
+                .padding(vertical = 6.dp),
+            horizontalArrangement = if (alignEnd) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                label,
+                color = when {
+                    active -> Color.White
+                    hovered -> Color.White.copy(alpha = 0.85f)
+                    else -> DesktopSecondary
+                },
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                letterSpacing = 0.6.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (active) {
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    if (sort?.second == true) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                    null,
+                    tint = DesktopAccent,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Heading(CollectionColumn.NUMBER, "#", Modifier.width(28.dp))
+            Spacer(Modifier.width(12.dp))
+            if (collectionType != BrowseType.ALBUM) Spacer(Modifier.width(56.dp))
+            Heading(CollectionColumn.TITLE, DesktopStrings["d_col_title", "Title"], Modifier.weight(0.42f))
+            Heading(
+                CollectionColumn.ARTIST,
+                DesktopStrings["d_col_artist", "Artist"],
+                Modifier.weight(0.20f).padding(horizontal = 8.dp),
+            )
+            if (collectionType != BrowseType.ALBUM) {
+                Heading(
+                    CollectionColumn.ALBUM,
+                    DesktopStrings["d_col_album", "Album"],
+                    Modifier.weight(0.25f).padding(horizontal = 8.dp),
+                )
+            }
+            Heading(CollectionColumn.DURATION, DesktopStrings["d_col_time", "Time"], Modifier.width(58.dp), alignEnd = true)
+            Spacer(Modifier.width(collectionActionsWidth(hasRemove)))
+        }
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), modifier = Modifier.padding(top = 4.dp))
     }
 }
 

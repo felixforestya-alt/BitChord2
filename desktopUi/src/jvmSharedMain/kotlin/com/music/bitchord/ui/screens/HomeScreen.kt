@@ -49,6 +49,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -361,7 +364,7 @@ private fun RecentShelf(
                             item = item,
                             onClick = { onItemClick(item) },
                             onLongPress = onItemLongPress?.let { { it(item) } },
-                            modifier = Modifier.width(cardWidth),
+                            modifier = Modifier.width(playingCardWidth(cardWidth, isCurrentItem(item), PLAYING_HERO_GROWTH)),
                             isCurrent = isCurrentItem(item),
                             isPlaying = isCurrentItem(item) && isPlaying,
                         )
@@ -507,7 +510,7 @@ fun CompactTrackRow(
             )
         }
         if (onLongPress != null) {
-            RowMoreButton(onClick = onLongPress)
+            RowMoreButton(onClick = onLongPress, hang = false, modifier = Modifier.padding(end = 4.dp))
         }
     }
 }
@@ -588,9 +591,12 @@ internal fun SectionHeader(title: String, subtitle: String = "", onShowAll: (() 
                 text = stringResource(Res.string.show_all),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
+                // The highlight a rounded pill around the words, not a box hanging off their left.
                 modifier = Modifier
+                    .padding(start = 8.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .clickable(onClick = onShowAll)
-                    .padding(start = 12.dp, top = 4.dp, bottom = 4.dp),
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
             )
         }
     }
@@ -835,7 +841,7 @@ private fun HeroShelf(
                         item = item,
                         onClick = { onItemClick(item) },
                         onLongPress = onItemLongPress?.let { { it(item) } },
-                        modifier = Modifier.width(cardWidth).cardEntrance(index),
+                        modifier = Modifier.width(playingCardWidth(cardWidth, isCurrentItem(item), PLAYING_HERO_GROWTH)).cardEntrance(index),
                         isCurrent = isCurrentItem(item),
                         isPlaying = isCurrentItem(item) && isPlaying,
                     )
@@ -938,13 +944,30 @@ internal fun Shelf(
                     item = item,
                     onClick = { onItemClick(item) },
                     onLongPress = onItemLongPress?.let { { it(item) } },
-                    modifier = Modifier.width(SHELF_CARD_WIDTH).cardEntrance(index),
+                    modifier = Modifier.width(playingCardWidth(SHELF_CARD_WIDTH, isCurrentItem(item), PLAYING_CARD_GROWTH)).cardEntrance(index),
                     isCurrent = isCurrentItem(item),
                     isPlaying = isCurrentItem(item) && isPlaying,
                 )
             }
         }
     }
+}
+
+/** How much wider the card of what is playing is than its neighbours on a shelf of covers. */
+private const val PLAYING_CARD_GROWTH = 1.3f
+
+/** The same for the large cards, which have less room to grow into. */
+private const val PLAYING_HERO_GROWTH = 1.15f
+
+/**
+ * A card's width: [base], or — where cards move, on the desktop — [growth] times it for the card
+ * of what is playing, so it stands out on its shelf; eased in and out as the track changes.
+ */
+@Composable
+private fun playingCardWidth(base: Dp, current: Boolean, growth: Float): Dp {
+    val target = if (current && LocalCardMotion.current) growth else 1f
+    val scale by animateFloatAsState(target, spring(dampingRatio = 0.85f, stiffness = 300f), label = "playingCard")
+    return base * scale
 }
 
 /**
@@ -962,8 +985,20 @@ internal fun NewShelfCard(
     /** A full-colour mark drawn in place of [icon], for a card that stands for a brand. */
     logo: DrawableResource? = null,
 ) {
+    val hover = rememberCardHover()
+    val motion = LocalCardMotion.current
     Column(
-        modifier = modifier.clickable(onClick = onClick),
+        // Where cards move, they answer the pointer as the covers beside them do — lifted, the
+        // tile lit in its own rounded shape — and not with a square over tile and captions.
+        modifier = modifier
+            .cardHoverLift(hover)
+            .then(
+                if (motion) {
+                    Modifier.clickable(interactionSource = hover.interaction, indication = null, onClick = onClick)
+                } else {
+                    Modifier.clickable(onClick = onClick)
+                },
+            ),
     ) {
         Box(
             modifier = Modifier
@@ -973,6 +1008,7 @@ internal fun NewShelfCard(
                 .background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center,
         ) {
+            CardHoverWash(hover)
             if (logo != null) {
                 // The mark is a disc with the bars cut out, so tinting it
                 // leaves the bars clear: white on dark, black on light.

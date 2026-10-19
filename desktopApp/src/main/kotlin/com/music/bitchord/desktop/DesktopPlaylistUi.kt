@@ -120,7 +120,7 @@ internal fun DesktopPlaylistDialog(
                 ?: song?.let { "${it.title} — ${it.artist}" }.orEmpty(),
         )
         error?.let { DialogError(it) }
-        DialogAction(BitChordIcons.Plus, "New playlist", enabled = !busy) { creating = true }
+        DialogAction(BitChordIcons.Plus, DesktopStrings["new_playlist", "New playlist"], enabled = !busy) { creating = true }
         onPickLiked?.let { pickLiked ->
             DialogAction(
                 BitChordIcons.HeartFilled,
@@ -150,11 +150,11 @@ internal fun DesktopPlaylistDialog(
             }
             account.isEmpty() && localPlaylists.isEmpty() -> Text(
                 when {
-                    !signedIn -> "No playlists on this computer yet. Sign in to see the ones on your account."
+                    !signedIn -> DesktopStrings["d_no_local_playlists_sign_in", "No playlists on this computer yet. Sign in to see the ones on your account."]
                     // Signed in, but this track cannot go on the account — so offering to sign in
                     // would be answering a question nobody asked.
-                    !canUseAccount -> "No playlists on this computer yet. Make one and this track goes straight into it."
-                    else -> "No playlists yet. Make one and this song goes straight into it."
+                    !canUseAccount -> DesktopStrings["d_no_local_playlists", "No playlists on this computer yet. Make one and this track goes straight into it."]
+                    else -> DesktopStrings["d_no_playlists", "No playlists yet. Make one and this song goes straight into it."]
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = DesktopSecondary,
@@ -162,7 +162,7 @@ internal fun DesktopPlaylistDialog(
             )
             else -> LazyColumn(Modifier.heightIn(max = 320.dp)) {
                 if (account.isNotEmpty()) {
-                    item(key = "heading:account") { DialogSectionHeading("On your account") }
+                    item(key = "heading:account") { DialogSectionHeading(DesktopStrings["d_on_your_account", "On your account"]) }
                     items(account.size, key = { account[it].playlistId }) { index ->
                         val playlist = account[index]
                         DialogAction(
@@ -174,7 +174,7 @@ internal fun DesktopPlaylistDialog(
                     }
                 }
                 if (localPlaylists.isNotEmpty()) {
-                    item(key = "heading:local") { DialogSectionHeading("On this computer") }
+                    item(key = "heading:local") { DialogSectionHeading(DesktopStrings["d_on_this_computer", "On this computer"]) }
                     items(localPlaylists.size, key = { localPlaylists[it].id }) { index ->
                         val playlist = localPlaylists[index]
                         DialogAction(
@@ -226,7 +226,7 @@ private fun NewPlaylistForm(
                 color = Color.White,
             )
             Text(
-                if (signedIn) "Saved to your YouTube Music account" else "Saved on this computer",
+                if (signedIn) DesktopStrings["d_saved_to_account", "Saved to your YouTube Music account"] else DesktopStrings["d_saved_here", "Saved on this computer"],
                 style = MaterialTheme.typography.bodySmall,
                 color = DesktopSecondary,
             )
@@ -269,13 +269,13 @@ private fun NewPlaylistForm(
     }
 
     if (signedIn) {
-        DialogSectionHeading("Who can see it")
+        DialogSectionHeading(DesktopStrings["d_who_can_see", "Who can see it"])
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 22.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             PlaylistPrivacy.entries.forEach { option ->
-                PrivacyPill(option.icon, option.label, option == privacy) { privacy = option }
+                PrivacyPill(option.icon, option.title, option == privacy) { privacy = option }
             }
         }
     }
@@ -295,46 +295,91 @@ private fun NewPlaylistForm(
     }
 }
 
-/** A name for something that already exists — renaming a playlist. */
+/**
+ * Editing a playlist that already exists: its name, its description and who can see it. Only
+ * what was changed is sent; who can see it starts unchosen, since the page does not say what it
+ * is now, and stays as it is unless a choice is made.
+ */
 @Composable
 internal fun DesktopRenamePlaylistDialog(
     current: String,
     busy: Boolean,
     error: String?,
-    onRename: (String) -> Unit,
+    onSave: (title: String?, description: String?, privacy: PlaylistPrivacy?) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember(current) { mutableStateOf(current) }
+    var description by remember { mutableStateOf("") }
+    var descriptionTouched by remember { mutableStateOf(false) }
+    var privacy by remember { mutableStateOf<PlaylistPrivacy?>(null) }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
-    val submit = { if (name.isNotBlank() && name.trim() != current && !busy) onRename(name.trim()) }
+    val newTitle = name.trim().takeIf { it.isNotBlank() && it != current }
+    val newDescription = description.trim().takeIf { descriptionTouched }
+    val changed = newTitle != null || newDescription != null || privacy != null
+    val submit = { if (changed && name.isNotBlank() && !busy) onSave(newTitle, newDescription, privacy) }
 
-    DesktopDialogFrame(onDismiss = onDismiss) {
-        DialogHeading("Rename playlist", current)
-        error?.let { DialogError(it) }
+    @Composable
+    fun Field(value: String, hint: String, singleLine: Boolean, modifier: Modifier = Modifier, onChange: (String) -> Unit) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 22.dp, vertical = 14.dp)
+                .padding(horizontal = 22.dp, vertical = 6.dp)
                 .clip(RoundedCornerShape(11.dp))
                 .background(Color.White.copy(alpha = 0.08f))
                 .padding(horizontal = 12.dp, vertical = 12.dp),
         ) {
+            if (value.isEmpty()) {
+                Text(hint, style = MaterialTheme.typography.bodyLarge, color = DesktopSecondary)
+            }
             BasicTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
+                value = value,
+                onValueChange = onChange,
+                singleLine = singleLine,
+                minLines = if (singleLine) 1 else 3,
+                maxLines = if (singleLine) 1 else 6,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color.White),
                 cursorBrush = SolidColor(DesktopAccent),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardOptions = if (singleLine) KeyboardOptions(imeAction = ImeAction.Done) else KeyboardOptions.Default,
                 keyboardActions = KeyboardActions(onDone = { submit() }),
-                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                modifier = modifier.fillMaxWidth(),
             )
         }
+    }
+
+    DesktopDialogFrame(onDismiss = onDismiss) {
+        DialogHeading(DesktopStrings["d_edit_playlist", "Edit playlist"], current)
+        error?.let { DialogError(it) }
+        DialogSectionHeading(DesktopStrings["playlist_name", "Playlist name"])
+        Field(name, DesktopStrings["playlist_name", "Playlist name"], singleLine = true, modifier = Modifier.focusRequester(focusRequester)) {
+            name = it
+        }
+        DialogSectionHeading(DesktopStrings["d_playlist_description", "Description"])
+        Field(description, DesktopStrings["d_playlist_description_hint", "Leave as it is, or write a new one"], singleLine = false) {
+            description = it
+            descriptionTouched = true
+        }
+        DialogSectionHeading(DesktopStrings["d_who_can_see", "Who can see it"])
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PlaylistPrivacy.entries.forEach { option ->
+                PrivacyPill(option.icon, option.title, option == privacy) {
+                    privacy = if (privacy == option) null else option
+                }
+            }
+        }
+        Text(
+            privacy?.detail ?: DesktopStrings["d_privacy_unchanged", "Unchanged unless you pick one"],
+            style = MaterialTheme.typography.bodySmall,
+            color = DesktopSecondary,
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 6.dp),
+        )
         DialogButtons(
             busy = busy,
-            confirmLabel = DesktopStrings["rename", "Rename"],
-            confirmEnabled = name.isNotBlank() && name.trim() != current,
+            confirmLabel = DesktopStrings["save", "Save"],
+            confirmEnabled = changed && name.isNotBlank(),
             onConfirm = submit,
             onDismiss = onDismiss,
         )
@@ -352,9 +397,11 @@ internal fun DesktopDeletePlaylistDialog(
 ) {
     DesktopDialogFrame(onDismiss = onDismiss) {
         DialogHeading(
-            "Delete playlist",
-            "“$title” will be removed from your YouTube Music account, on every " +
-                "device. The songs in it are not deleted.",
+            DesktopStrings["d_delete_playlist", "Delete playlist"],
+            DesktopStrings[
+                "d_delete_playlist_sub",
+                "“%s” will be removed from your YouTube Music account, on every device. The songs in it are not deleted.",
+            ].replace("%s", title),
         )
         error?.let { DialogError(it) }
         DialogButtons(
@@ -386,7 +433,7 @@ internal fun DesktopReorderPlaylistDialog(
     val entries by produceState<UiState<List<Song>>>(UiState.Loading, browseId) {
         value = DesktopSearchClient.playlistEntries(browseId).fold(
             onSuccess = { UiState.Success(it) },
-            onFailure = { UiState.Error(it.message ?: "Could not load the playlist") },
+            onFailure = { UiState.Error(it.message ?: DesktopStrings["d_playlist_load_failed", "Could not load the playlist"]) },
         )
     }
     // Null until a row has been dragged: an untouched list has nothing to send.
@@ -762,6 +809,22 @@ private fun PrivacyPill(icon: ImageVector, label: String, selected: Boolean, onC
         )
     }
 }
+
+/** [PlaylistPrivacy.label] in the app's language. */
+private val PlaylistPrivacy.title: String
+    get() = when (this) {
+        PlaylistPrivacy.PRIVATE -> DesktopStrings["d_privacy_private", "Private"]
+        PlaylistPrivacy.UNLISTED -> DesktopStrings["d_privacy_unlisted", "Unlisted"]
+        PlaylistPrivacy.PUBLIC -> DesktopStrings["d_privacy_public", "Public"]
+    }
+
+/** What each choice means, under the choices. */
+private val PlaylistPrivacy.detail: String
+    get() = when (this) {
+        PlaylistPrivacy.PRIVATE -> DesktopStrings["d_privacy_private_detail", "Only you can see it"]
+        PlaylistPrivacy.UNLISTED -> DesktopStrings["d_privacy_unlisted_detail", "Anyone with the link can open it; it is not listed anywhere"]
+        PlaylistPrivacy.PUBLIC -> DesktopStrings["d_privacy_public_detail", "Anyone can find and open it"]
+    }
 
 private val PlaylistPrivacy.icon: ImageVector
     get() = when (this) {

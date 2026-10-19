@@ -386,6 +386,15 @@
     <string name="wave_unblock_all">Вернуть всех</string>
     <string name="d_dpi_bypass">Обход блокировок YouTube</string>
     <string name="d_dpi_bypass_subtitle">Без VPN, для сетей, где YouTube замедляют (как в России): адреса через зашифрованный DNS, а имя сайта в первом пакете разрезается, чтобы фильтр его не узнал</string>
+    <string name="d_dns">DNS-сервер</string>
+    <string name="d_dns_subtitle">У кого приложение спрашивает адреса сайтов, через зашифрованный DNS (DNS over HTTPS). «Системный» — DNS вашей сети; если выбранный сервер не отвечает, спрашивается системный</string>
+    <string name="d_dns_system">Системный</string>
+    <string name="d_dns_custom">Свой</string>
+    <string name="d_dns_custom_url">Адрес DNS over HTTPS</string>
+    <string name="d_dns_check">Проверить</string>
+    <string name="d_dns_checking">Проверка…</string>
+    <string name="d_dns_ok">Отвечает</string>
+    <string name="d_dns_failed">Не отвечает</string>
     <string name="wave_skipped_count">Пропущенных треков, которые больше не попадутся: %d</string>
     <string name="wave_skipped_clear">Забыть</string>
     <string name="d_start_jam">Джем по треку</string>

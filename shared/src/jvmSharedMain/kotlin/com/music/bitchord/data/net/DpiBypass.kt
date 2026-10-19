@@ -3,20 +3,9 @@ package com.music.bitchord.data.net
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.Socket
-import java.net.UnknownHostException
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import javax.net.SocketFactory
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.int
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Dns
 import okhttp3.OkHttpClient
-import okhttp3.Request
 
 /**
  * Getting to YouTube where the network in between is told not to let you: Russia's, where its
@@ -31,8 +20,8 @@ import okhttp3.Request
  *    reads one packet at a time, does not find the name it is looking for. (The trick GoodbyeDPI,
  *    zapret and ByeDPI play from outside the app.)
  *  - **Addresses over HTTPS.** Host names are looked up with Cloudflare's and Google's DNS over
- *    HTTPS, so a provider's own answer for a name is never asked for. The system's lookup is the
- *    fallback when neither answers.
+ *    HTTPS (unless another server is chosen — see [SecureDns]), so a provider's own answer for a
+ *    name is never asked for. The system's lookup is the fallback when neither answers.
  *
  * Off, everything goes the ordinary way. It is read on every connection, so switching it takes
  * effect on the next one.
@@ -59,8 +48,11 @@ object DpiBypass {
             }
     }
 
-    /** For [OkHttpClient.Builder.dns]: DNS over HTTPS when [enabled], the system's otherwise. */
-    val dns: Dns = Dns { host -> if (enabled) DohDns.lookup(host) else Dns.SYSTEM.lookup(host) }
+    /**
+     * For [OkHttpClient.Builder.dns]: [SecureDns] — the DNS server chosen in settings, or, with
+     * none chosen, DNS over HTTPS when [enabled] and the system's otherwise.
+     */
+    val dns: Dns = SecureDns.dns
 
     /** A plain socket whose first write, if it is a ClientHello, goes out split. */
     private class SplittingSocket : Socket() {
@@ -188,68 +180,5 @@ object DpiBypass {
         }.getOrNull()
 
         private fun u16(b: ByteArray, at: Int): Int = ((b[at].toInt() and 0xFF) shl 8) or (b[at + 1].toInt() and 0xFF)
-    }
-
-    /** DNS over HTTPS, asked of resolvers by address so that no lookup is needed to reach them. */
-    private object DohDns {
-        private val json = Json { ignoreUnknownKeys = true }
-        private val cache = ConcurrentHashMap<String, Pair<List<InetAddress>, Long>>()
-
-        private val client: OkHttpClient by lazy {
-            OkHttpClient.Builder()
-                .socketFactory(socketFactory)
-                .dns(Dns.SYSTEM)
-                .connectTimeout(4, TimeUnit.SECONDS)
-                .readTimeout(4, TimeUnit.SECONDS)
-                .callTimeout(6, TimeUnit.SECONDS)
-                .build()
-        }
-
-        private val resolvers = listOf(
-            "https://1.1.1.1/dns-query?type=A&name=",
-            "https://8.8.8.8/resolve?type=A&name=",
-            "https://1.0.0.1/dns-query?type=A&name=",
-        )
-
-        fun lookup(host: String): List<InetAddress> {
-            // Addresses already, and this machine's own names, need nobody asked.
-            if (host.isEmpty() || host[0].isDigit() || ':' in host || host == "localhost" || '.' !in host) {
-                return Dns.SYSTEM.lookup(host)
-            }
-            cache[host]?.let { (addresses, until) -> if (System.currentTimeMillis() < until) return addresses }
-            for (resolver in resolvers) {
-                val found = runCatching { ask(resolver, host) }.getOrNull()
-                if (!found.isNullOrEmpty()) return found
-            }
-            return try {
-                Dns.SYSTEM.lookup(host)
-            } catch (failure: UnknownHostException) {
-                throw failure
-            }
-        }
-
-        private fun ask(resolver: String, host: String): List<InetAddress> {
-            val request = Request.Builder().url(resolver + host).header("Accept", "application/dns-json").build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return emptyList()
-                val body = json.parseToJsonElement(response.body.string()).jsonObject
-                val answers = (body["Answer"] ?: return emptyList()).jsonArray.map { it.jsonObject }
-                    .filter { it["type"]?.jsonPrimitive?.int == 1 }
-                val addresses = answers.mapNotNull { answer ->
-                    answer["data"]?.jsonPrimitive?.content?.let { ip -> runCatching { InetAddress.getByAddress(host, ipv4(ip)) }.getOrNull() }
-                }
-                val ttl = answers.mapNotNull { it["TTL"]?.jsonPrimitive?.intOrNull }.minOrNull() ?: 300
-                if (addresses.isNotEmpty()) {
-                    cache[host] = addresses to System.currentTimeMillis() + ttl.coerceIn(60, 3_600) * 1_000L
-                }
-                return addresses
-            }
-        }
-
-        private fun ipv4(text: String): ByteArray {
-            val parts = text.split('.')
-            require(parts.size == 4)
-            return ByteArray(4) { parts[it].toInt().toByte() }
-        }
     }
 }

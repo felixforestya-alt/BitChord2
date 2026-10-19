@@ -103,8 +103,8 @@ fun main() {
             available = { DesktopPoTokenWebView.available },
         ).asTokenProvider(),
     )
-    // Round a network that throttles YouTube, where the setting says to — see DesktopNetworkSettings.
-    com.music.bitchord.data.net.DpiBypass.enabled = DesktopNetworkSettings.bypass.value
+    // Round a network that throttles YouTube, and the DNS server, as the settings say.
+    DesktopNetworkSettings.apply()
     // The public "apps open right now" count; see Presence.
     DesktopPresence.install()
     installImageLoader()

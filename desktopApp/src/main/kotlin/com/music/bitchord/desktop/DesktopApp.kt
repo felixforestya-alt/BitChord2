@@ -1,6 +1,7 @@
 package com.music.bitchord.desktop
 
 import androidx.compose.foundation.lazy.LazyListState
+import com.music.bitchord.data.net.SecureDns
 import com.music.bitchord.ui.components.LocalShelfRowChrome
 import com.music.bitchord.ui.components.ShelfRowChrome
 import com.music.bitchord.ui.components.ShelfRow
@@ -8352,6 +8353,7 @@ private fun DesktopSettingsScreen(
                         bypass,
                         DesktopNetworkSettings::setBypass,
                     )
+                    DesktopDnsSetting()
                     SettingsToggle(
                         DesktopStrings["show_nerd_stats", "Show stats for nerds"],
                         DesktopStrings["show_nerd_stats_subtitle", "Codec, bitrate and sample rate on the player"],
@@ -9730,6 +9732,69 @@ private fun <T> StyleChoiceRow(
                     label = { Text(label) },
                 )
             }
+        }
+    }
+}
+
+/** Which DNS server names are looked up with, a server of one's own, and a check that it answers. */
+@Composable
+private fun DesktopDnsSetting() {
+    val provider by DesktopNetworkSettings.dns.collectAsState()
+    val customUrl by DesktopNetworkSettings.customDns.collectAsState()
+    val title = DesktopStrings["d_dns", "DNS server"]
+    val subtitle = DesktopStrings[
+        "d_dns_subtitle",
+        "Who the app asks for websites' addresses, over encrypted DNS (DNS over HTTPS). System uses your network's own; if the chosen server does not answer, the system's is asked instead",
+    ]
+    StyleChoiceRow(
+        title,
+        subtitle,
+        listOf(
+            DesktopStrings["d_dns_system", "System"] to SecureDns.Provider.SYSTEM,
+            "Cloudflare" to SecureDns.Provider.CLOUDFLARE,
+            "Google" to SecureDns.Provider.GOOGLE,
+            "Quad9" to SecureDns.Provider.QUAD9,
+            "AdGuard" to SecureDns.Provider.ADGUARD,
+            DesktopStrings["d_dns_custom", "Custom"] to SecureDns.Provider.CUSTOM,
+        ),
+        provider,
+        DesktopNetworkSettings::setDns,
+    )
+    if (provider == SecureDns.Provider.SYSTEM || !settingsRowVisible(title, subtitle)) return
+    val scope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var result by remember(provider, customUrl) { mutableStateOf<String?>(null) }
+    val server = if (provider == SecureDns.Provider.CUSTOM) customUrl.trim() else provider.url.orEmpty()
+    Column(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (provider == SecureDns.Provider.CUSTOM) {
+            OutlinedTextField(
+                value = customUrl,
+                onValueChange = DesktopNetworkSettings::setCustomDns,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(DesktopStrings["d_dns_custom_url", "DNS over HTTPS address"]) },
+                placeholder = { Text("https://dns.example.com/dns-query") },
+                singleLine = true,
+                isError = customUrl.isNotBlank() && !customUrl.trim().startsWith("https://"),
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(
+                enabled = !checking && server.startsWith("https://"),
+                onClick = {
+                    checking = true
+                    scope.launch {
+                        val started = System.nanoTime()
+                        val outcome = withContext(Dispatchers.IO) { runCatching { SecureDns.probe(server) } }
+                        val ms = (System.nanoTime() - started) / 1_000_000
+                        result = outcome.fold(
+                            { DesktopStrings["d_dns_ok", "Answers"] + " · ${ms} ms · ${it.first().hostAddress}" },
+                            { DesktopStrings["d_dns_failed", "No answer"] + " · ${it.message ?: it::class.simpleName}" },
+                        )
+                        checking = false
+                    }
+                },
+            ) { Text(if (checking) DesktopStrings["d_dns_checking", "Checking…"] else DesktopStrings["d_dns_check", "Check"]) }
+            result?.let { Text(it, color = DesktopSecondary, style = MaterialTheme.typography.bodySmall) }
         }
     }
 }

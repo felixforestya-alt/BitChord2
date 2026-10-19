@@ -208,6 +208,15 @@
     <string name="wave_unblock_all">Let them all back</string>
     <string name="d_dpi_bypass">Get round YouTube blocking</string>
     <string name="d_dpi_bypass_subtitle">Without a VPN, for networks that slow YouTube down (as in Russia): looks up addresses over encrypted DNS and splits the site\'s name in the first packet so the filter does not recognise it</string>
+    <string name="d_dns">DNS server</string>
+    <string name="d_dns_subtitle">Who the app asks for websites' addresses, over encrypted DNS (DNS over HTTPS). System uses your network's own; if the chosen server does not answer, the system's is asked instead</string>
+    <string name="d_dns_system">System</string>
+    <string name="d_dns_custom">Custom</string>
+    <string name="d_dns_custom_url">DNS over HTTPS address</string>
+    <string name="d_dns_check">Check</string>
+    <string name="d_dns_checking">Checking…</string>
+    <string name="d_dns_ok">Answers</string>
+    <string name="d_dns_failed">No answer</string>
     <string name="wave_skipped_count">Skipped tracks not played again: %d</string>
     <string name="wave_skipped_clear">Forget</string>
     <string name="d_start_jam">Start a jam from this</string>

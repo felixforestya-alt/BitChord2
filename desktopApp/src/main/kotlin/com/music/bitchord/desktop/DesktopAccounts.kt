@@ -101,7 +101,16 @@ internal object DesktopAccounts {
             writeCookie(account.accountId, rotated)
         }
         val stored = saved.copy(cookie = rotated)
-        DesktopYouTubeSession.adoptSessionScope(stored.cookie)?.let { live ->
+        val read = DesktopYouTubeSession.readSessionScope(stored.cookie)
+        if (read.isFailure) {
+            // Not reached at all — a slow or dropped network says nothing about the cookie. The
+            // account stays signed in as it was saved, rather than falling back to a guest.
+            DesktopTrackLog.log("music.youtube.com not reached; keeping the saved session")
+            DesktopYouTubeAuth.adopt(stored)
+            DesktopSessionKeeper.start()
+            return stored
+        }
+        read.getOrNull()?.let { live ->
             // The shell may have renewed a cookie or two of its own on the way.
             if (live.cookie != stored.cookie) writeCookie(account.accountId, live.cookie)
             val session = healedIdentity(account, profile, stored.copy(cookie = live.cookie), live)

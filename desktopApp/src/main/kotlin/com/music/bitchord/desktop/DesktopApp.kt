@@ -948,7 +948,12 @@ fun BitChordDesktopApp() {
         signInError = null
         signInBusy = label
         try {
-            val scope = withContext(Dispatchers.IO) { DesktopYouTubeSession.adoptSessionScope(cookie) }
+            val read = withContext(Dispatchers.IO) { DesktopYouTubeSession.readSessionScope(cookie) }
+            if (read.isFailure) {
+                signInError = "Could not reach YouTube Music. Check the connection and try again."
+                return
+            }
+            val scope = read.getOrNull()
             if (scope == null) {
                 signInError = "$label is not signed in to YouTube Music."
                 return

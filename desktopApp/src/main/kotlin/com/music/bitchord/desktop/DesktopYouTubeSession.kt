@@ -55,7 +55,21 @@ internal object DesktopYouTubeSession {
      * Reads who the stored cookie actually acts as out of the signed-in music.youtube.com shell,
      * and adopts its visitor id.
      */
-    suspend fun adoptSessionScope(cookie: String): DesktopYouTubeAuth.Session? {
+    suspend fun adoptSessionScope(cookie: String): DesktopYouTubeAuth.Session? = readSessionScope(cookie).getOrNull()
+
+    /**
+     * As [adoptSessionScope], telling apart the two ways of getting nothing: a failure is the shell
+     * not reached at all — a timeout, a network down — which says nothing about the cookie; null
+     * is the shell answering that it is signed out. Tried twice, a moment apart, before giving up.
+     */
+    suspend fun readSessionScope(cookie: String): Result<DesktopYouTubeAuth.Session?> {
+        val first = readSessionScopeOnce(cookie)
+        if (first.isSuccess) return first
+        kotlinx.coroutines.delay(1_500)
+        return readSessionScopeOnce(cookie)
+    }
+
+    private suspend fun readSessionScopeOnce(cookie: String): Result<DesktopYouTubeAuth.Session?> {
         // Whatever the shell renews on the way in is kept, as a browser would keep it.
         var renewed = cookie
         val html = runCatching {
@@ -70,21 +84,21 @@ internal object DesktopYouTubeSession {
             response.bodyAsText()
         }.getOrElse {
             DesktopTrackLog.log("could not read the session scope: ${it.message}")
-            return null
+            return Result.failure(it)
         }
 
         // The one value that must not be guessed.
         val signedIn = CONFIG_LOGGED_IN.find(html)?.groupValues?.get(1) == "true"
         if (!signedIn) {
             DesktopTrackLog.log("music.youtube.com served a signed-out shell; not scoping requests")
-            return null
+            return Result.success(null)
         }
         // The shell's own visitor id, bound to this session — see [sessionBound].
         CONFIG_VISITOR_DATA.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() }?.let {
             visitorData.set(it)
             sessionBound = true
         }
-        return DesktopYouTubeAuth.Session(
+        return Result.success(DesktopYouTubeAuth.Session(
             cookie = renewed,
             authUser = CONFIG_SESSION_INDEX.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() } ?: "0",
             pageId = CONFIG_PAGE_ID.find(html)?.groupValues?.get(1)?.takeIf { it.isNotBlank() },
@@ -93,7 +107,7 @@ internal object DesktopYouTubeSession {
             dataSyncId = CONFIG_DATASYNC_ID.find(html)?.groupValues?.get(1)
                 ?.substringBefore("||")
                 ?.takeIf { it.isNotBlank() },
-        )
+        ))
     }
 
     private val CONFIG_LOGGED_IN = Regex(""""LOGGED_IN"\s*:\s*(true|false)""")

@@ -2,6 +2,7 @@ package com.music.bitchord.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -86,6 +87,8 @@ fun Modifier.longPressMenuClickable(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)?,
     enabled: Boolean = true,
+    /** False for a card that answers the pointer in its own shape: the stock highlight is a square over its whole bounds. */
+    indication: Boolean = true,
 ): Modifier {
     val capture = remember { HoldCapture() }
     val graphicsContext = LocalGraphicsContext.current
@@ -103,7 +106,19 @@ fun Modifier.longPressMenuClickable(
     }
     return this
         .onPlaced { capture.coordinates = it }
-        .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = longClick)
+        .then(
+            if (indication) {
+                Modifier.combinedClickable(enabled = enabled, onClick = onClick, onLongClick = longClick)
+            } else {
+                Modifier.combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = enabled,
+                    onClick = onClick,
+                    onLongClick = longClick,
+                )
+            },
+        )
         .drawWithContent {
             drawContent()
             // Reading the counter is what subscribes this draw to a hold;

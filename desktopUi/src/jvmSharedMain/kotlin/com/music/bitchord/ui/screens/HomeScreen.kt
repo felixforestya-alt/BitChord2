@@ -2,6 +2,8 @@ package com.music.bitchord.ui.screens
 
 import com.music.bitchord.ui.components.contextClick
 import com.music.bitchord.ui.components.CardHoverPlay
+import com.music.bitchord.ui.components.CardHoverWash
+import com.music.bitchord.ui.components.LocalCardMotion
 import com.music.bitchord.ui.components.cardEntrance
 import com.music.bitchord.ui.components.cardHoverLift
 import com.music.bitchord.ui.components.rememberCardHover
@@ -816,7 +818,7 @@ private fun HeroCard(
             .clip(RoundedCornerShape(18.dp))
             .thumbnailBorder(RoundedCornerShape(18.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
+            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress, indication = !LocalCardMotion.current)
             .contextClick(onLongPress),
     ) {
         AsyncImage(
@@ -826,7 +828,8 @@ private fun HeroCard(
             modifier = Modifier.fillMaxSize(),
         )
         if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
-        CardHoverPlay(hover, Alignment.TopEnd)
+        CardHoverWash(hover)
+        CardHoverPlay(hover, Alignment.TopEnd, isCurrent = isCurrent, isPlaying = isPlaying)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1006,7 +1009,7 @@ internal fun ShelfCard(
     Column(
         modifier = modifier
             .cardHoverLift(hover)
-            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress)
+            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress, indication = !LocalCardMotion.current)
             .contextClick(onLongPress),
     ) {
         when (item.browseId) {
@@ -1069,7 +1072,8 @@ internal fun ShelfCard(
                         modifier = Modifier.fillMaxSize(),
                     )
                     if (isCurrent && isPlaying) SearchPlayingBars(Modifier.align(Alignment.Center))
-                    CardHoverPlay(hover)
+                    CardHoverWash(hover)
+                    CardHoverPlay(hover, isCurrent = isCurrent, isPlaying = isPlaying)
                 }
             }
         }

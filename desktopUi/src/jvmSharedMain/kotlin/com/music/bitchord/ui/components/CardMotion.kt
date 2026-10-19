@@ -8,6 +8,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -39,6 +41,12 @@ import kotlinx.coroutines.delay
  * provides it.
  */
 val LocalCardMotion = staticCompositionLocalOf { false }
+
+/**
+ * Pauses or resumes what is playing, for the button on the card of the thing playing now. Null
+ * where a host has no player to hand; the button then only shows what is going on.
+ */
+val LocalCardPlayPause = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 /** The hover state a card's parts share: the lift on the whole card, the play button on its art. */
 class CardHover internal constructor(val interaction: MutableInteractionSource)
@@ -65,13 +73,37 @@ fun Modifier.cardHoverLift(hover: CardHover): Modifier {
         }
 }
 
-/** The round play button that rises into the corner of a card's artwork while it is hovered. */
+/**
+ * A faint light over a card's artwork while it is hovered. Placed inside the artwork's clip, so
+ * it takes the artwork's rounded shape: the card's own click draws no highlight of its own,
+ * which was a square over cover and captions alike.
+ */
 @Composable
-fun BoxScope.CardHoverPlay(hover: CardHover, alignment: Alignment = Alignment.BottomEnd) {
+fun BoxScope.CardHoverWash(hover: CardHover) {
     if (!LocalCardMotion.current) return
     val hovered by hover.interaction.collectIsHoveredAsState()
+    val wash by animateFloatAsState(if (hovered) 1f else 0f, tween(140), label = "cardWash")
+    if (wash <= 0.01f) return
+    Box(Modifier.matchParentSize().background(Color.White.copy(alpha = 0.10f * wash)))
+}
+
+/**
+ * The round button that rises into the corner of a card's artwork while it is hovered. On the
+ * card of what is playing now it stays, and is a pause button: pressing it pauses, and again
+ * resumes, rather than starting the track over.
+ */
+@Composable
+fun BoxScope.CardHoverPlay(
+    hover: CardHover,
+    alignment: Alignment = Alignment.BottomEnd,
+    isCurrent: Boolean = false,
+    isPlaying: Boolean = false,
+) {
+    if (!LocalCardMotion.current) return
+    val hovered by hover.interaction.collectIsHoveredAsState()
+    val playPause = LocalCardPlayPause.current.takeIf { isCurrent }
     val shown by animateFloatAsState(
-        if (hovered) 1f else 0f,
+        if (hovered || (isCurrent && isPlaying)) 1f else 0f,
         spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "cardPlay",
     )
@@ -91,10 +123,22 @@ fun BoxScope.CardHoverPlay(hover: CardHover, alignment: Alignment = Alignment.Bo
                 clip = true
             }
             .background(Color.White.copy(alpha = 0.92f))
-            .border(0.5.dp, Color.White, CircleShape),
+            .border(0.5.dp, Color.White, CircleShape)
+            .then(
+                if (playPause != null) {
+                    Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = playPause)
+                } else {
+                    Modifier
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(26.dp))
+        Icon(
+            if (isCurrent && isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            contentDescription = null,
+            tint = Color.Black,
+            modifier = Modifier.size(26.dp),
+        )
     }
 }
 

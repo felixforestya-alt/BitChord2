@@ -2620,6 +2620,8 @@ fun BitChordDesktopApp() {
         val videoId = item.videoId
         val browseId = item.browseId
         when {
+            // The track playing now: its card pauses and resumes it, not starts it over.
+            videoId != null && videoId == selectedSong?.videoId -> togglePlayPauseFromUser()
             videoId != null -> {
                 val source = shelfTitle?.let { DesktopQueueSource(it, PlaybackSourceType.HOME) }
                 playSong(item.toSong(), source = source)
@@ -4979,6 +4981,7 @@ fun BitChordDesktopApp() {
                     LocalPullToRefreshEnabled provides false,
                     LocalShelfRowChrome provides DesktopShelfRowChrome,
                     com.music.bitchord.ui.components.LocalCardMotion provides animatedHome,
+                    com.music.bitchord.ui.components.LocalCardPlayPause provides ::togglePlayPauseFromUser,
                 ) {
                 DesktopPointerMenuHost<Song>(
                     menu = { song, onDismiss ->

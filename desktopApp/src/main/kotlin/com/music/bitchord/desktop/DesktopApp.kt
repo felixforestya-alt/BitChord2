@@ -9281,6 +9281,10 @@ private fun Modifier.desktopFrosted(
         blurEnabled = true
         backgroundColor = DesktopSurface
         blurRadius = 30.dp
+        // Blurred from a copy a third the size, as the phone's panes are: at 30 dp nothing of the
+        // detail lost shows, and blurring the page under the pane at the window's full 4K, every
+        // frame it scrolled, took a frame past its refresh.
+        inputScale = dev.chrisbanes.haze.HazeInputScale.Fixed(0.33f)
         // Dark enough that white text on the pane always wins, translucent enough that the
         // colour of what is behind it still comes through.
         tints = listOf(HazeTint(DesktopSurface.copy(alpha = tintAlpha)))

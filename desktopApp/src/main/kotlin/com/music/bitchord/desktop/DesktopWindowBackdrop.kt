@@ -29,7 +29,10 @@ internal object DesktopWindowBackdrop {
      * Whether this window can carry a material: Windows 11 and the native frame. Decided once, at
      * start, because it decides whether the window is created transparent.
      */
-    val available: Boolean = System.getenv("BITCHORD_OPAQUE") != "1" && (
+    val available: Boolean = System.getenv("BITCHORD_OPAQUE") != "1" &&
+        // Skia draws nothing at all into a transparent window through OpenGL on Windows: an empty
+        // frame where the app should be. Opaque there, without the material.
+        System.getProperty("skiko.renderApi") != DesktopGraphicsApi.OPENGL.skikoName && (
         (DesktopPlatform.isWindows && DesktopPlatform.drawsOwnWindowFrame &&
             System.getProperty("os.name").orEmpty().contains("11")) ||
             DesktopPlatform.isMac

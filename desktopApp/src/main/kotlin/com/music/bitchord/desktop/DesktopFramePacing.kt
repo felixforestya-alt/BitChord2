@@ -1,10 +1,8 @@
 package com.music.bitchord.desktop
 
 import com.sun.jna.Memory
-import com.sun.jna.Native
 import com.sun.jna.NativeLibrary
 import com.sun.jna.Pointer
-import com.sun.jna.WString
 import java.awt.Container
 import java.awt.Window
 import org.jetbrains.skia.Canvas
@@ -12,20 +10,26 @@ import org.jetbrains.skiko.SkiaLayer
 import org.jetbrains.skiko.SkikoRenderDelegate
 
 /**
- * Frames timed to the monitor's own refresh rather than to Direct3D's vsync.
+ * Frames limited to the monitor's rate by a precise timer, rather than held to Direct3D's vsync.
  *
  * Skia presents each frame with a sync interval of one and waits for its buffer back. Alone on
  * the GPU that holds the screen's rate; with a game running — in front, behind, or minimised —
  * the buffer came back a refresh late every time, so on a 160 Hz screen the player ran at 78
  * frames a second while drawing one took four milliseconds of the six it had. Measured with
- * Deadlock open: 78 fps with Skia's vsync; 233 drawn with none, so the drawing was never short.
- * Waiting on the desktop's compositions instead (DwmFlush) was worse, 54: that wait includes
- * the window's own last frame reaching the screen, which is exactly what comes late.
+ * Deadlock open: 78 fps with Skia's vsync; 233–258 drawn with none, so the drawing was never
+ * short.
  *
- * So Skia presents without waiting, and the frame waits at its start for the monitor's next
- * vertical blank — the display's own clock, asked of the driver, and not held up by anyone's
- * queue. A frame is still only drawn when something on screen changes; nothing here asks for
- * frames, so an idle window stays idle and the waiting thread sleeps.
+ * Waiting for the monitor's vertical blank instead did no better in a match: with G-SYNC the
+ * monitor refreshes when the game presents, so its blanks came irregularly — 127 a second, gaps
+ * of 20 ms — and frames waiting for them ran at 83. Nor did waiting on the desktop's
+ * compositions (DwmFlush), 54: that wait includes the window's own last frame reaching the
+ * screen, which is exactly what comes late.
+ *
+ * So Skia presents without waiting, and a frame that comes sooner than one refresh after the
+ * last waits out the rest on a high-resolution waitable timer: no spinning, a fraction of a
+ * millisecond late at most. At a fixed refresh the desktop shows the newest frame at each one;
+ * under G-SYNC the monitor shows each as it lands. A frame is still only drawn when something
+ * on screen changes; nothing here asks for frames, so an idle window stays idle.
  */
 internal object DesktopFramePacing {
 
@@ -38,9 +42,8 @@ internal object DesktopFramePacing {
         // Set on the command line — say for a benchmark of frames unpaced — that wins.
         if (System.getProperty("skiko.vsync.enabled") != null) return
         if (System.getProperty("skiko.renderApi") != DesktopGraphicsApi.DIRECT3D.skikoName) return
-        // Only when the driver answers; otherwise Skia keeps its own vsync.
-        val probe = runCatching { Output.open(null) }.getOrNull() ?: return
-        probe.close()
+        // Only with a timer precise enough; otherwise Skia keeps its own vsync.
+        if (Timer.handle == null) return
         System.setProperty("skiko.vsync.enabled", "false")
         active = true
     }
@@ -59,7 +62,7 @@ internal object DesktopFramePacing {
         val inner = layer.renderDelegate ?: return
         if (inner is Paced) return
         layer.renderDelegate = Paced(inner, window)
-        DesktopTrackLog.log("frames: paced to the monitor's vertical blank")
+        DesktopTrackLog.log("frames: limited to the monitor's rate by a precise timer")
     }
 
     private fun findLayer(container: Container): SkiaLayer? {
@@ -71,144 +74,80 @@ internal object DesktopFramePacing {
     }
 
     private class Paced(private val inner: SkikoRenderDelegate, private val window: Window) : SkikoRenderDelegate {
+
+        /** When the next frame may start. */
+        private var next = 0L
+        private var period = 0L
+        private var periodCheckedAt = 0L
+
         override fun onRender(canvas: Canvas, width: Int, height: Int, nanoTime: Long) {
-            VBlank.follow(window)
-            VBlank.await()
-            inner.onRender(canvas, width, height, System.nanoTime())
+            var now = System.nanoTime()
+            if (now - periodCheckedAt > PERIOD_CHECK_NANOS) {
+                period = periodNanos(window)
+                periodCheckedAt = now
+            }
+            if (now < next) {
+                Timer.waitNanos(next - now)
+                now = System.nanoTime()
+            }
+            // On time, the next is one refresh after this one was due, so the rate holds exactly;
+            // late by more than a refresh — a pause, or a long frame — the count starts again.
+            next = if (next != 0L && now - next < period) next + period else now + period
+            inner.onRender(canvas, width, height, now)
         }
     }
 
     /**
-     * The wait itself, on a thread of its own: the driver's call has no timeout, and a monitor
-     * switched off could hold it indefinitely. The frame waits for it at most two refreshes,
-     * then goes on unpaced.
-     *
-     * While frames are coming the thread follows every blank, so a frame that comes a moment
-     * after one — its predecessor ran a little long — takes that blank rather than waiting a
-     * whole refresh for the next. A quarter of a second after the last frame it stops, and
-     * sleeps until another asks.
+     * The monitor's refresh period. The desktop's own figure where it gives one (159.98 Hz, not
+     * the 160 the display mode rounds to: frames a hair faster than the screen would now and then
+     * land two to a refresh), else the display mode's.
      */
-    private object VBlank {
-        private val lock = Object()
-        private var lastAsked = 0L
-        private var blanks = 0L
-        private var blankAt = 0L
-        private var taken = 0L
-        @Volatile private var output: Output? = null
-        private var monitor: Pointer? = null
-        @Volatile private var periodNanos = 7_000_000L
-
-        init {
-            Thread(::run, "BitChord-VBlank").apply { isDaemon = true; start() }
-        }
-
-        /** Keeps the output the window is on: the blank waited for is that monitor's. On the UI thread. */
-        fun follow(window: Window) {
-            val hwnd = runCatching { Native.getWindowPointer(window) }.getOrNull() ?: return
-            val now = runCatching { Win.monitorFromWindow.invokePointer(arrayOf(hwnd, MONITOR_DEFAULTTONEAREST)) }.getOrNull() ?: return
-            if (now == monitor && output != null) return
-            monitor = now
-            val opened = runCatching { Output.open(now) }.getOrNull() ?: return
-            output?.let { old -> output = opened; old.close() } ?: run { output = opened }
-            val hz = runCatching { window.graphicsConfiguration.device.displayMode.refreshRate }.getOrDefault(60)
-            periodNanos = 1_000_000_000L / (if (hz in 24..1000) hz else 60)
-        }
-
-        fun await() {
-            synchronized(lock) {
-                val now = System.nanoTime()
-                val idle = now - lastAsked > FOLLOW_NANOS
-                lastAsked = now
-                if (idle) lock.notifyAll()
-                // A blank not yet used, and recent: this frame's.
-                if (blanks > taken && now - blankAt < periodNanos / 2) {
-                    taken = blanks
-                    return
-                }
-                val seen = blanks
-                val deadline = now + periodNanos * 2
-                while (blanks == seen) {
-                    val left = (deadline - System.nanoTime()) / 1_000_000
-                    if (left <= 0) return
-                    lock.wait(left.coerceAtLeast(1))
-                }
-                taken = blanks
-            }
-        }
-
-        private fun run() {
-            while (true) {
-                synchronized(lock) {
-                    while (System.nanoTime() - lastAsked > FOLLOW_NANOS) lock.wait()
-                }
-                val out = output
-                if (out == null || !out.waitForBlank()) Thread.sleep(periodNanos / 1_000_000 + 1)
-                synchronized(lock) {
-                    blanks++
-                    blankAt = System.nanoTime()
-                    lock.notifyAll()
-                }
-            }
-        }
-
-        private const val FOLLOW_NANOS = 250_000_000L
+    private fun periodNanos(window: Window): Long {
+        val hz = runCatching { window.graphicsConfiguration.device.displayMode.refreshRate }.getOrDefault(60)
+        val mode = 1_000_000_000L / (if (hz in 24..1000) hz else 60)
+        val dwm = runCatching { compositionPeriodNanos() }.getOrNull() ?: return mode
+        // The desktop composes at the fastest monitor's rate; trust it only when it agrees with
+        // the monitor the window is on.
+        return if (kotlin.math.abs(dwm - mode) < mode / 50) dwm else mode
     }
 
-    /** One monitor's output on its adapter, as the driver's vertical-blank call wants it. */
-    private class Output(private val adapter: Int, private val source: Int) {
+    /** DWM_TIMING_INFO.rateRefresh, from DwmGetCompositionTimingInfo. */
+    private fun compositionPeriodNanos(): Long? {
+        val info = Memory(TIMING_INFO_SIZE.toLong()).apply { clear(); setInt(0, TIMING_INFO_SIZE) }
+        val result = NativeLibrary.getInstance("dwmapi").getFunction("DwmGetCompositionTimingInfo")
+            .invokeInt(arrayOf<Any?>(null, info))
+        if (result != 0) return null
+        val numerator = info.getInt(4).toLong() and 0xFFFFFFFFL
+        val denominator = info.getInt(8).toLong() and 0xFFFFFFFFL
+        if (numerator == 0L || denominator == 0L) return null
+        return denominator * 1_000_000_000L / numerator
+    }
 
-        fun waitForBlank(): Boolean {
-            val wait = Memory(12).apply { clear(); setInt(0, adapter); setInt(8, source) }
-            return Win.waitForVerticalBlank.invokeInt(arrayOf(wait)) == 0
-        }
+    /** A high-resolution waitable timer: waits to well under a millisecond without spinning. One user, the UI thread. */
+    private object Timer {
+        private val kernel32 = NativeLibrary.getInstance("kernel32")
+        private val setTimer = kernel32.getFunction("SetWaitableTimer")
+        private val waitFor = kernel32.getFunction("WaitForSingleObject")
+        private val due = Memory(8)
 
-        fun close() {
-            val close = Memory(4).apply { setInt(0, adapter) }
-            runCatching { Win.closeAdapter.invokeInt(arrayOf(close)) }
-        }
+        val handle: Pointer? = runCatching {
+            kernel32.getFunction("CreateWaitableTimerExW")
+                .invokePointer(arrayOf<Any?>(null, null, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS))
+        }.getOrNull()
 
-        companion object {
-            /** [monitor] null: the primary one. */
-            fun open(monitor: Pointer?): Output? {
-                val dc: Pointer
-                val owned: Boolean
-                if (monitor == null) {
-                    dc = Win.getDC.invokePointer(arrayOf<Any?>(null)) ?: return null
-                    owned = false
-                } else {
-                    // MONITORINFOEXW: the device name follows the 40 bytes of MONITORINFO.
-                    val info = Memory(104).apply { clear(); setInt(0, 104) }
-                    if (Win.getMonitorInfo.invokeInt(arrayOf(monitor, info)) == 0) return null
-                    val name = WString(info.getWideString(40))
-                    dc = Win.createDC.invokePointer(arrayOf(name, name, null, null)) ?: return null
-                    owned = true
-                }
-                try {
-                    // D3DKMT_OPENADAPTERFROMHDC: hDc, hAdapter, AdapterLuid, VidPnSourceId.
-                    val open = Memory(24).apply { clear(); setPointer(0, dc) }
-                    if (Win.openAdapterFromHdc.invokeInt(arrayOf(open)) != 0) return null
-                    return Output(open.getInt(8), open.getInt(20))
-                } finally {
-                    if (owned) Win.deleteDC.invokeInt(arrayOf(dc)) else Win.releaseDC.invokeInt(arrayOf(null, dc))
-                }
-            }
+        fun waitNanos(nanos: Long) {
+            val timer = handle ?: return
+            // Relative times are negative, in units of 100 ns. Never more than two refreshes.
+            due.setLong(0, -(nanos.coerceIn(0, 20_000_000) / 100))
+            if (setTimer.invokeInt(arrayOf(timer, due, 0, null, null, 0)) == 0) return
+            waitFor.invokeInt(arrayOf(timer, WAIT_LIMIT_MS))
         }
     }
 
-    private object Win {
-        private val user32 = NativeLibrary.getInstance("user32")
-        private val gdi32 = NativeLibrary.getInstance("gdi32")
-        val monitorFromWindow = user32.getFunction("MonitorFromWindow")
-        val getMonitorInfo = user32.getFunction("GetMonitorInfoW")
-        val getDC = user32.getFunction("GetDC")
-        val releaseDC = user32.getFunction("ReleaseDC")
-        val createDC = gdi32.getFunction("CreateDCW")
-        val deleteDC = gdi32.getFunction("DeleteDC")
-        val openAdapterFromHdc = gdi32.getFunction("D3DKMTOpenAdapterFromHdc")
-        val waitForVerticalBlank = gdi32.getFunction("D3DKMTWaitForVerticalBlankEvent")
-        val closeAdapter = gdi32.getFunction("D3DKMTCloseAdapter")
-    }
-
-    private const val MONITOR_DEFAULTTONEAREST = 2
+    private const val CREATE_WAITABLE_TIMER_HIGH_RESOLUTION = 0x00000002
+    private const val TIMER_ALL_ACCESS = 0x1F0003
+    private const val WAIT_LIMIT_MS = 50
+    private const val TIMING_INFO_SIZE = 292
+    private const val PERIOD_CHECK_NANOS = 2_000_000_000L
     private const val CHECK_MS = 2_000
 }

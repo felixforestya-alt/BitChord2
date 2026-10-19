@@ -108,7 +108,11 @@ internal object DesktopFramePacing {
             }
             val due = minOf(next, maxOf(start, last + period + period / 16))
             if (due - start > MIN_WAIT_NANOS) Win.sleepFor(due - start)
-            return System.nanoTime()
+            val woke = System.nanoTime()
+            // The frame is timed as of the refresh it was started on, not as of when the timer
+            // got round to waking it, a fraction of a millisecond either way: everything that
+            // moves steps by exactly one refresh's worth a frame, as the screen shows it.
+            return if (due == next && woke - due in 0..period / 2) due else woke
         }
     }
 

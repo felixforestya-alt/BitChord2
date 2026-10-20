@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.rounded.Dashboard
 import com.music.bitchord.ui.components.longPressMenuClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -149,6 +150,10 @@ fun HomeScreen(
     isPlaying: Boolean = false,
     /** Scrolls in at the head of the feed, above everything — the desktop's greeting. */
     header: (@Composable () -> Unit)? = null,
+    /** Right under the heading, above the shelves — BitChord²'s My Jam. */
+    lead: (@Composable () -> Unit)? = null,
+    /** Opens Home's own settings, from a button beside the heading — BitChord²'s. */
+    onCustomize: (() -> Unit)? = null,
 ) {
     val recentsViewType by AppUi.host.homeRecentsViewType.collectAsStateWithLifecycle()
 
@@ -173,10 +178,13 @@ fun HomeScreen(
             },
         ) {
             if (title != null) {
-                item { HomeTitle(title) }
+                item { HomeTitle(title, onCustomize = onCustomize) }
             }
             if (header != null) {
                 item(key = "header") { header() }
+            }
+            if (lead != null) {
+                item(key = "lead") { lead() }
             }
             if (!signedIn && onSignIn != null) {
                 item {
@@ -340,22 +348,21 @@ private fun RecentShelf(
                 }
             }
         } else {
-            BoxWithConstraints {
-                val cardWidth = heroCardWidth(maxWidth)
-                ShelfRow(
-                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    items(shelf.items) { item ->
-                        HeroCard(
-                            item = item,
-                            onClick = { onItemClick(item) },
-                            onLongPress = onItemLongPress?.let { { it(item) } },
-                            modifier = Modifier.width(playingCardWidth(cardWidth, isCurrentItem(item), PLAYING_HERO_GROWTH)),
-                            isCurrent = isCurrentItem(item),
-                            isPlaying = isCurrentItem(item) && isPlaying,
-                        )
-                    }
+            // BitChord²: the covers at the size every other shelf's are, with their words at
+            // the size those have — the hero posters here were all cover and no title.
+            ShelfRow(
+                contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                itemsIndexed(shelf.items) { index, item ->
+                    ShelfCard(
+                        item = item,
+                        onClick = { onItemClick(item) },
+                        onLongPress = onItemLongPress?.let { { it(item) } },
+                        modifier = Modifier.width(playingCardWidth(SHELF_CARD_WIDTH, isCurrentItem(item), PLAYING_CARD_GROWTH)).cardEntrance(index),
+                        isCurrent = isCurrentItem(item),
+                        isPlaying = isCurrentItem(item) && isPlaying,
+                    )
                 }
             }
         }
@@ -511,7 +518,7 @@ fun CompactTrackRow(
  * system font scale.
  */
 @Composable
-private fun HomeTitle(title: String, modifier: Modifier = Modifier) {
+private fun HomeTitle(title: String, modifier: Modifier = Modifier, onCustomize: (() -> Unit)? = null) {
     val style = MaterialTheme.typography.displayLarge
     val logoHeight = with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() }
     Column(modifier = modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
@@ -524,11 +531,32 @@ private fun HomeTitle(title: String, modifier: Modifier = Modifier) {
                 .height(logoHeight)
                 .aspectRatio(LOGO_ASPECT),
         )
-        Text(
-            text = title,
-            style = style,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
+        androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                style = style,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
+            )
+            if (onCustomize != null) {
+                // Home's settings by its heading, as the desktop has them by its greeting.
+                androidx.compose.foundation.layout.Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.10f))
+                        .clickable(onClick = onCustomize),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Rounded.Dashboard,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+        }
     }
 }
 

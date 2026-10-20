@@ -101,6 +101,8 @@ fun GlassNavBar(
     dock: PlayerDock? = null,
     /** Dragging the bar's player up into the full player. */
     pull: MiniPlayerPull? = null,
+    /** How far through the track, 0 to 1 — drawn as a hairline along the player, nothing more. */
+    progress: () -> Float = { 0f },
     modifier: Modifier = Modifier,
 ) {
     // Held for the same reason [tabs] is. The glass factory below closes over
@@ -153,6 +155,7 @@ fun GlassNavBar(
                     onBlockedControl = onBlockedControl,
                     dock = dock,
                     pull = pull,
+                    progress = progress,
                     modifier = accessoryModifier.then(glassSurface()),
                 )
             }
@@ -173,6 +176,7 @@ fun GlassNavBar(
                     onBlockedControl = onBlockedControl,
                     dock = dock,
                     pull = pull,
+                    progress = progress,
                     modifier = accessoryModifier.fillMaxWidth().then(glassSurface()),
                 )
             }
@@ -289,6 +293,7 @@ private fun GlassNowPlaying(
     onBlockedControl: () -> Unit,
     dock: PlayerDock?,
     pull: MiniPlayerPull?,
+    progress: () -> Float,
     modifier: Modifier = Modifier,
 ) {
     val haptics = rememberHaptics()
@@ -337,6 +342,7 @@ private fun GlassNowPlaying(
                 scaleY = pressScale
             }
             .then(modifier)
+            .miniProgress(progress, contentColor)
             .clickable(
                 interactionSource = pressSource,
                 indication = null,
@@ -401,6 +407,20 @@ private fun GlassNowPlaying(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+            // BitChord²: back as well as forward, expanded.
+            if (!isInline) {
+                IconButton(
+                    onClick = {
+                        haptics.play(Haptic.SkipPrevious)
+                        onPrevious()
+                    },
+                    enabled = !controlsLocked,
+                    modifier = Modifier.size(glyphSlot),
+                ) {
+                    MiniPlayerPreviousGlyph(tint = contentColor.copy(alpha = if (controlsLocked) 0.3f else 1f))
+                }
+                Spacer(Modifier.width(8.dp))
             }
             if (isLoading) {
                 Box(Modifier.size(glyphSlot), contentAlignment = Alignment.Center) {

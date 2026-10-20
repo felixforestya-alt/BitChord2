@@ -423,11 +423,12 @@ internal fun LandscapeCredits(
     onOpenArtist: (browseId: String?, name: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+    val buttons = LocalCreditsButtonsPlacement.current
+    val words: @Composable (Modifier, Modifier) -> Unit = { wordsModifier, artistModifier ->
         Crossfade(
             targetState = song.title to song.artist,
             animationSpec = tween(durationMillis = 300),
-            modifier = Modifier.weight(1f),
+            modifier = wordsModifier,
             label = "landscapeCredits",
         ) {
             Column {
@@ -456,31 +457,80 @@ internal fun LandscapeCredits(
                     // together reads as clutter, so the artist waits a beat.
                     startDelayMillis = if (titleOverflowing) MARQUEE_ARTIST_STAGGER_MS else 0L,
                     onOpenArtist = onOpenArtist,
+                    modifier = artistModifier,
                 )
             }
         }
-        Spacer(Modifier.width(10.dp))
-        // Same gate as the portrait player's: no account to like against for a
-        // guest, and no YouTube identity to rate a local file or a finished
-        // download against either.
-        if (signedIn && song.localUri == null) {
-            val liked = likeStatus == LikeStatus.LIKE
+    }
+    val glyphs: @Composable () -> Unit = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Same gate as the portrait player's: no account to like against for a
+            // guest, and no YouTube identity to rate a local file or a finished
+            // download against either.
+            if (signedIn && song.localUri == null) {
+                val liked = likeStatus == LikeStatus.LIKE
+                CircleGlyph(
+                    icon = if (liked) BitChordIcons.HeartFilled else BitChordIcons.Heart,
+                    contentDescription = stringResource(
+                        if (liked) Res.string.remove_from_liked else Res.string.like,
+                    ),
+                    onClick = onToggleLike,
+                    active = liked,
+                    haptic = if (liked) Haptic.ToggleOff else Haptic.ToggleOn,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
             CircleGlyph(
-                icon = if (liked) BitChordIcons.HeartFilled else BitChordIcons.Heart,
-                contentDescription = stringResource(
-                    if (liked) Res.string.remove_from_liked else Res.string.like,
-                ),
-                onClick = onToggleLike,
-                active = liked,
-                haptic = if (liked) Haptic.ToggleOff else Haptic.ToggleOn,
+                icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
+                contentDescription = stringResource(Res.string.more),
+                onClick = onOpenMenu,
             )
-            Spacer(Modifier.width(8.dp))
         }
-        CircleGlyph(
-            icon = if (showRevertCue) Icons.AutoMirrored.Rounded.Undo else Icons.Rounded.MoreHoriz,
-            contentDescription = stringResource(Res.string.more),
-            onClick = onOpenMenu,
-        )
+    }
+    if (buttons.byArtist) {
+        // The title the whole width; the buttons at the end of the artist's line, hanging below
+        // it by [CreditsButtonsPlacement.offset], and taking only the artist's width.
+        Box(modifier) {
+            words(Modifier.fillMaxWidth(), Modifier.padding(end = buttons.artistEnd))
+            Box(Modifier.align(Alignment.BottomEnd).offset(y = buttons.offset)) { glyphs() }
+        }
+        return
+    }
+    Row(modifier = modifier, verticalAlignment = buttons.alignment) {
+        words(Modifier.weight(1f), Modifier)
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.offset(y = buttons.offset)) { glyphs() }
+    }
+}
+
+/**
+ * Where the like and menu buttons sit against the title and artist beside them: centred between
+ * the two, or — the disc player's, whose words are set large — dropped by [offset] below the
+ * title, beside the artist.
+ */
+internal data class CreditsButtonsPlacement(
+    val alignment: Alignment.Vertical = Alignment.CenterVertically,
+    val offset: androidx.compose.ui.unit.Dp = 0.dp,
+    /** The buttons at the end of the artist's line, the title running the whole width over them. */
+    val byArtist: Boolean = false,
+    /** With [byArtist], the room the artist's line leaves them. */
+    val artistEnd: androidx.compose.ui.unit.Dp = 0.dp,
+)
+
+internal val LocalCreditsButtonsPlacement = androidx.compose.runtime.staticCompositionLocalOf { CreditsButtonsPlacement() }
+
+/**
+ * How big the lyrics pane's two toggles are drawn, and how far its bottom row stands off what is
+ * under it — larger on the disc player, whose deck sits right below.
+ */
+internal data class LyricsPaneControls(val scale: Float = 1f, val bottomGap: androidx.compose.ui.unit.Dp = 0.dp)
+
+internal val LocalLyricsPaneControls = androidx.compose.runtime.staticCompositionLocalOf { LyricsPaneControls() }
+
+@Composable
+private fun ScaledToggle(scale: Float, content: @Composable () -> Unit) {
+    Box(Modifier.size(34.dp * scale), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(34.dp).graphicsLayer { scaleX = scale; scaleY = scale }, contentAlignment = Alignment.Center) { content() }
     }
 }
 
@@ -538,27 +588,34 @@ internal fun LandscapeLyricsPane(
         if (picking) {
             Box(Modifier.fillMaxWidth()) { pickBar() }
         } else {
+        val controls = LocalLyricsPaneControls.current
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 10.dp),
+                .padding(top = 10.dp, bottom = controls.bottomGap),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Fixed slots either side whether or not the toggles are drawn, so
             // the status line stays centred as lyrics arrive.
-            Box(Modifier.size(34.dp)) { if (hasLyrics) romanizationToggle() }
+            ScaledToggle(controls.scale) { if (hasLyrics) romanizationToggle() }
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                LyricsStatusWithChange(
-                    status = status,
-                    onStatusClick = onStatusClick,
-                )
+                // Scaled with the toggles either side of it.
+                val here = androidx.compose.ui.platform.LocalDensity.current
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(here.density, here.fontScale * minOf(1f, controls.scale)),
+                ) {
+                    LyricsStatusWithChange(
+                        status = status,
+                        onStatusClick = onStatusClick,
+                    )
+                }
             }
-            Box(Modifier.size(34.dp)) { if (hasLyrics) translationToggle() }
+            ScaledToggle(controls.scale) { if (hasLyrics) translationToggle() }
         }
         }
     }

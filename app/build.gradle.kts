@@ -121,7 +121,10 @@ android {
         }
         create("prod") {
             dimension = "env"
-            // Matches defaultConfig — this is the package already shipped/installed.
+            // BitChord², the fork: a package of its own, so it installs beside the original
+            // BitChord rather than over it.
+            applicationId = "com.felixforestya.bitchord2"
+            resValue("string", "app_name", "BitChord²")
         }
     }
 
@@ -186,6 +189,17 @@ android {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
             applicationIdSuffix = ".benchmark"
+            matchingFallbacks += listOf("release")
+        }
+        /*
+         * BitChord²: the release build — R8, the baseline profile, a non-debuggable runtime —
+         * under the app's own package and signed with the debug key, so it installs straight
+         * over a debug build of the fork and keeps the listener's sign-in and settings.
+         * `./gradlew assembleProdFast`.
+         */
+        create("fast") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
         }
     }

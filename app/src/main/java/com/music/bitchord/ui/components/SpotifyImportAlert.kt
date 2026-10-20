@@ -34,6 +34,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.music.bitchord.R
+import com.music.bitchord.bc2.PlaylistImport
+import com.music.bitchord.bc2.bc2
 import com.music.bitchord.data.model.PlaylistPrivacy
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.spotify.SpotifyImportTrack
@@ -71,9 +73,12 @@ fun SpotifyImportAlert(
     var unmatched by remember { mutableStateOf<List<SpotifyImportTrack>?>(null) }
 
     fun start() {
-        val id = SpotifyImporter.extractPlaylistId(link)
-        if (id == null) {
-            status = context.getString(R.string.spotify_import_invalid)
+        // BitChord²: any service the import reads, or tracks pasted as text — see [PlaylistImport].
+        if (PlaylistImport.detect(link) == null) {
+            status = bc2(
+                "Нужна ссылка на плейлист Spotify, Яндекс Музыки, Apple Music, Deezer или SoundCloud — или треки текстом.",
+                "Paste a Spotify, Yandex Music, Apple Music, Deezer or SoundCloud playlist link — or the tracks as text.",
+            )
             failed = true
             return
         }
@@ -82,7 +87,7 @@ fun SpotifyImportAlert(
         status = context.getString(R.string.spotify_import_fetching)
         scope.launch {
             try {
-                val (name, tracks) = SpotifyImporter.fetchPlaylistTracks(id)
+                val (name, tracks) = PlaylistImport.fetch(link)
                 val (songs, missed) = SpotifyImporter.resolveToSongs(tracks) { done, total ->
                     status = context.getString(R.string.spotify_import_matching, done, total)
                 }
@@ -107,7 +112,7 @@ fun SpotifyImportAlert(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = stringResource(R.string.spotify_import_title),
+                text = bc2("Импорт плейлиста", "Import a playlist"),
                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.W600),
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center,
@@ -163,7 +168,7 @@ fun SpotifyImportAlert(
                             failed = false
                         }
                     },
-                    placeholder = stringResource(R.string.spotify_import_hint),
+                    placeholder = bc2("Ссылка или «Исполнитель — Название» по строкам", "A link, or \"Artist — Title\" per line"),
                     enabled = !working,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { if (link.isNotBlank() && !working) start() }),

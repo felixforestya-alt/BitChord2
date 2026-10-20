@@ -190,15 +190,17 @@ fun Modifier.liquidGlassRim(shape: CornerBasedShape): Modifier {
  * throws for any other shape type.
  */
 @Composable
-fun Modifier.liquidGlass(shape: CornerBasedShape): Modifier {
+fun Modifier.liquidGlass(shape: CornerBasedShape, sampling: Backdrop? = null): Modifier {
     if (!isGlassSupported()) return this
     val reduceDynamicBlur by AppSettings.reduceDynamicBlur.collectAsStateWithLifecycle()
     if (reduceDynamicBlur) {
         return background(MaterialTheme.colorScheme.surface, shape)
             .border(GLASS_EDGE_WIDTH, GLASS_EDGE_COLOR, shape)
     }
-    val backdrop = LocalAppBackdrop.current
-    val exportedBackdrop = LocalGlassExport.current
+    // What the glass refracts: the app's own page, or [sampling] for a surface that stands over
+    // something else — the disc player's deck over its room.
+    val backdrop = sampling ?: LocalAppBackdrop.current
+    val exportedBackdrop = if (sampling == null) LocalGlassExport.current else null
     val density = LocalDensity.current
     val blurPx = with(density) { BLUR_RADIUS_DP.dp.toPx() } * GLASS_RESOLUTION_SCALE
     val lensHeightPx = with(density) { (LENS_HEIGHT * LENS_MAX_DP).dp.toPx() } * GLASS_RESOLUTION_SCALE

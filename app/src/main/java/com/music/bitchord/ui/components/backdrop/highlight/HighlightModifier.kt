@@ -93,6 +93,12 @@ internal class HighlightNode(
 
     private var prevStyle: HighlightStyle? = null
 
+    // Vendored change: what the rim layer was last recorded for. The rim is the same frame
+    // after frame, but upstream re-recorded it on every draw — and a re-recorded layer with a
+    // blend mode has its whole surface-sized buffer, blurred stroke and shader, rendered again
+    // on the GPU, every frame the glass beneath it moves.
+    private var recordedFor: Any? = null
+
     override fun ContentDrawScope.draw() {
         val highlight = highlight()
         if (highlight == null || highlight.width.value <= 0f) {
@@ -121,10 +127,12 @@ internal class HighlightNode(
                     null
                 }
 
-            configurePaint(highlight)
-
             highlightLayer.alpha = highlight.alpha
             highlightLayer.blendMode = highlight.style.blendMode
+            val key = listOf(safeSize, outline, highlight, density.density, layoutDirection)
+            if (key != recordedFor) {
+            recordedFor = key
+            configurePaint(highlight)
             highlightLayer.record(safeSize) {
                 translate(1f, 1f) {
                     val canvas = drawContext.canvas
@@ -133,6 +141,7 @@ internal class HighlightNode(
                     canvas.drawOutline(outline, paint)
                     canvas.restore()
                 }
+            }
             }
 
             translate(-1f, -1f) {
@@ -153,6 +162,7 @@ internal class HighlightNode(
             highlightLayer = null
         }
         clipPath = null
+        recordedFor = null
         runtimeShaderCache.clear()
         prevStyle = null
     }

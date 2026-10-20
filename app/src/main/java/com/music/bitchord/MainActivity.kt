@@ -275,6 +275,14 @@ import com.music.bitchord.ui.components.FieldConfig
 import com.music.bitchord.ui.icons.BitChordIcons
 import androidx.media3.common.Player
 import com.music.bitchord.data.YtMusicRepository
+import com.music.bitchord.bc2.HomeCustomizeSheet
+import com.music.bitchord.bc2.Bc2ExploreScreen
+import com.music.bitchord.ui.player.LivingBackdrop
+import com.music.bitchord.bc2.HomeShelves
+import com.music.bitchord.bc2.JamCard
+import com.music.bitchord.bc2.JamSeeds
+import com.music.bitchord.bc2.JamSettingsSheet
+import com.music.bitchord.bc2.MyJam
 import com.music.bitchord.ui.player.NowPlayingScreen
 import com.music.bitchord.ui.player.PlayerSheetMotion
 import androidx.compose.ui.geometry.Offset
@@ -510,6 +518,10 @@ private fun BitChordApp(
     // player's cover reports itself here, the sheet its offset, and the player
     // flies its artwork between them — see [PlayerDock].
     val playerDock = remember { PlayerDock() }
+    // BitChord²: what moves on the page stands still while the player covers it — see [PageCover].
+    LaunchedEffect(playerDock) {
+        androidx.compose.runtime.snapshotFlow { playerDock.openFraction() >= 0.99f }.collect { com.music.bitchord.ui.components.PageCover.covered = it }
+    }
     // Who moves the player sheet when the app does rather than M3: a tap's
     // open, the pull up from the mini player, and every close — see
     // [PlayerSheetMotion].
@@ -713,6 +725,13 @@ private fun BitChordApp(
     )
 
     val homeState by viewModel.home.collectAsStateWithLifecycle()
+    // Home as the listener arranged it: their order, without the shelves they took off.
+    val hiddenShelves by HomeShelves.hidden.collectAsStateWithLifecycle()
+    val shelfOrder by HomeShelves.order.collectAsStateWithLifecycle()
+    val jamShown by MyJam.shown.collectAsStateWithLifecycle()
+    val visibleHome = remember(homeState, hiddenShelves, shelfOrder) {
+        (homeState as? UiState.Success)?.let { UiState.Success(HomeShelves.visible(it.data)) } ?: homeState
+    }
     val homeLoadingMore by viewModel.homeLoadingMore.collectAsStateWithLifecycle()
     val homeRecentlyPlayedLoading by viewModel.homeRecentlyPlayedLoading.collectAsStateWithLifecycle()
 
@@ -948,6 +967,11 @@ private fun BitChordApp(
     }
     val controller = rememberMediaController()
     val player = rememberPlayerState(controller)
+    // The floating player's hairline: how far through the track, read where it is drawn.
+    val miniProgress: () -> Float = {
+        val duration = player.durationMs
+        if (duration > 0) player.position.positionMs.toFloat() / duration else 0f
+    }
     // A resume in a party is performed on the instant the server schedules, not
     // when it was pressed, and nothing about the player moves in between — so
     // the transport spends that round trip drawn as though the tap never landed.
@@ -1057,11 +1081,25 @@ private fun BitChordApp(
         }
     }
 
-    val homeListState = rememberLazyListState()
-    val exploreListState = rememberLazyListState()
-    val moodGenreListState = rememberLazyListState()
-    val libraryListState = rememberLazyListState()
-    val historyListState = rememberLazyListState()
+    // BitChord²: the feeds lay out what is about to scroll in ahead of time, between frames,
+    // and keep what just left for a moment — a shelf with its row of covers was otherwise
+    // composed whole in the one frame it came into view, and that frame came late.
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val feedCacheWindow = remember {
+        androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow(ahead = 900.dp, behind = 400.dp)
+    }
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val homeListState = rememberLazyListState(cacheWindow = feedCacheWindow)
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val exploreListState = rememberLazyListState(cacheWindow = feedCacheWindow)
+    // BitChord²'s Explore is a grid — see [Bc2ExploreScreen].
+    val exploreGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val moodGenreListState = rememberLazyListState(cacheWindow = feedCacheWindow)
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val libraryListState = rememberLazyListState(cacheWindow = feedCacheWindow)
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    val historyListState = rememberLazyListState(cacheWindow = feedCacheWindow)
     val libraryShowAllGridState = rememberLazyGridState()
     val searchListState = rememberLazyListState()
     val currentListState = when (selectedTab) {
@@ -1580,6 +1618,75 @@ private fun BitChordApp(
                 ).show()
             }
         }
+    }
+    // ---- BitChord²: My Jam, and Home's own settings — see [MyJam], [HomeShelves] ----------------
+    var jamStarting by remember { mutableStateOf(false) }
+    var jamSettingsOpen by remember { mutableStateOf(false) }
+    var homeCustomizeOpen by remember { mutableStateOf(false) }
+    /**
+     * Starts My Jam: its first tracks from the listener's likes, history or a playlist, as the jam
+     * is set to, in place of the queue — loaded before the player is touched, as [startRadio] is,
+     * so a failed request leaves what was playing alone. AutoPlay grows it from there.
+     */
+    val startJam: () -> Unit = start@{
+        if (jamStarting || controller == null || refusedByHost()) return@start
+        jamStarting = true
+        val request = ++playRequestGeneration
+        scope.launch {
+            try {
+                val liked = (viewModel.library.value as? UiState.Success)?.data?.likedSongs.orEmpty()
+                val history = (viewModel.history.value as? UiState.Success)?.data
+                    ?: YtMusicRepository.history().getOrNull().orEmpty()
+                // Signed out there is no account to read: the feed's own picks, then.
+                val played = history.ifEmpty {
+                    (viewModel.home.value as? UiState.Success)?.data.orEmpty()
+                        .flatMap { it.items }.mapNotNull { item ->
+                            item.videoId?.let { id ->
+                                Song(
+                                    videoId = id,
+                                    title = item.title,
+                                    artist = InnertubeParser.artistFromSubtitle(item.subtitle),
+                                    thumbnailUrl = item.thumbnailUrl,
+                                )
+                            }
+                        }
+                }
+                val fromPlaylist = if (MyJam.seeds.value == JamSeeds.PLAYLIST) {
+                    MyJam.playlist.value?.first?.let { YtMusicRepository.playlistEntries(it).getOrNull() }.orEmpty()
+                } else {
+                    emptyList()
+                }
+                val batch = MyJam.start(liked, played, fromPlaylist)
+                val activeController = controller
+                if (request != playRequestGeneration || activeController == null) return@launch
+                if (batch.isEmpty()) {
+                    Toast.makeText(context, R.string.couldnt_load_tracks, Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                val station = batch.mapIndexed { i, song ->
+                    if (i == 0) song.copy(queueTier = QueueTier.CONTEXT, radioName = MyJam.radioName, playbackSource = MyJam.radioName) else song
+                }
+                activeController.beginRadioQueue()
+                activeRadioSeed = null
+                activeController.playSongs(station, 0)
+                activeController.commitRadioQueue()
+            } finally {
+                jamStarting = false
+            }
+        }
+    }
+    if (jamSettingsOpen) {
+        JamSettingsSheet(
+            playlists = playlists.map { it.browseId to it.title },
+            onRestart = startJam,
+            onDismiss = { jamSettingsOpen = false },
+        )
+    }
+    if (homeCustomizeOpen) {
+        HomeCustomizeSheet(
+            shelfTitles = (homeState as? UiState.Success)?.data?.map { it.title }.orEmpty(),
+            onDismiss = { homeCustomizeOpen = false },
+        )
     }
     val addToQueue: (Song) -> Unit = { song ->
         scope.launch {
@@ -3094,8 +3201,15 @@ private fun BitChordApp(
                             contentPadding = listPadding,
                         )
                     } else when (key.removePrefix(TAB_KEY).toIntOrNull() ?: selectedTab) {
-                        TAB_HOME -> HomeScreen(
-                            state = homeState,
+                        TAB_HOME -> Box(Modifier.fillMaxSize()) {
+                        // BitChord²: Home lit by what is playing, as the desktop's is.
+                        LivingBackdrop(
+                            coverUrl = player.song?.thumbnailUrl,
+                            covered = { playerDock.openFraction() >= 0.99f },
+                            modifier = Modifier.matchParentSize(),
+                        )
+                        HomeScreen(
+                            state = visibleHome,
                             listState = homeListState,
                             currentSong = player.song,
                             isPlaying = player.isPlaying,
@@ -3130,7 +3244,29 @@ private fun BitChordApp(
                             onLoadMore = viewModel::loadMoreHome,
                             loadingMore = homeLoadingMore,
                             recentlyPlayedLoading = homeRecentlyPlayedLoading,
+                            onCustomize = { homeCustomizeOpen = true },
+                            lead = if (jamShown) {
+                                {
+                                    val jamPlaying = MyJam.isJam(player.song?.radioName)
+                                    JamCard(
+                                        starting = jamStarting,
+                                        playing = jamPlaying,
+                                        paused = jamPlaying && !player.isPlaying,
+                                        current = player.song.takeIf { jamPlaying },
+                                        coverUrl = player.song?.thumbnailUrl,
+                                        onPlay = startJam,
+                                        onPlayPause = togglePlayPause,
+                                        onSkip = { controller?.seekToNextMediaItem() },
+                                        onTune = { jamSettingsOpen = true },
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
+                                        visible = { playerDock.openFraction() < 0.99f },
+                                    )
+                                }
+                            } else {
+                                null
+                            },
                         )
+                        }
                         TAB_EXPLORE -> selectedMoodGenre?.let { category ->
                             MoodGenrePlaylistsScreen(
                                 title = category.title,
@@ -3163,9 +3299,16 @@ private fun BitChordApp(
                                 onRetry = { viewModel.openMoodGenre(category) },
                                 contentPadding = listPadding,
                             )
-                        } ?: ExploreScreen(
+                        } ?: Box(Modifier.fillMaxSize()) {
+                            // BitChord²: lit by what is playing, as Home is.
+                            LivingBackdrop(
+                                coverUrl = player.song?.thumbnailUrl,
+                                covered = { playerDock.openFraction() >= 0.99f },
+                                modifier = Modifier.matchParentSize(),
+                            )
+                            Bc2ExploreScreen(
                             state = exploreState,
-                            listState = exploreListState,
+                            gridState = exploreGridState,
                             onCategoryClick = viewModel::openMoodGenre,
                             onRetry = viewModel::loadExplore,
                             refreshing = MainViewModel.Feed.EXPLORE in refreshing,
@@ -3173,6 +3316,7 @@ private fun BitChordApp(
                             pullState = explorePull,
                             contentPadding = listPadding,
                         )
+                        }
                         TAB_SEARCH -> SearchScreen(
                             query = query,
                             onQueryChange = viewModel::onQueryChange,
@@ -3348,7 +3492,14 @@ private fun BitChordApp(
                                 )
                             },
                         )
-                        else -> LibraryScreen(
+                        else -> Box(Modifier.fillMaxSize()) {
+                            // BitChord²: lit by what is playing, as Home and Explore are.
+                            LivingBackdrop(
+                                coverUrl = player.song?.thumbnailUrl,
+                                covered = { playerDock.openFraction() >= 0.99f },
+                                modifier = Modifier.matchParentSize(),
+                            )
+                            LibraryScreen(
                             signedIn = signedIn,
                             state = libraryState.withChosenCovers(playlistCovers),
                             listState = libraryListState,
@@ -3382,6 +3533,7 @@ private fun BitChordApp(
                             links = libraryLinks(),
                             deviceItems = libraryDeviceItems(downloadedReleases) + localPlaylistItems,
                         )
+                        }
                     }
                 }
 
@@ -4002,6 +4154,7 @@ private fun BitChordApp(
                         onBlockedControl = showHostOnlyNotice,
                         dock = activeDock,
                         pull = playerSheetMotion.takeIf { !reducePlayerMotion },
+                        progress = miniProgress,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else Column(
@@ -4039,6 +4192,7 @@ private fun BitChordApp(
                             onBlockedControl = showHostOnlyNotice,
                             dock = activeDock,
                             pull = playerSheetMotion.takeIf { !reducePlayerMotion },
+                            progress = miniProgress,
                             modifier = Modifier.fillMaxWidth(),
                         )
                         Spacer(Modifier.height(8.dp))
@@ -4047,6 +4201,7 @@ private fun BitChordApp(
                         tabs = tabs,
                         selectedIndex = selectedTab,
                         hazeState = hazeState,
+                        coverUrl = player.song?.thumbnailUrl,
                         onTabSelected = onTabSelected,
                     )
                 }

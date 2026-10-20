@@ -57,6 +57,7 @@ import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.FilterAlt
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Gradient
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Groups
@@ -224,6 +225,8 @@ fun SettingsScreen(
     val signatureApiUrl by AppSettings.signatureApiUrl.collectAsStateWithLifecycle()
     val fullBleedArtwork by AppSettings.fullBleedArtwork.collectAsStateWithLifecycle()
     val legacyMeshGradient by AppSettings.legacyMeshGradient.collectAsStateWithLifecycle()
+    val discPlayer by AppSettings.discPlayer.collectAsStateWithLifecycle()
+    val discHeading by AppSettings.discHeading.collectAsStateWithLifecycle()
     val syncedLyrics by AppSettings.syncedLyrics.collectAsStateWithLifecycle()
     val lyricsSources by AppSettings.lyricsSources.collectAsStateWithLifecycle()
     val translationLanguage by AppSettings.translationLanguage.collectAsStateWithLifecycle()
@@ -882,6 +885,46 @@ fun SettingsScreen(
                             )
                         },
                         onClick = { AppSettings.setFullBleedArtwork(!fullBleedArtwork) },
+                    )
+                }
+            }
+            val discPlayerTitle = stringResource(R.string.disc_player)
+            row(discPlayerTitle, "disc", "cd", "player") {
+                SettingsRow(
+                    icon = Icons.Rounded.Album,
+                    title = discPlayerTitle,
+                    subtitle = stringResource(R.string.disc_player_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = discPlayer,
+                            onCheckedChange = AppSettings::setDiscPlayer,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setDiscPlayer(!discPlayer) },
+                )
+            }
+            if (discPlayer) {
+                val discHeadingTitle = stringResource(R.string.disc_heading)
+                row(discHeadingTitle, "now playing", "heading", "disc") {
+                    SettingsRow(
+                        icon = Icons.Rounded.Album,
+                        title = discHeadingTitle,
+                        subtitle = stringResource(R.string.disc_heading_subtitle),
+                        trailing = {
+                            Switch(
+                                checked = discHeading,
+                                onCheckedChange = AppSettings::setDiscHeading,
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                    checkedBorderColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            )
+                        },
+                        onClick = { AppSettings.setDiscHeading(!discHeading) },
                     )
                 }
             }

@@ -124,6 +124,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
+import androidx.compose.material.icons.rounded.HideImage
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.AccountCircle
@@ -657,6 +659,8 @@ fun BitChordDesktopApp() {
     // History screen is and what makes a phone and a desktop agree.
     var history by remember { mutableStateOf(persistence.history()) }
     var remoteHistory by remember { mutableStateOf<List<Song>>(emptyList()) }
+    /** For each track of [remoteHistory], the token that takes it out of the account's history. */
+    var remoteHistoryTokens by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var likedIds by remember { mutableStateOf(persistence.likedIds()) }
     // In-flight tail of the Liked Music chain; replaced whenever the library is fetched again.
     var likedSyncJob by remember { mutableStateOf<Job?>(null) }
@@ -775,6 +779,8 @@ fun BitChordDesktopApp() {
     val activeAccount = accounts.firstOrNull { it.accountId == activeAccountId } ?: accounts.firstOrNull()
     // The account's own library, fetched once a session is in force.
     var libraryState by remember { mutableStateOf<UiState<LibraryPage>>(UiState.Loading) }
+    /** Covers the listener picked for their own playlists — see [DesktopPlaylistCovers]. */
+    val playlistCovers by DesktopPlaylistCovers.covers.collectAsState()
     // Whether YouTube is actually accepting the session, which is not the same as having an account
     // saved.
     // Taken as signed in from launch when an account is saved, so the sidebar shows it rather than
@@ -2489,7 +2495,10 @@ fun BitChordDesktopApp() {
     // point of it is that something played elsewhere shows up here.
     LaunchedEffect(destination, youtubeSignedIn, sessionRevision) {
         if (destination != DesktopDestination.HISTORY || !youtubeSignedIn) return@LaunchedEffect
-        DesktopSearchClient.history().onSuccess { remoteHistory = it }
+        DesktopSearchClient.historyWithRemoval().onSuccess { (songs, tokens) ->
+            remoteHistory = songs
+            remoteHistoryTokens = tokens
+        }
     }
     LaunchedEffect(selectedSong?.videoId) {
         trackLinks = null
@@ -3343,6 +3352,24 @@ fun BitChordDesktopApp() {
     }
 
     /** Takes one row back out of the playlist it is being read in. */
+    /**
+     * Takes a track out of the history: out of what this computer played, and — signed in — out
+     * of the account's own, which is what Home's recents are made of.
+     */
+    fun removeFromHistory(song: Song) {
+        history = history.filterNot { it.videoId == song.videoId }
+        persistence.saveHistory(history)
+        val token = remoteHistoryTokens[song.videoId]
+        remoteHistory = remoteHistory.filterNot { it.videoId == song.videoId }
+        if (token != null) {
+            scope.launch {
+                DesktopSearchClient.removeFromHistory(listOf(token)).onFailure {
+                    DesktopTrackLog.log("history: could not remove ${song.videoId}: ${it.message}")
+                }
+            }
+        }
+    }
+
     fun removeFromOpenPlaylist(song: Song) {
         val collection = openedCollection ?: return
         val setVideoId = song.setVideoId ?: return
@@ -5055,10 +5082,19 @@ fun BitChordDesktopApp() {
                             onDismiss = onDismiss,
                             // On a row of a playlist of one's own, the way out of it — the row's
                             // own (−) button, offered where the right click is.
-                            onRemoveFromList = openedCollection
-                                ?.takeIf { it.owned == true && song.setVideoId != null }
-                                ?.takeIf { page -> page.songs.any { it.setVideoId == song.setVideoId } }
-                                ?.let { { removeFromOpenPlaylist(song) } },
+                            onRemoveFromList = if (destination == DesktopDestination.HISTORY && openedCollection == null) {
+                                { removeFromHistory(song) }
+                            } else {
+                                openedCollection
+                                    ?.takeIf { it.owned == true && song.setVideoId != null }
+                                    ?.takeIf { page -> page.songs.any { it.setVideoId == song.setVideoId } }
+                                    ?.let { { removeFromOpenPlaylist(song) } }
+                            },
+                            removeFromListLabel = if (destination == DesktopDestination.HISTORY && openedCollection == null) {
+                                DesktopStrings["d_remove_from_history", "Remove from history"]
+                            } else {
+                                null
+                            },
                         )
                     },
                 ) { openMenu ->
@@ -5452,7 +5488,20 @@ fun BitChordDesktopApp() {
                             }
                         }
                         openedCollection != null -> DesktopCollectionPage(
-                            collection = openedCollection!!,
+                            collection = openedCollection!!.let { page ->
+                                playlistCovers[page.browseId]?.let { page.copy(thumbnailUrl = it) } ?: page
+                            },
+                            // A playlist of one's own — on the account or on this computer — can
+                            // wear a picture of one's choosing.
+                            onChangeCover = openedCollection
+                                ?.takeIf { page ->
+                                    page.type == BrowseType.PLAYLIST &&
+                                        (page.owned == true || playlists.any { it.id == page.browseId })
+                                }
+                                ?.let { page -> { DesktopPlaylistCovers.choose(page.browseId) } },
+                            onResetCover = openedCollection
+                                ?.takeIf { it.browseId in playlistCovers }
+                                ?.let { page -> { DesktopPlaylistCovers.reset(page.browseId) } },
                             loadingMore = collectionLoadingMore,
                             onLoadMore = ::loadMoreCollectionSongs,
                             onRename = { overlays.rename = true }.takeIf { openedCollection?.owned == true },
@@ -5712,10 +5761,16 @@ fun BitChordDesktopApp() {
                             // Without the parts switched off in Customize Library.
                             state = libraryHidden.let { hidden ->
                                 val page = (libraryState as? UiState.Success)?.data
-                                if (page == null || hidden.isEmpty()) {
+                                if (page == null || (hidden.isEmpty() && playlistCovers.isEmpty())) {
                                     libraryState
                                 } else {
-                                    UiState.Success(page.copy(shelves = page.shelves.filterNot { DesktopLibrarySections.isHidden(hidden, it.title) }))
+                                    UiState.Success(
+                                        page.copy(
+                                            shelves = page.shelves
+                                                .filterNot { DesktopLibrarySections.isHidden(hidden, it.title) }
+                                                .map { shelf -> shelf.copy(items = shelf.items.map { it.withChosenCover(playlistCovers) }) },
+                                        ),
+                                    )
                                 }
                             },
                             listState = libraryListState,
@@ -5761,7 +5816,7 @@ fun BitChordDesktopApp() {
                             pullState = rememberPullToRefreshState(),
                             contentPadding = sharedPagePadding,
                             links = libraryLinks.filterNot { DesktopLibrarySections.isHidden(libraryHidden, it.item.title) },
-                            deviceItems = if (DesktopLibrarySections.isHidden(libraryHidden, DesktopLibrarySections.ON_DEVICE)) emptyList() else libraryDeviceItems,
+                            deviceItems = if (DesktopLibrarySections.isHidden(libraryHidden, DesktopLibrarySections.ON_DEVICE)) emptyList() else libraryDeviceItems.map { it.withChosenCover(playlistCovers) },
                             showTitle = false,
                         )
                         destination == DesktopDestination.HISTORY -> DesktopHistoryPage(
@@ -5775,6 +5830,7 @@ fun BitChordDesktopApp() {
                             downloadInProgress = downloadInProgress,
                             contentPadding = contentPadding,
                             menu = { song -> songMenu(song) },
+                            onRemove = ::removeFromHistory,
                         )
                         destination == DesktopDestination.DOWNLOADS -> Box(Modifier.fillMaxSize()) {
                             DesktopDownloadsPage(
@@ -7220,6 +7276,8 @@ private fun DesktopHistoryPage(
     downloadInProgress: Set<String>,
     contentPadding: PaddingValues,
     menu: (@Composable (Song) -> Unit)? = null,
+    /** Takes a track out of the history. */
+    onRemove: ((Song) -> Unit)? = null,
 ) {
     DesktopPageScaffold(contentPadding) {
         val isCurrentRow = rememberPlayingRowMatcher(history)
@@ -7228,7 +7286,7 @@ private fun DesktopHistoryPage(
             contentPadding = pagePadding(start = DesktopPageGutter, end = DesktopPageGutter, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (history.isEmpty()) item { DesktopEmptyPage(BitChordIcons.Clock, "Nothing played yet", "Songs you play will show up here.") }
+            if (history.isEmpty()) item { DesktopEmptyPage(BitChordIcons.Clock, DesktopStrings["d_history_empty", "Nothing played yet"], DesktopStrings["d_history_empty_sub", "Songs you play will show up here."]) }
             else items(history, key = Song::videoId) {
                 DesktopSongRow(
                     song = it,
@@ -7241,6 +7299,8 @@ private fun DesktopHistoryPage(
                     downloaded = it.videoId in downloadedIds,
                     downloadInProgress = it.videoId in downloadInProgress,
                     menu = menu,
+                    onRemove = onRemove,
+                    removeLabel = DesktopStrings["d_remove_from_history", "Remove from history"],
                 )
             }
         }
@@ -8788,6 +8848,10 @@ private fun DesktopCollectionPage(
     onAddAllToPlaylist: (() -> Unit)?,
     /** Copies the release's own YouTube Music link; null for anything with no link to share. */
     onShare: (() -> Unit)?,
+    /** Picks a picture to be this playlist's cover; null where the playlist is not ours. */
+    onChangeCover: (() -> Unit)? = null,
+    /** Back to the playlist's own cover; null while it has it. */
+    onResetCover: (() -> Unit)? = null,
     onRemoveFromPlaylist: ((Song) -> Unit)?,
     likedIds: Set<String>,
     onPlaySongs: (List<Song>, Int) -> Unit,
@@ -8964,7 +9028,7 @@ private fun DesktopCollectionPage(
                                     onAddAllToPlaylist?.let { addAll ->
                                         DesktopMenuRow(BitChordIcons.Plus, DesktopStrings["d_add_all_to_playlist", "Add all to playlist…"]) { pick(addAll) }
                                     }
-                                    if (onRename != null || onReorder != null || onShuffleOrder != null || onDelete != null) DesktopMenuDivider()
+                                    if (onRename != null || onReorder != null || onShuffleOrder != null || onChangeCover != null || onDelete != null) DesktopMenuDivider()
                                     onRename?.let { rename ->
                                         DesktopMenuRow(Icons.Rounded.Edit, DesktopStrings["d_edit_playlist", "Edit playlist"]) { pick(rename) }
                                     }
@@ -8973,6 +9037,12 @@ private fun DesktopCollectionPage(
                                     }
                                     onShuffleOrder?.let { shuffleOrder ->
                                         DesktopMenuRow(BitChordIcons.Shuffle, DesktopStrings["d_shuffle_order", "Shuffle order"]) { pick(shuffleOrder) }
+                                    }
+                                    onChangeCover?.let { change ->
+                                        DesktopMenuRow(Icons.Rounded.Image, DesktopStrings["d_change_cover", "Change cover"]) { pick(change) }
+                                    }
+                                    onResetCover?.let { reset ->
+                                        DesktopMenuRow(Icons.Rounded.HideImage, DesktopStrings["d_reset_cover", "Use the playlist's own cover"]) { pick(reset) }
                                     }
                                     onDelete?.let { delete ->
                                         DesktopMenuDivider()
@@ -9282,6 +9352,10 @@ private fun DesktopCollectionSongRow(
     }
 }
 
+
+/** [this] wearing the cover the listener chose for its playlist, if they chose one. */
+private fun ShelfItem.withChosenCover(covers: Map<String, String>): ShelfItem =
+    browseId?.let(covers::get)?.let { copy(thumbnailUrl = it) } ?: this
 
 /** The track playing, for rows that want to say so. */
 private val LocalNowPlaying = compositionLocalOf<Song?> { null }
@@ -9672,6 +9746,9 @@ private fun DesktopSongRow(
     number: Int? = null,
     /** The row's own "…", when the page has a menu to give it. */
     menu: (@Composable (Song) -> Unit)? = null,
+    /** A (−) that takes the row out of the list it is in, labelled [removeLabel]. */
+    onRemove: ((Song) -> Unit)? = null,
+    removeLabel: String = "",
 ) {
     val openContextMenu = LocalDesktopContextMenu.current
     Row(
@@ -9718,6 +9795,11 @@ private fun DesktopSongRow(
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
+        }
+        if (onRemove != null) {
+            IconButton(onClick = { onRemove(song) }) {
+                Icon(Icons.Rounded.RemoveCircleOutline, removeLabel, tint = DesktopSecondary, modifier = Modifier.size(20.dp))
+            }
         }
         if (onToggleLike != null) {
             IconButton(onClick = { onToggleLike(song) }) { Icon(if (liked) BitChordIcons.HeartFilled else BitChordIcons.Heart, "Favorite", tint = if (liked) DesktopAccent else DesktopSecondary) }

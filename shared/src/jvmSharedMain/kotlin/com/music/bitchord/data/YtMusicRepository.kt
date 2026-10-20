@@ -151,6 +151,17 @@ object YtMusicRepository {
      */
     suspend fun history(): Result<List<Song>> = call("history") { fetchHistory() }
 
+    /** The history as [history] has it, with the token that removes each track from it. */
+    suspend fun historyWithRemoval(): Result<Pair<List<Song>, Map<String, String>>> = call("history") {
+        val raw = Innertube.browse(HISTORY)
+        InnertubeParser.collectSongsDeep(raw).distinctBy { it.videoId } to InnertubeParser.historyRemovalTokens(raw)
+    }
+
+    /** Takes rows out of the account's history, by the tokens [historyWithRemoval] gave them. */
+    suspend fun removeFromHistory(tokens: List<String>): Result<Unit> = call("history:remove") {
+        tokens.forEach { Innertube.sendFeedback(it) }
+    }
+
     /** Account listening history for the Recents feed. */
     suspend fun recents(): Result<List<Song>> = call("recents") {
         if (Innertube.cookie != null) {

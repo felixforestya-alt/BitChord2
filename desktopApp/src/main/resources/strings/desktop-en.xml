@@ -388,4 +388,11 @@
     <string name="d_delete_playlist_sub">“%s” will be removed from your YouTube Music account, on every device. The songs in it are not deleted.</string>
     <string name="d_playlist_load_failed">Could not load the playlist</string>
     <string name="d_playlist_edit_failed">Could not change the playlist</string>
+    <string name="d_remove_from_history">Remove from history</string>
+    <string name="d_history_empty">Nothing played yet</string>
+    <string name="d_history_empty_sub">Songs you play will show up here.</string>
+    <string name="d_change_cover">Change cover</string>
+    <string name="d_reset_cover">Use the playlist\'s own cover</string>
+    <string name="d_choose_cover">Choose a cover</string>
+    <string name="d_images">Images</string>
 </resources>

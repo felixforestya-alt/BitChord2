@@ -566,4 +566,11 @@
     <string name="d_delete_playlist_sub">«%s» удалится из аккаунта YouTube Music на всех устройствах. Сами треки не удаляются.</string>
     <string name="d_playlist_load_failed">Не удалось загрузить плейлист</string>
     <string name="d_playlist_edit_failed">Не удалось изменить плейлист</string>
+    <string name="d_remove_from_history">Удалить из истории</string>
+    <string name="d_history_empty">Пока ничего не слушали</string>
+    <string name="d_history_empty_sub">Здесь появятся треки, которые вы слушаете.</string>
+    <string name="d_change_cover">Сменить обложку</string>
+    <string name="d_reset_cover">Вернуть обложку плейлиста</string>
+    <string name="d_choose_cover">Выберите обложку</string>
+    <string name="d_images">Изображения</string>
 </resources>

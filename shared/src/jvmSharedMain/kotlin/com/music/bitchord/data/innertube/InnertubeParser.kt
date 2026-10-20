@@ -499,6 +499,46 @@ object InnertubeParser {
         return out.values.toList()
     }
 
+    /**
+     * For each row of the history page, the token that takes it out of the history — the row
+     * menu's "Remove from history", which YouTube Music sends as a feedback token. By video id;
+     * the first row of a track wins, as [collectSongsDeep] keeps the first of it too.
+     */
+    fun historyRemovalTokens(root: JsonElement): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        fun tokenIn(renderer: JsonObject): String? {
+            val items = renderer.o("menu").o("menuRenderer")?.get("items") as? JsonArray ?: return null
+            var last: String? = null
+            for (item in items) {
+                val service = item.o("menuServiceItemRenderer") ?: continue
+                val icon = service.o("icon").s("iconType")
+                val token = service.o("serviceEndpoint").o("feedbackEndpoint").s("feedbackToken") ?: continue
+                if (icon == "REMOVE_FROM_HISTORY") return token
+                last = token
+            }
+            // Marked by its icon where the page marks it; otherwise the row menu's last feedback
+            // item, which is where the history page puts "Remove from history".
+            return last
+        }
+        fun walk(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    (node["musicResponsiveListItemRenderer"] as? JsonObject)?.let { renderer ->
+                        val videoId = renderer.o("playlistItemData").s("videoId")
+                            ?: parseResponsiveListItem(renderer, pageCredit(root))?.videoId
+                        val token = tokenIn(renderer)
+                        if (videoId != null && token != null) out.putIfAbsent(videoId, token)
+                    }
+                    node.values.forEach(::walk)
+                }
+                is JsonArray -> node.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(root)
+        return out
+    }
+
     /** A playlist page's own tracks, the ones YouTube suggests adding, and the token for the rest. */
     data class PlaylistShelfPage(val songs: List<Song>, val suggested: List<Song>, val continuation: String?)
 

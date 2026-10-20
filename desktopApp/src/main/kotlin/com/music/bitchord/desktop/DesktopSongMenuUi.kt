@@ -197,6 +197,8 @@ internal fun DesktopSongMenuFor(
     onSetLyricsOffset: ((Int) -> Unit)? = null,
     /** Takes the track out of the playlist it was opened from; null where that is not ours to edit. */
     onRemoveFromList: (() -> Unit)? = null,
+    /** What that row says; the playlist's wording when null. */
+    removeFromListLabel: String? = null,
 ) {
     val close = onDismiss
     DesktopSongMenu(
@@ -243,6 +245,7 @@ internal fun DesktopSongMenuFor(
         lyricsOffsetMs = lyricsOffsetMs,
         onSetLyricsOffset = onSetLyricsOffset,
         onRemoveFromList = onRemoveFromList?.let { { it(); close() } },
+        removeFromListLabel = removeFromListLabel,
         onDismiss = close,
     )
 }
@@ -293,6 +296,7 @@ internal fun DesktopSongMenu(
     lyricsOffsetMs: Int = 0,
     onSetLyricsOffset: ((Int) -> Unit)? = null,
     onRemoveFromList: (() -> Unit)? = null,
+    removeFromListLabel: String? = null,
     onDismiss: () -> Unit,
 ) {
     var pickingSleepTimer by remember { mutableStateOf(false) }
@@ -400,7 +404,7 @@ internal fun DesktopSongMenu(
             onRemoveFromList?.let { remove ->
                 DesktopMenuRow(
                     Icons.Rounded.RemoveCircleOutline,
-                    DesktopStrings["d_remove_from_playlist", "Remove from playlist"],
+                    removeFromListLabel ?: DesktopStrings["d_remove_from_playlist", "Remove from playlist"],
                     tint = MaterialTheme.colorScheme.error,
                     onClick = remove,
                 )

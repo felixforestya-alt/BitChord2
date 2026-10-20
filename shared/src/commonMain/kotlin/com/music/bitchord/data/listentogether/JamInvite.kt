@@ -11,15 +11,18 @@ object JamInvite {
 
     const val ORIGIN = "https://bitchord.kushagrasingh.in"
 
+    /** BitChord²'s own party server, whose invite page lives on the server itself. */
+    const val BITCHORD2_ORIGIN = "https://bitchord-party.bitchord-party.workers.dev"
+
     /** How many characters a party code carries. */
     const val CODE_LENGTH = 6
 
     /** The normalized party code, for the public invite URL shape only. */
     fun parse(value: String?): String? {
         val text = value?.trim() ?: return null
-        val prefix = "$ORIGIN/invite/"
-        if (!text.startsWith(prefix, ignoreCase = true)) return null
-        val code = text.removePrefix(prefix).substringBefore('?').substringBefore('#')
+        val prefix = listOf(ORIGIN, BITCHORD2_ORIGIN).map { "$it/invite/" }
+            .firstOrNull { text.startsWith(it, ignoreCase = true) } ?: return null
+        val code = text.substring(prefix.length).substringBefore('?').substringBefore('#')
         if (code.length != CODE_LENGTH || !code.all(Char::isLetterOrDigit)) return null
         return code.uppercase()
     }

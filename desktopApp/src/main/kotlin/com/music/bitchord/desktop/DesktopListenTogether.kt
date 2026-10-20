@@ -244,12 +244,9 @@ internal object DesktopListenTogether {
 
     /** Public invite for the server that actually owns the current membership. */
     fun inviteUrl(code: String): String {
-        val server = activePartyServerBase
-        return if (server.isNullOrBlank() || server == DEFAULT_SERVER) {
-            JamInvite.url(code)
-        } else {
-            "$server/invite/${code.uppercase()}"
-        }
+        // On the party's own server: a link on the original's site would find no such party there.
+        val server = activePartyServerBase?.takeIf(String::isNotBlank) ?: DEFAULT_SERVER
+        return if (server.isBlank()) JamInvite.url(code) else "${server.trimEnd('/')}/invite/${code.uppercase()}"
     }
 
     /** Whether this device can join at all — a party is joined as an account, not anonymously. */

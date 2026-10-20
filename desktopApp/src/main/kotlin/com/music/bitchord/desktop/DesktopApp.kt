@@ -10346,7 +10346,7 @@ private val SHELF_DURATION = Regex("""\d{1,2}:\d{2}(?::\d{2})?""")
 // In English and in Russian: the service answers in the account's language, and a Russian
 // "Композиция • Artist" put the word for "song" where the artist goes.
 private val SHELF_TALLY = Regex(
-    "[0-9,.\\s]+(?:тыс\\.?|млн|млрд|K|M|B)?\\s*(?:views?|likes?|songs?|просмотр\\w*|отмет\\w*|трек\\w*|композици\\w*)",
+    "[0-9,.\\s]+(?:тыс\\.?|млн|млрд|K|M|B)?\\s*(?:views?|likes?|songs?|просмотр\\p{L}*|отмет\\p{L}*|трек\\p{L}*|композици\\p{L}*|прослушивани\\p{L}*)",
     RegexOption.IGNORE_CASE,
 )
 private val SHELF_TYPE_WORDS = setOf(

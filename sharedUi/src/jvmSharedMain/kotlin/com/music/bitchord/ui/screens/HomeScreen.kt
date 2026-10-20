@@ -351,7 +351,7 @@ private fun RecentShelf(
                             item = item,
                             onClick = { onItemClick(item) },
                             onLongPress = onItemLongPress?.let { { it(item) } },
-                            modifier = Modifier.width(cardWidth),
+                            modifier = Modifier.width(playingCardWidth(cardWidth, isCurrentItem(item), PLAYING_HERO_GROWTH)),
                             isCurrent = isCurrentItem(item),
                             isPlaying = isCurrentItem(item) && isPlaying,
                         )
@@ -782,7 +782,7 @@ private fun HeroShelf(
                         item = item,
                         onClick = { onItemClick(item) },
                         onLongPress = onItemLongPress?.let { { it(item) } },
-                        modifier = Modifier.width(cardWidth).cardEntrance(index),
+                        modifier = Modifier.width(playingCardWidth(cardWidth, isCurrentItem(item), PLAYING_HERO_GROWTH)).cardEntrance(index),
                         isCurrent = isCurrentItem(item),
                         isPlaying = isCurrentItem(item) && isPlaying,
                     )
@@ -884,13 +884,30 @@ internal fun Shelf(
                     item = item,
                     onClick = { onItemClick(item) },
                     onLongPress = onItemLongPress?.let { { it(item) } },
-                    modifier = Modifier.width(SHELF_CARD_WIDTH).cardEntrance(index),
+                    modifier = Modifier.width(playingCardWidth(SHELF_CARD_WIDTH, isCurrentItem(item), PLAYING_CARD_GROWTH)).cardEntrance(index),
                     isCurrent = isCurrentItem(item),
                     isPlaying = isCurrentItem(item) && isPlaying,
                 )
             }
         }
     }
+}
+
+/** How much wider the card of what is playing is than its neighbours on a shelf of covers. */
+private const val PLAYING_CARD_GROWTH = 1.3f
+
+/** The same for the large cards, which have less room to grow into. */
+private const val PLAYING_HERO_GROWTH = 1.15f
+
+/** A card's width: [base], or [growth] times it for the card of what is playing, eased as the track changes. */
+@Composable
+private fun playingCardWidth(base: androidx.compose.ui.unit.Dp, current: Boolean, growth: Float): androidx.compose.ui.unit.Dp {
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        if (current) growth else 1f,
+        androidx.compose.animation.core.spring(dampingRatio = 0.85f, stiffness = 300f),
+        label = "playingCard",
+    )
+    return base * scale
 }
 
 /**

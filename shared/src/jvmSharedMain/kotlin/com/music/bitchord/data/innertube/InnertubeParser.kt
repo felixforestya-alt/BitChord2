@@ -1510,8 +1510,9 @@ object InnertubeParser {
      * counting one of the words YouTube counts with.
      */
     private val TALLY = Regex(
-        """[\d.,]+\s*[KMB]?\s+(plays|views|likes|songs|tracks|subscribers|""" +
-            """hours?|minutes?|seconds?)\b.*""",
+        """[\d.,]+\s*(?:[KMB]|тыс\.?|млн|млрд)?\s+(plays|views|likes|songs|tracks|subscribers|""" +
+            """hours?|minutes?|seconds?|прослушивани\p{L}*|просмотр\p{L}*|отмет\p{L}*|трек\p{L}*|""" +
+            """композици\p{L}*|подписчик\p{L}*|час\p{L}*|минут\p{L}*|секунд\p{L}*)(?:\b|$).*""",
         RegexOption.IGNORE_CASE,
     )
     /** Header words that mark a page as a release, whose rows share its credit. */
@@ -1522,9 +1523,13 @@ object InnertubeParser {
     )
     /** Header lines that name the artist, in either header shape. */
     private val HEADER_CREDIT_LINES = listOf("straplineTextOne", "subtitle")
+    // And in Russian: the service answers in the account's language, and "Композиция • Artist"
+    // put the word for "song" where the artist goes.
     private val TYPE_WORDS = setOf(
         "song", "video", "album", "single", "ep", "artist",
         "playlist", "podcast", "episode",
+        "композиция", "песня", "трек", "видео", "клип", "альбом", "мини-альбом", "сингл",
+        "исполнитель", "плейлист", "подкаст", "выпуск",
     )
     /**
      * Flags a browse card as video content: "50 videos" in a subtitle

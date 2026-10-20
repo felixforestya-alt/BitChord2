@@ -979,7 +979,13 @@ fun BitChordDesktopApp() {
         signInError = null
         signInBusy = label
         try {
-            val read = withContext(Dispatchers.IO) { DesktopYouTubeSession.readSessionScope(cookie) }
+            val read = withContext(Dispatchers.IO) {
+                DesktopYouTubeSession.readSessionScope(cookie).let { page ->
+                    // The page did not come (some VPNs and networks pass the API, not the page):
+                    // asked of the API instead, which the rest of the app already reaches.
+                    if (page.isSuccess) page else DesktopYouTubeSession.readSessionScopeViaApi(cookie)
+                }
+            }
             if (read.isFailure) {
                 signInError = "Could not reach YouTube Music. Check the connection and try again."
                 return

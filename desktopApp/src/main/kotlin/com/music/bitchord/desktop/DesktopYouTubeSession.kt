@@ -109,6 +109,41 @@ internal object DesktopYouTubeSession {
         ))
     }
 
+    /**
+     * As [readSessionScope], from the InnerTube API rather than the music.youtube.com page: the
+     * account menu, asked with [cookie], names the account when the session is signed in. For a network that lets the API through and not the page.
+     * The personal channel is assumed (authUser 0, no page id); a brand channel is picked later from
+     * the accounts list, as ever.
+     */
+    suspend fun readSessionScopeViaApi(cookie: String): Result<DesktopYouTubeAuth.Session?> {
+        val before = DesktopYouTubeAuth.session
+        val trial = DesktopYouTubeAuth.Session(cookie = cookie)
+        DesktopYouTubeAuth.adopt(trial)
+        val answer = DesktopSearchClient.accountMenu()
+        val context = answer.getOrNull()?.get("responseContext")?.jsonObject
+            ?.get("mainAppWebResponseContext")?.jsonObject
+        // Signed in is an account in the menu — a name to show — or the context saying so outright.
+        val account = answer.getOrNull()?.let { runCatching { DesktopAccountParser.account(it) }.getOrNull() }
+        val signedIn = account != null || context?.get("loggedOut")?.jsonPrimitive?.contentOrNull == "false"
+        val dataSyncId = context?.get("datasyncId")?.jsonPrimitive?.contentOrNull
+            ?.substringBefore("||")?.takeIf { it.isNotBlank() }
+        if (answer.isFailure || !signedIn) DesktopYouTubeAuth.adopt(before)
+        return when {
+            answer.isFailure -> {
+                DesktopTrackLog.log("could not read the session from the API either: ${answer.exceptionOrNull()?.message}")
+                Result.failure(answer.exceptionOrNull()!!)
+            }
+            !signedIn -> {
+                DesktopTrackLog.log("the API answered as nobody; not signed in")
+                Result.success(null)
+            }
+            else -> {
+                DesktopTrackLog.log("session read from the API, the page being out of reach")
+                Result.success(trial.copy(dataSyncId = dataSyncId))
+            }
+        }
+    }
+
     private val CONFIG_LOGGED_IN = Regex(""""LOGGED_IN"\s*:\s*(true|false)""")
     private val CONFIG_DATASYNC_ID = Regex(""""DATASYNC_ID"\s*:\s*"([^"]+)"""")
     private val CONFIG_PAGE_ID = Regex(""""DELEGATED_SESSION_ID"\s*:\s*"([^"]+)"""")

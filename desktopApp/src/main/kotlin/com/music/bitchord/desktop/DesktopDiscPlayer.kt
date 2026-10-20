@@ -417,7 +417,8 @@ private fun DiscPlayerLayout(
                     targetState = cover,
                     transitionSpec = {
                         (slideInHorizontally(tween(900, easing = EASE_OUT_EXPO)) { -it } + fadeIn(tween(500))) togetherWith
-                            (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(450)))
+                            (slideOutHorizontally(tween(650, easing = FastOutSlowInEasing)) { -it } + fadeOut(tween(450))) using
+                            NO_CLIP
                     },
                     modifier = Modifier
                         .align(Alignment.CenterStart)
@@ -485,7 +486,8 @@ private fun DiscPlayerLayout(
                     targetState = centre,
                     transitionSpec = {
                         (fadeIn(tween(420, delayMillis = 90)) + slideInVertically(tween(520, easing = EASE_OUT_EXPO)) { it / 8 }) togetherWith
-                            (fadeOut(tween(220)) + slideOutVertically(tween(300)) { -it / 10 })
+                            (fadeOut(tween(220)) + slideOutVertically(tween(300)) { -it / 10 }) using
+                            NO_CLIP
                     },
                     label = "centre",
                 ) { showing ->
@@ -665,7 +667,8 @@ private fun NowPlayingWords(
             targetState = song to coverUrl,
             transitionSpec = {
                 (slideInVertically(tween(700, delayMillis = 120, easing = EASE_OUT_EXPO)) { it / 2 } + fadeIn(tween(600, delayMillis = 120))) togetherWith
-                    (slideOutVertically(tween(380)) { -it / 3 } + fadeOut(tween(300)))
+                    (slideOutVertically(tween(380)) { -it / 3 } + fadeOut(tween(300))) using
+                    NO_CLIP
             },
             contentKey = { it.first.videoId },
             label = "words",
@@ -745,10 +748,12 @@ private fun CurrentLyricLine(
         transitionSpec = {
             // Swapped outright while the window is in the background: nobody to see it.
             if (com.music.bitchord.ui.AppActivity.quiet) {
-                androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+                androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None using
+                    NO_CLIP
             } else {
                 (slideInVertically(tween(420, easing = EASE_OUT_EXPO)) { it / 2 } + fadeIn(tween(320))) togetherWith
-                    (slideOutVertically(tween(260)) { -it / 2 } + fadeOut(tween(200)))
+                    (slideOutVertically(tween(260)) { -it / 2 } + fadeOut(tween(200))) using
+                    NO_CLIP
             }
         },
         label = "lyricLine",
@@ -839,6 +844,14 @@ internal fun DesktopSungLine(
         )
     }
 }
+
+/**
+ * No clip for the player's switching parts. An [AnimatedContent] clips what it holds to its own
+ * box by default, at rest as well as mid-change; the soft shadows of the words, the cover and the
+ * disc's glow reach past their boxes, and were cut off there in straight lines that read as a
+ * crooked highlight over the page.
+ */
+private val NO_CLIP = androidx.compose.animation.SizeTransform(clip = false)
 
 /** Room around a lyric line for its shadow's blur to fade out in, not be cut. */
 private val LYRIC_SHADOW_ROOM = 28.dp

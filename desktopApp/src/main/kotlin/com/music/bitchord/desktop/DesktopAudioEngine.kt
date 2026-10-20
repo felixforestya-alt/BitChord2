@@ -316,8 +316,18 @@ class DesktopPlaybackEngine(
         if (retryingSongId != song.videoId) {
             retryingSongId = song.videoId
             DesktopTrackLog.log("could not decode '${song.title}' from ${DesktopMusicSources.sourceNameFor(stream)}: ${failure.message}")
-            stream.sourceId?.let { refusedSources[song.videoId] = it }
-            loadInternal(song, playWhenReady, excludedSourceId = stream.sourceId, priorFailure = failure)
+            val fromYouTube = runCatching { java.net.URI(stream.url).host.orEmpty().endsWith("googlevideo.com") }.getOrDefault(false)
+            if (fromYouTube) {
+                // A YouTube URL that would not decode is that URL gone bad — expired, cut short —
+                // not YouTube unable to play the track: struck off YouTube's cache, and the track
+                // asked of YouTube again. Struck off as a source instead, as it was, a track with
+                // no other source never played again in the session, and sat on 0:00 "playing".
+                com.music.bitchord.data.innertube.StreamResolver.onPlaybackRefused(stream.url, 403)
+                loadInternal(song, playWhenReady, priorFailure = failure)
+            } else {
+                stream.sourceId?.let { refusedSources[song.videoId] = it }
+                loadInternal(song, playWhenReady, excludedSourceId = stream.sourceId, priorFailure = failure)
+            }
         } else {
             _state.value = DesktopPlaybackState(
                 song = song,

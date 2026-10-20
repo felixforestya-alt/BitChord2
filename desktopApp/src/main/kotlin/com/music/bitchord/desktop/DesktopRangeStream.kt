@@ -63,12 +63,29 @@ internal class DesktopRangeStream(
 
         // The app's own client, so the media goes the way the rest of YouTube does — including
         // round a network that throttles it, when that is switched on (see DpiBypass).
-        val (status, body, stated) = runCatching {
-            client.newCall(request.get().build()).execute().use { response ->
-                Triple(response.code, if (response.isSuccessful) response.body.bytes() else ByteArray(0), response.header("content-range"))
+        // A dropped connection or a server hiccup used to end the stream on the spot, which FFmpeg
+        // reports as "Invalid data" and the track was skipped. It is asked again a couple of times.
+        var attempt = 0
+        var fetched: Triple<Int, ByteArray, String?>? = null
+        while (fetched == null) {
+            if (Thread.currentThread().isInterrupted) return false
+            val outcome = runCatching {
+                client.newCall(request.get().build()).execute().use { response ->
+                    Triple(response.code, if (response.isSuccessful) response.body.bytes() else ByteArray(0), response.header("content-range"))
+                }
             }
-        }.getOrNull() ?: return false
+            val result = outcome.getOrNull()
+            val transient = result == null || result.first >= 500
+            if (!transient || ++attempt > RETRIES) {
+                if (result == null) DesktopTrackLog.log("stream: window at $at not fetched: ${outcome.exceptionOrNull()?.message}")
+                fetched = result ?: return false
+            } else {
+                runCatching { Thread.sleep(300L * attempt) }.onFailure { return false }
+            }
+        }
+        val (status, body, stated) = fetched
         if (status !in 200..299) {
+            DesktopTrackLog.log("stream: window at $at refused with HTTP $status")
             // A URL cleared before playback has been refused mid-track: tell the resolver, as the
             // phone's ChunkedDataSource does, so it forgets it and benches the client that minted it.
             StreamResolver.onPlaybackRefused(url, status)
@@ -92,6 +109,9 @@ internal class DesktopRangeStream(
     private companion object {
         /** Comfortably inside what Google will serve. */
         const val DEFAULT_WINDOW = 512 * 1024
+
+        /** Further tries for a window that failed on the way, not by refusal. */
+        const val RETRIES = 2
 
         val client = Http.client.newBuilder()
             .connectTimeout(15, TimeUnit.SECONDS)

@@ -472,7 +472,7 @@
     <string name="lt_look_up">Найти комнату</string>
     <string name="lt_sign_in">Чтобы создать комнату или зайти в неё, войдите в YouTube Music.</string>
     <string name="lt_server">Сервер комнат</string>
-    <string name="lt_server_sub">Оставьте пустым, чтобы использовать встроенный сервер.</string>
+    <string name="lt_server_sub">Выберите сервер или введите адрес своего. Если он не ответит, подключимся к нашему.</string>
     <string name="lt_server_custom">Адрес своего сервера</string>
     <string name="lt_test">Проверить</string>
     <string name="lt_use_builtin">Встроенный</string>
@@ -573,4 +573,6 @@
     <string name="d_reset_cover">Вернуть обложку плейлиста</string>
     <string name="d_choose_cover">Выберите обложку</string>
     <string name="d_images">Изображения</string>
+    <string name="lt_server_ours">BitChord² (наш)</string>
+    <string name="lt_server_upstream">BitChord (сервер автора)</string>
 </resources>

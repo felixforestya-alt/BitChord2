@@ -294,7 +294,7 @@
     <string name="lt_look_up">Look up party</string>
     <string name="lt_sign_in">Sign in to YouTube Music before creating or joining a party.</string>
     <string name="lt_server">Party server</string>
-    <string name="lt_server_sub">Leave blank to use the server included with this build.</string>
+    <string name="lt_server_sub">Pick one, or enter the address of your own. If it does not answer, ours is used.</string>
     <string name="lt_server_custom">Custom server address</string>
     <string name="lt_test">Test</string>
     <string name="lt_use_builtin">Use built-in</string>
@@ -395,4 +395,6 @@
     <string name="d_reset_cover">Use the playlist\'s own cover</string>
     <string name="d_choose_cover">Choose a cover</string>
     <string name="d_images">Images</string>
+    <string name="lt_server_ours">BitChord² (ours)</string>
+    <string name="lt_server_upstream">BitChord (original author\'s)</string>
 </resources>

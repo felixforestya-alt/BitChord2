@@ -871,6 +871,9 @@ internal object DesktopListenTogether {
     private const val DEFAULT_SERVER_TIMEOUT_MS = 15_000L
     private const val KICK_BLOCK_MS = 24L * 60 * 60 * 1000
     private const val HEALTH_OK = "\"ok\":true"
+
+    /** The original BitChord's party server: the same protocol, run by its author. */
+    const val UPSTREAM_SERVER = "https://api.bitchord.kushagrasingh.in"
     const val CODE_LENGTH = 6
 
     private val ABSOLUTE_URL = Regex("""(?:https?|wss?)://[^\s,;)\]}'"]+""", RegexOption.IGNORE_CASE)

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -164,6 +165,12 @@ internal fun DesktopListenTogetherDialog(autoplayEnabled: Boolean, onDismiss: ()
                     server = serverDraft,
                     serverStatus = serverStatus,
                     onServerChange = { serverDraft = it },
+                    onPickServer = { value ->
+                        localError = null
+                        DesktopListenTogether.setCustomServerUrl(value)
+                            .onSuccess { serverDraft = value }
+                            .onFailure { localError = it.message }
+                    },
                     onSaveServer = {
                         localError = null
                         DesktopListenTogether.normalizeServerUrl(serverDraft)
@@ -216,6 +223,8 @@ private fun PartyLanding(
     server: String,
     serverStatus: DesktopListenTogether.ServerStatus,
     onServerChange: (String) -> Unit,
+    /** Switches to a known server at once: blank for BitChord²'s own. */
+    onPickServer: (String) -> Unit,
     onSaveServer: () -> Unit,
     onRefreshServer: () -> Unit,
     busy: Boolean,
@@ -293,10 +302,25 @@ private fun PartyLanding(
                     Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
                         Text(DesktopStrings["lt_server", "Party server"], fontWeight = FontWeight.Medium)
-                        Text(DesktopStrings["lt_server_sub", "Leave blank to use the server included with this build."], color = DesktopSecondary, style = MaterialTheme.typography.bodySmall)
+                        Text(DesktopStrings["lt_server_sub", "Pick one, or enter the address of your own. If it does not answer, ours is used."], color = DesktopSecondary, style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 Spacer(Modifier.height(12.dp))
+                // The two servers there are, a click away; the field below for any other.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        DesktopStrings["lt_server_ours", "BitChord² (ours)"] to "",
+                        DesktopStrings["lt_server_upstream", "BitChord (original author's)"] to DesktopListenTogether.UPSTREAM_SERVER,
+                    ).forEach { (label, value) ->
+                        FilterChip(
+                            colors = desktopChipColors(),
+                            selected = server.trimEnd('/') == value,
+                            onClick = { onPickServer(value) },
+                            label = { Text(label) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
                 DesktopSearchField(
                     query = server,
                     onQueryChange = onServerChange,

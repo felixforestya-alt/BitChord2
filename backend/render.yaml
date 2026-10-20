@@ -8,7 +8,7 @@
 # - Start Command: ./server
 # - Health Check Path: /healthz
 # - Plan: Free
-# - Region: Singapore (or closest to you)
+# - Region: Frankfurt (closest to Europe and Russia)
 # - Instances: 1 (Parties live in memory, so keep to 1 instance)
 
 services:
@@ -16,7 +16,7 @@ services:
     name: bitchord-listen-together
     runtime: go
     plan: free
-    region: singapore
+    region: frankfurt
     rootDir: backend
     buildCommand: go build -o server .
     startCommand: ./server

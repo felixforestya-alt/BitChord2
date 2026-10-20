@@ -529,6 +529,8 @@ compose.desktop {
         // Likewise AWT's own Direct3D pipeline: Compose draws through Skia, so Java2D's device is
         // a third GPU context doing nothing.
         jvmArgs("-Dsun.java2d.d3d=false", "-Dsun.java2d.noddraw=true")
+        // Windows' proxy, as a VPN app in system-proxy mode sets it: see Main.kt.
+        jvmArgs("-Djava.net.useSystemProxies=true")
         jvmArgs("-Dbitchord.version=$appVersion")
         if (desktopModuleIndexUrl.isNotBlank()) {
             jvmArgs("-Dbitchord.module.index=$desktopModuleIndexUrl")

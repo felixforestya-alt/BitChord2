@@ -29,6 +29,11 @@ import okio.Path.Companion.toOkioPath
 import org.jetbrains.compose.resources.painterResource
 
 fun main() {
+    // Windows' own proxy, before anything opens a connection: many VPN apps (v2rayN, Hiddify,
+    // Nekoray, Happ...) set one rather than take all traffic, and Java ignores it unless told —
+    // the app went round the VPN, straight into the network it was meant to get past, and the
+    // sign-in page stayed white. The launcher passes this too; here for a run from Gradle.
+    if (System.getProperty("java.net.useSystemProxies") == null) System.setProperty("java.net.useSystemProxies", "true")
     // Already running — in the tray, say: bring that one forward rather than start a second.
     if (!DesktopSingleInstance.claim()) kotlin.system.exitProcess(0)
     // The graphics API Skia draws through — OpenGL unless set otherwise, see DesktopGraphicsSettings.

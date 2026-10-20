@@ -207,6 +207,17 @@
                     android:pathPattern="/invite/......" />
             </intent-filter>
 
+            <!-- Invites on BitChord²'s own party server. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="bitchord-party.bitchord-party.workers.dev"
+                    android:pathPattern="/invite/......" />
+            </intent-filter>
+
             <!-- Custom scheme for Listen Together invites on custom server deployments. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

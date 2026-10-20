@@ -3,6 +3,8 @@ package com.music.bitchord.ui.screens
 import android.content.Intent
 import android.text.format.DateFormat
 import android.widget.Toast
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -190,12 +192,8 @@ fun ListenTogetherScreen(
 
     /** The invite URL for a code, pointing at whichever server holds the party. */
     val inviteLinkFor: (String) -> String = { partyCode ->
-        val host = ListenTogether.activePartyServerBase()
-        if (host == null || host == ListenTogether.defaultServer) {
-            JamInviteLink.url(partyCode, null)
-        } else {
-            JamInviteLink.url(partyCode, host)
-        }
+        // On the party's own server: a link on the original's site would find no such party there.
+        JamInviteLink.url(partyCode, ListenTogether.activePartyServerBase() ?: ListenTogether.defaultServer)
     }
 
     /** The system chooser, with the link and the spoken-aloud code together. */
@@ -557,6 +555,22 @@ fun ListenTogetherScreen(
             header = stringResource(R.string.listen_together_custom_server),
             footer = stringResource(R.string.listen_together_custom_server_footer),
         ) {
+            // The two servers there are, a tap away: BitChord²'s own, and the original's (the same
+            // protocol, run by its author). Any other address goes in through the row below.
+            val pickScope = rememberCoroutineScope()
+            listOf(
+                stringResource(R.string.listen_together_server_ours) to "",
+                stringResource(R.string.listen_together_server_upstream) to JamInviteLink.UPSTREAM_SERVER,
+            ).forEach { (label, value) ->
+                val chosen = customServer.trimEnd('/') == value
+                SettingsRow(
+                    icon = if (chosen) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+                    title = label,
+                    enabled = !state.inParty && !busy,
+                    onClick = { if (!chosen) pickScope.launch { ListenTogether.setCustomServerUrl(value) } },
+                )
+                RowDivider()
+            }
             SettingsRow(
                 icon = Icons.Rounded.Dns,
                 title = stringResource(R.string.listen_together_custom_server),

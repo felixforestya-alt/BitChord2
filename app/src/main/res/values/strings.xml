@@ -1224,4 +1224,6 @@
     <string name="privacy_public">Public</string>
     <string name="change_cover">Change cover</string>
     <string name="reset_cover">Use the playlist\'s own cover</string>
+    <string name="listen_together_server_ours">BitChord² server (ours)</string>
+    <string name="listen_together_server_upstream">BitChord server (original author\'s)</string>
 </resources>

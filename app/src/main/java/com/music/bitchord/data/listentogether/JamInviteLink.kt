@@ -18,6 +18,13 @@ object JamInviteLink {
 
     const val ORIGIN = "https://bitchord.kushagrasingh.in"
 
+    /** BitChord²'s own party server, whose invite page lives on the server itself. */
+    const val BITCHORD2_SERVER = "https://bitchord-party.bitchord-party.workers.dev"
+    private const val BITCHORD2_HOST = "bitchord-party.bitchord-party.workers.dev"
+
+    /** The original BitChord's party server, behind invites on [ORIGIN]. */
+    const val UPSTREAM_SERVER = "https://api.bitchord.kushagrasingh.in"
+
     private const val EXTRA_CONSUMED = "bitchord.jamInviteConsumed"
     private const val HOST = "bitchord.kushagrasingh.in"
     private const val CUSTOM_SCHEME = "bitchord"
@@ -67,11 +74,19 @@ object JamInviteLink {
             return ParsedJamInvite(code = code, serverUrl = server)
         }
 
-        // 2. Official web domain: https://bitchord.kushagrasingh.in/invite/<CODE>
+        // 2. The original's web domain: https://bitchord.kushagrasingh.in/invite/<CODE> — a party
+        //    on the original's server, unless the link names another.
         if (scheme == "https" && host == HOST) {
             val match = INVITE_PATH.matchEntire(uri.path.orEmpty()) ?: return null
             val code = match.groupValues[1].uppercase()
-            return ParsedJamInvite(code = code, serverUrl = server)
+            return ParsedJamInvite(code = code, serverUrl = server ?: UPSTREAM_SERVER)
+        }
+
+        // 3. BitChord²'s server: its invite page is on the server, so the server is the link's own.
+        if (scheme == "https" && host == BITCHORD2_HOST) {
+            val match = INVITE_PATH.matchEntire(uri.path.orEmpty()) ?: return null
+            val code = match.groupValues[1].uppercase()
+            return ParsedJamInvite(code = code, serverUrl = server ?: BITCHORD2_SERVER)
         }
 
         return null

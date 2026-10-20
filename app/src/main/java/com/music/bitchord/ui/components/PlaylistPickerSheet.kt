@@ -358,7 +358,7 @@ private fun NewPlaylistForm(
             PlaylistPrivacy.entries.forEach { option ->
                 PrivacyPill(
                     icon = option.icon,
-                    label = option.label,
+                    label = option.title(),
                     selected = option == privacy,
                     onClick = { privacy = option },
                 )
@@ -390,8 +390,17 @@ internal fun RenamePlaylistForm(
     onBack: () -> Unit,
     onRename: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * The rest of the playlist's details: a new description (null to leave it) and who can see
+     * it (null to leave it). Null hides both, leaving the form a rename.
+     */
+    onEditDetails: ((description: String?, privacy: PlaylistPrivacy?) -> Unit)? = null,
 ) {
     var name by remember { mutableStateOf(playlist.title) }
+    var description by remember { mutableStateOf("") }
+    var descriptionTouched by remember { mutableStateOf(false) }
+    var privacy by remember { mutableStateOf<PlaylistPrivacy?>(null) }
+    val detailsChanged = descriptionTouched || privacy != null
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
@@ -400,7 +409,9 @@ internal fun RenamePlaylistForm(
     val submit: () -> Unit = {
         if (name.isNotBlank()) {
             focusManager.clearFocus()
-            onRename(name)
+            if (name != playlist.title) onRename(name)
+            if (detailsChanged) onEditDetails?.invoke(description.trim().takeIf { descriptionTouched }, privacy)
+            if (name == playlist.title && !detailsChanged) onBack()
         }
     }
 
@@ -425,7 +436,7 @@ internal fun RenamePlaylistForm(
                 )
             }
             Text(
-                text = stringResource(R.string.rename_playlist),
+                text = stringResource(if (onEditDetails != null) R.string.edit_playlist else R.string.rename_playlist),
                 style = MaterialTheme.typography.titleLarge,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.weight(1f),
@@ -456,14 +467,63 @@ internal fun RenamePlaylistForm(
                     .focusRequester(focusRequester),
             )
         }
+        if (onEditDetails != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 22.dp, end = 22.dp, bottom = 12.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(11.dp))
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+            ) {
+                Box(Modifier.weight(1f)) {
+                    if (description.isEmpty()) {
+                        Text(
+                            stringResource(R.string.playlist_description_hint),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    BasicTextField(
+                        value = description,
+                        onValueChange = {
+                            description = it
+                            descriptionTouched = true
+                        },
+                        minLines = 2,
+                        maxLines = 5,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onBackground),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            SheetHeading(stringResource(R.string.who_can_see_it).uppercase(Locale.getDefault()))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 22.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PlaylistPrivacy.entries.forEach { option ->
+                    PrivacyPill(
+                        icon = option.icon,
+                        label = option.title(),
+                        selected = option == privacy,
+                        // Unchosen leaves it as it is: the page does not say what it is now.
+                        onClick = { privacy = if (privacy == option) null else option },
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
         Button(
             onClick = submit,
-            enabled = name.isNotBlank() && name != playlist.title,
+            enabled = name.isNotBlank() && (name != playlist.title || detailsChanged),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 22.dp),
         ) {
-            Text(stringResource(R.string.save_name))
+            Text(stringResource(if (onEditDetails != null) R.string.save else R.string.save_name))
         }
         Spacer(Modifier.height(28.dp))
     }
@@ -474,6 +534,16 @@ internal fun RenamePlaylistForm(
  * link, a globe. Three words that all sound like degrees of the same thing
  * read much faster as three different shapes.
  */
+/** [PlaylistPrivacy.label] in the app's language. */
+@Composable
+private fun PlaylistPrivacy.title(): String = stringResource(
+    when (this) {
+        PlaylistPrivacy.PRIVATE -> R.string.privacy_private
+        PlaylistPrivacy.UNLISTED -> R.string.privacy_unlisted
+        PlaylistPrivacy.PUBLIC -> R.string.privacy_public
+    },
+)
+
 private val PlaylistPrivacy.icon: ImageVector
     get() = when (this) {
         PlaylistPrivacy.PRIVATE -> Icons.Rounded.Lock

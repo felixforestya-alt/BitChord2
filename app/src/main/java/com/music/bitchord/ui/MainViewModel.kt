@@ -565,6 +565,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _history = MutableStateFlow<UiState<List<Song>>>(UiState.Loading)
     val history: StateFlow<UiState<List<Song>>> = _history.asStateFlow()
 
+    /** For each track of [history], the token that takes it out of the account's history. */
+    private var historyTokens: Map<String, String> = emptyMap()
+
+    /**
+     * Takes a track out of the account's history, by the token its row came with; off the page
+     * at once, and back on it if YouTube Music refuses.
+     */
+    fun removeFromHistory(song: Song) {
+        val token = historyTokens[song.videoId] ?: return
+        val before = _history.value
+        (before as? UiState.Success)?.let { state ->
+            val rest = state.data.filterNot { it.videoId == song.videoId }
+            _history.value = if (rest.isEmpty()) UiState.Error(text(R.string.history_empty)) else UiState.Success(rest)
+        }
+        viewModelScope.launch {
+            YtMusicRepository.removeFromHistory(listOf(token)).onFailure {
+                _history.value = before
+            }
+        }
+    }
+
+    /** Whether [song] can be taken out of the history: it came with a token to do it by. */
+    fun canRemoveFromHistory(song: Song): Boolean = song.videoId in historyTokens
+
     private val _library = MutableStateFlow<UiState<LibraryPage>>(UiState.Loading)
     val library: StateFlow<UiState<LibraryPage>> = _library.asStateFlow()
 
@@ -1232,6 +1256,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * own page or its card, so there is always something on screen still
      * showing the old name.
      */
+    /** A playlist of one's own's description and who can see it; a null leaves that part. */
+    fun editPlaylistDetails(
+        playlist: UserPlaylist,
+        description: String?,
+        privacy: com.music.bitchord.data.model.PlaylistPrivacy?,
+    ) {
+        if (!requireSignIn()) return
+        if (description == null && privacy == null) return
+        viewModelScope.launch {
+            YtMusicRepository.editPlaylistDetails(playlist.playlistId, null, description, privacy)
+                .onSuccess { libraryStale = true }
+        }
+    }
+
     fun renamePlaylist(playlist: UserPlaylist, title: String) {
         if (!requireSignIn()) return
         val name = title.trim()
@@ -1821,8 +1859,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val identity = listenerKey()
         _history.value = UiState.Loading
         viewModelScope.launch {
-            val next = YtMusicRepository.history().fold(
-                onSuccess = { songs ->
+            val next = YtMusicRepository.historyWithRemoval().fold(
+                onSuccess = { (songs, tokens) ->
+                    historyTokens = tokens
                     if (songs.isEmpty()) UiState.Error(text(R.string.history_empty))
                     else UiState.Success(songs)
                 },

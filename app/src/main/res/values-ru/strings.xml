@@ -1386,4 +1386,24 @@
     <string name="wear_os_code_hint">Код подключения</string>
     <string name="wear_os_done">Готово</string>
     <string name="signed_by">Подпись: %1$s</string>
+    <string name="network">Сеть</string>
+    <string name="dpi_bypass">Обход блокировок YouTube</string>
+    <string name="dpi_bypass_subtitle">Без VPN, для сетей, где YouTube замедляют (как в России): адреса через зашифрованный DNS, а имя сайта в первом пакете разрезается, чтобы фильтр его не узнал</string>
+    <string name="dns_server">DNS-сервер</string>
+    <string name="dns_server_subtitle">У кого приложение спрашивает адреса сайтов, через зашифрованный DNS (DNS over HTTPS). Если выбранный сервер не отвечает, спрашивается системный</string>
+    <string name="dns_system">Системный</string>
+    <string name="dns_custom">Свой</string>
+    <string name="dns_custom_url">Адрес DNS over HTTPS</string>
+    <string name="dns_check">Проверить</string>
+    <string name="dns_checking">Проверка…</string>
+    <string name="dns_ok">Отвечает</string>
+    <string name="dns_failed">Не отвечает</string>
+    <string name="remove_from_history">Удалить из истории</string>
+    <string name="edit_playlist">Изменить плейлист</string>
+    <string name="playlist_description_hint">Описание — оставьте как есть или напишите новое</string>
+    <string name="privacy_private">Только я</string>
+    <string name="privacy_unlisted">По ссылке</string>
+    <string name="privacy_public">Все</string>
+    <string name="change_cover">Сменить обложку</string>
+    <string name="reset_cover">Вернуть обложку плейлиста</string>
 </resources>

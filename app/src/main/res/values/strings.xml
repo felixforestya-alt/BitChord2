@@ -1204,4 +1204,24 @@
     <string name="wear_os_code_hint">Pairing code</string>
     <string name="wear_os_done">Done</string>
     <string name="signed_by">Signed by %1$s</string>
+    <string name="network">Network</string>
+    <string name="dpi_bypass">Get round YouTube blocking</string>
+    <string name="dpi_bypass_subtitle">Without a VPN, for networks that slow YouTube down (as in Russia): addresses over encrypted DNS, and the site\'s name split in the first packet so the filter does not recognise it</string>
+    <string name="dns_server">DNS server</string>
+    <string name="dns_server_subtitle">Who the app asks for websites\' addresses, over encrypted DNS (DNS over HTTPS). If the chosen server does not answer, the system\'s is asked instead</string>
+    <string name="dns_system">System</string>
+    <string name="dns_custom">Custom</string>
+    <string name="dns_custom_url">DNS over HTTPS address</string>
+    <string name="dns_check">Check</string>
+    <string name="dns_checking">Checking…</string>
+    <string name="dns_ok">Answers</string>
+    <string name="dns_failed">No answer</string>
+    <string name="remove_from_history">Remove from history</string>
+    <string name="edit_playlist">Edit playlist</string>
+    <string name="playlist_description_hint">Description — leave as it is, or write a new one</string>
+    <string name="privacy_private">Private</string>
+    <string name="privacy_unlisted">Unlisted</string>
+    <string name="privacy_public">Public</string>
+    <string name="change_cover">Change cover</string>
+    <string name="reset_cover">Use the playlist\'s own cover</string>
 </resources>

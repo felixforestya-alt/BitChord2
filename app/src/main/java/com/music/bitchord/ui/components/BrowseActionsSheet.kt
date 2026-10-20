@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.HideImage
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Edit
@@ -156,6 +158,12 @@ fun BrowseActionsSheet(
     isPinned: Boolean = false,
     onTogglePin: (() -> Unit)? = null,
     onRename: ((String) -> Unit)? = null,
+    /** A playlist of one's own's description and who can see it — see [RenamePlaylistForm]. */
+    onEditDetails: ((description: String?, privacy: com.music.bitchord.data.model.PlaylistPrivacy?) -> Unit)? = null,
+    /** Picks a picture to be the playlist's cover on this device; null where it is not ours. */
+    onChangeCover: (() -> Unit)? = null,
+    /** Back to the playlist's own cover; null while it has it. */
+    onResetCover: (() -> Unit)? = null,
     /**
      * Opens the reorder sheet for one of the account's own playlists — set
      * under the same rule as [onRename], since YouTube refuses to rearrange a
@@ -196,6 +204,7 @@ fun BrowseActionsSheet(
             playlist = playlist,
             onBack = { renaming = false },
             onRename = onRename,
+            onEditDetails = onEditDetails,
             modifier = modifier,
         )
         return
@@ -282,8 +291,14 @@ fun BrowseActionsSheet(
                     onClick = it,
                 )
             }
+            onChangeCover?.let {
+                ActionRow(Icons.Rounded.Image, stringResource(R.string.change_cover), onClick = it)
+            }
+            onResetCover?.let {
+                ActionRow(Icons.Rounded.HideImage, stringResource(R.string.reset_cover), onClick = it)
+            }
             if (onRename != null) {
-                ActionRow(Icons.Rounded.Edit, stringResource(R.string.rename)) {
+                ActionRow(Icons.Rounded.Edit, stringResource(if (onEditDetails != null) R.string.edit_playlist else R.string.rename)) {
                     if (menu && onRenameInSheet != null) {
                         onRenameInSheet()
                     } else {

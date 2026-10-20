@@ -743,6 +743,20 @@ private fun BitChordApp(
     val selectedMoodGenre by viewModel.selectedMoodGenre.collectAsStateWithLifecycle()
     val moodGenreShelves by viewModel.moodGenreShelves.collectAsStateWithLifecycle()
     val libraryState by viewModel.library.collectAsStateWithLifecycle()
+    /** Covers the listener picked for their own playlists — see [PlaylistCovers]. */
+    val playlistCovers by com.music.bitchord.data.settings.PlaylistCovers.covers.collectAsStateWithLifecycle()
+    // Which playlist the picture picker is choosing a cover for, while it is open.
+    var coverTarget by remember { mutableStateOf<String?>(null) }
+    val coverScope = rememberCoroutineScope()
+    val coverPicker = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.GetContent(),
+    ) { picked ->
+        val id = coverTarget
+        coverTarget = null
+        if (picked != null && id != null) {
+            coverScope.launch { com.music.bitchord.data.settings.PlaylistCovers.set(context, id, picked) }
+        }
+    }
     val filter by viewModel.filter.collectAsStateWithLifecycle()
     val searchSource by viewModel.searchSource.collectAsStateWithLifecycle()
     val libraryResults by viewModel.libraryResults.collectAsStateWithLifecycle()
@@ -3012,7 +3026,7 @@ private fun BitChordApp(
                             )
                         }
                         DetailScreen(
-                            page = page,
+                            page = playlistCovers[page.browseId]?.let { page.copy(thumbnailUrl = it) } ?: page,
                             currentSong = player.song,
                             isPlaying = player.isPlaying,
                             listState = pageDetailListState,
@@ -3336,7 +3350,7 @@ private fun BitChordApp(
                         )
                         else -> LibraryScreen(
                             signedIn = signedIn,
-                            state = libraryState,
+                            state = libraryState.withChosenCovers(playlistCovers),
                             listState = libraryListState,
                             onShelfItemClick = onLibraryItemClick,
                             // Every shelf here has a menu behind it now — the account's
@@ -4396,6 +4410,15 @@ private fun BitChordApp(
                         viewModel.removeFromPlaylist(it.browseId, song)
                     }
                 },
+                // Held on the history page: the way to take it out of the history.
+                onRemoveFromHistory = if (showHistory && !fromPlayer && viewModel.canRemoveFromHistory(song)) {
+                    {
+                        songActions = null
+                        viewModel.removeFromHistory(song)
+                    }
+                } else {
+                    null
+                },
                 onOpenAlbum = { id ->
                     openPage(
                         id,
@@ -4779,6 +4802,25 @@ private fun BitChordApp(
                     { name: String ->
                         browseActions = null
                         viewModel.renamePlaylist(p, name)
+                    }
+                },
+                onEditDetails = playlist?.let { p ->
+                    { description, privacy ->
+                        browseActions = null
+                        viewModel.editPlaylistDetails(p, description, privacy)
+                    }
+                },
+                onChangeCover = playlist?.let { p ->
+                    {
+                        browseActions = null
+                        coverTarget = p.browseId
+                        coverPicker.launch("image/*")
+                    }
+                },
+                onResetCover = target.browseId?.takeIf { it in playlistCovers }?.let { id ->
+                    {
+                        browseActions = null
+                        com.music.bitchord.data.settings.PlaylistCovers.reset(context, id)
                     }
                 },
                 onReorder = playlist?.let { p ->
@@ -5747,3 +5789,17 @@ private const val TAB_SEARCH = 3
  * prefix has to be the one thing both the writing and the reading agree on.
  */
 private const val TAB_KEY = "tab:"
+
+/** The Library with the covers the listener picked for their playlists in place of their own. */
+private fun UiState<com.music.bitchord.data.model.LibraryPage>.withChosenCovers(
+    covers: Map<String, String>,
+): UiState<com.music.bitchord.data.model.LibraryPage> {
+    if (covers.isEmpty() || this !is UiState.Success) return this
+    return UiState.Success(
+        data.copy(
+            shelves = data.shelves.map { shelf ->
+                shelf.copy(items = shelf.items.map { item -> item.browseId?.let(covers::get)?.let { item.copy(thumbnailUrl = it) } ?: item })
+            },
+        ),
+    )
+}

@@ -265,6 +265,19 @@ object AppSettings {
      */
     val loudnessNormalization = MutableStateFlow(true)
 
+    /**
+     * Getting round a network that throttles YouTube (Russia's): see
+     * [DpiBypass][com.music.bitchord.data.net.DpiBypass]. On by default where the
+     * phone's region or time zone says Russia.
+     */
+    val dpiBypass = MutableStateFlow(false)
+
+    /** The DNS server names are looked up with — see [SecureDns][com.music.bitchord.data.net.SecureDns]. */
+    val dnsProvider = MutableStateFlow(com.music.bitchord.data.net.SecureDns.Provider.SYSTEM)
+
+    /** The DNS over HTTPS address for [com.music.bitchord.data.net.SecureDns.Provider.CUSTOM]. */
+    val customDns = MutableStateFlow("")
+
     /** Skip loudness normalization while the active output is the phone's own speaker. */
     val loudnessOffOnSpeaker = MutableStateFlow(true)
 
@@ -832,6 +845,14 @@ object AppSettings {
         }.getOrDefault(OutputPcmMode.PCM_16)
         preferUsbDac.value = prefs.getBoolean(KEY_PREFER_USB_DAC, false)
         loudnessNormalization.value = prefs.getBoolean(KEY_LOUDNESS_NORMALIZATION, true)
+        dpiBypass.value = prefs.getBoolean(KEY_DPI_BYPASS, inRussia())
+        dnsProvider.value = runCatching {
+            com.music.bitchord.data.net.SecureDns.Provider.valueOf(
+                prefs.getString(KEY_DNS_PROVIDER, null) ?: com.music.bitchord.data.net.SecureDns.Provider.SYSTEM.name,
+            )
+        }.getOrDefault(com.music.bitchord.data.net.SecureDns.Provider.SYSTEM)
+        customDns.value = prefs.getString(KEY_CUSTOM_DNS, "").orEmpty()
+        applyNetwork()
         loudnessOffOnSpeaker.value = prefs.getBoolean(KEY_LOUDNESS_OFF_ON_SPEAKER, true)
         dolbyAtmos.value = prefs.getBoolean(KEY_DOLBY_ATMOS, true)
         spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
@@ -1560,6 +1581,46 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_LOUDNESS_OFF_ON_SPEAKER, value).apply()
     }
 
+    fun setDpiBypass(value: Boolean) {
+        dpiBypass.value = value
+        prefs.edit().putBoolean(KEY_DPI_BYPASS, value).apply()
+        applyNetwork()
+    }
+
+    fun setDnsProvider(value: com.music.bitchord.data.net.SecureDns.Provider) {
+        dnsProvider.value = value
+        prefs.edit().putString(KEY_DNS_PROVIDER, value.name).apply()
+        applyNetwork()
+    }
+
+    fun setCustomDns(value: String) {
+        customDns.value = value
+        prefs.edit().putString(KEY_CUSTOM_DNS, value).apply()
+        applyNetwork()
+    }
+
+    /** Hands the network choices to the client every request goes through; read on each connection. */
+    private fun applyNetwork() {
+        com.music.bitchord.data.net.DpiBypass.enabled = dpiBypass.value
+        com.music.bitchord.data.net.SecureDns.customUrl = customDns.value
+        com.music.bitchord.data.net.SecureDns.provider = dnsProvider.value
+    }
+
+    /** Russia, by the phone's region or its time zone — where YouTube is known to be slowed. */
+    private fun inRussia(): Boolean {
+        if (java.util.Locale.getDefault().country.equals("RU", ignoreCase = true)) return true
+        val zone = runCatching { java.util.TimeZone.getDefault().id }.getOrDefault("")
+        return zone.startsWith("Europe/Moscow") || zone in RUSSIAN_ZONES
+    }
+
+    private val RUSSIAN_ZONES = setOf(
+        "Europe/Kaliningrad", "Europe/Samara", "Europe/Volgograd", "Europe/Saratov", "Europe/Ulyanovsk",
+        "Europe/Astrakhan", "Europe/Kirov", "Asia/Yekaterinburg", "Asia/Omsk", "Asia/Novosibirsk",
+        "Asia/Barnaul", "Asia/Tomsk", "Asia/Novokuznetsk", "Asia/Krasnoyarsk", "Asia/Irkutsk",
+        "Asia/Chita", "Asia/Yakutsk", "Asia/Khandyga", "Asia/Vladivostok", "Asia/Ust-Nera",
+        "Asia/Magadan", "Asia/Sakhalin", "Asia/Srednekolymsk", "Asia/Kamchatka", "Asia/Anadyr", "W-SU",
+    )
+
     fun setLoudnessNormalization(value: Boolean) {
         loudnessNormalization.value = value
         prefs.edit().putBoolean(KEY_LOUDNESS_NORMALIZATION, value).apply()
@@ -1999,6 +2060,9 @@ object AppSettings {
     private const val KEY_OUTPUT_PCM_MODE = "output_pcm_mode"
     private const val KEY_PREFER_USB_DAC = "prefer_usb_dac"
     private const val KEY_LOUDNESS_NORMALIZATION = "loudness_normalization"
+    private const val KEY_DPI_BYPASS = "net_dpi_bypass"
+    private const val KEY_DNS_PROVIDER = "net_dns_provider"
+    private const val KEY_CUSTOM_DNS = "net_dns_custom_url"
     private const val KEY_LOUDNESS_OFF_ON_SPEAKER = "loudness_off_on_speaker"
     private const val KEY_DOLBY_ATMOS = "dolby_atmos"
     private const val KEY_SPATIAL_AUDIO = "spatial_audio"

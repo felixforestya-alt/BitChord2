@@ -143,6 +143,8 @@ fun SongActionsSheet(
     onOpenArtist: (String) -> Unit,
     modifier: Modifier = Modifier,
     onRemoveFromPlaylist: (() -> Unit)? = null,
+    /** Takes the track out of the listening history; null where it was not opened from there. */
+    onRemoveFromHistory: (() -> Unit)? = null,
     showSleepTimer: Boolean = false,
     /**
      * Sends the playing track back to YouTube's own upload, and keeps it there.
@@ -287,6 +289,14 @@ fun SongActionsSheet(
                 ActionRow(
                     icon = Icons.Rounded.PlaylistRemove,
                     label = stringResource(R.string.remove_from_playlist),
+                    accent = palette.accent,
+                    onClick = it,
+                )
+            }
+            onRemoveFromHistory?.let {
+                ActionRow(
+                    icon = Icons.Rounded.PlaylistRemove,
+                    label = stringResource(R.string.remove_from_history),
                     accent = palette.accent,
                     onClick = it,
                 )

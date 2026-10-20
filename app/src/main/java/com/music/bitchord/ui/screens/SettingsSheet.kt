@@ -8,6 +8,9 @@ import android.media.audiofx.AudioEffect
 import android.net.Uri
 import android.provider.Settings
 import android.widget.Toast
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -230,6 +233,9 @@ fun SettingsScreen(
     val preferUsbDac by AppSettings.preferUsbDac.collectAsStateWithLifecycle()
     val loudnessNormalization by AppSettings.loudnessNormalization.collectAsStateWithLifecycle()
     val loudnessOffOnSpeaker by AppSettings.loudnessOffOnSpeaker.collectAsStateWithLifecycle()
+    val dpiBypass by AppSettings.dpiBypass.collectAsStateWithLifecycle()
+    val dnsProvider by AppSettings.dnsProvider.collectAsStateWithLifecycle()
+    var pickingDns by remember { mutableStateOf(false) }
     val outputStatus by AudioOutputStatus.current.collectAsStateWithLifecycle()
     val playingFormat by NerdStats.current.collectAsStateWithLifecycle()
     val playingDolbyAtmos = playingFormat?.isDolbyAtmos == true
@@ -405,6 +411,27 @@ fun SettingsScreen(
             placeholder = stringResource(R.string.settings_search_hint),
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 4.dp),
         )
+        // The page's sections, a tap away: a long list, read on a phone. Not while searching,
+        // when the list is already only what was asked for.
+        val anchors = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
+        val jumpScope = rememberCoroutineScope()
+        if (searchQuery.isBlank() && anchors.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                anchors.entries.sortedBy { it.value }.forEach { (title, y) ->
+                    androidx.compose.material3.AssistChip(
+                        onClick = { jumpScope.launch { scrollState.animateScrollTo(y) } },
+                        label = { Text(title) },
+                    )
+                }
+            }
+        }
+        androidx.compose.runtime.CompositionLocalProvider(LocalSettingsAnchors provides anchors) {
 
         SearchableSettingsGroup(search) {
             val accountTitle = stringResource(R.string.account_integrations)
@@ -1054,6 +1081,38 @@ fun SettingsScreen(
             }
         }
 
+        SearchableSettingsGroup(search, header = stringResource(R.string.network)) {
+            val bypassTitle = stringResource(R.string.dpi_bypass)
+            row(bypassTitle, "russia", "vpn", "dpi", "blocking", "throttle", "youtube") {
+                SettingsRow(
+                    icon = Icons.Rounded.Shield,
+                    title = bypassTitle,
+                    subtitle = stringResource(R.string.dpi_bypass_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = dpiBypass,
+                            onCheckedChange = AppSettings::setDpiBypass,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setDpiBypass(!dpiBypass) },
+                )
+            }
+            val dnsTitle = stringResource(R.string.dns_server)
+            row(dnsTitle, "dns", "doh", "cloudflare", "google", "quad9", "adguard") {
+                SettingsRow(
+                    icon = Icons.Rounded.Dns,
+                    title = dnsTitle,
+                    subtitle = stringResource(R.string.dns_server_subtitle),
+                    value = dnsProviderLabel(dnsProvider),
+                    onClick = { pickingDns = true },
+                )
+            }
+        }
+
         SearchableSettingsGroup(search, header = stringResource(R.string.performance)) {
             val highPerformanceModeTitle = stringResource(R.string.high_performance_mode)
             row(highPerformanceModeTitle, "frame rate", "refresh rate", "hz", "battery", "smooth") {
@@ -1591,6 +1650,7 @@ fun SettingsScreen(
                 .padding(top = 24.dp, bottom = 8.dp),
         )
         }
+        }
     }
 
     picking?.let { target ->
@@ -1621,6 +1681,10 @@ fun SettingsScreen(
                 },
             )
         }
+    }
+
+    if (pickingDns) {
+        DnsPickerDialog(onDismiss = { pickingDns = false })
     }
 
     if (pickingDownloadQuality) {
@@ -2384,11 +2448,20 @@ internal fun SettingsGroup(
     content: @Composable () -> Unit,
 ) {
     if (header != null) {
+        val anchors = LocalSettingsAnchors.current
         Text(
             text = header.uppercase(Locale.ROOT),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(
+            modifier = Modifier
+                .then(
+                    if (anchors != null) {
+                        Modifier.onGloballyPositioned { anchors[header] = it.positionInParent().y.toInt() }
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(
                 start = GROUP_INSET + 4.dp,
                 end = GROUP_INSET,
                 top = 26.dp,
@@ -2419,6 +2492,101 @@ internal fun SettingsGroup(
             ),
         )
     }
+}
+
+/** Where each settings section's heading sits in the page, for the contents row above them. */
+private val LocalSettingsAnchors = androidx.compose.runtime.compositionLocalOf<MutableMap<String, Int>?> { null }
+
+@Composable
+private fun dnsProviderLabel(provider: com.music.bitchord.data.net.SecureDns.Provider): String = when (provider) {
+    com.music.bitchord.data.net.SecureDns.Provider.SYSTEM -> stringResource(R.string.dns_system)
+    com.music.bitchord.data.net.SecureDns.Provider.CLOUDFLARE -> "Cloudflare"
+    com.music.bitchord.data.net.SecureDns.Provider.GOOGLE -> "Google"
+    com.music.bitchord.data.net.SecureDns.Provider.QUAD9 -> "Quad9"
+    com.music.bitchord.data.net.SecureDns.Provider.ADGUARD -> "AdGuard"
+    com.music.bitchord.data.net.SecureDns.Provider.CUSTOM -> stringResource(R.string.dns_custom)
+}
+
+/**
+ * Which DNS server names are looked up with: the system's, a known one, or any DNS over HTTPS
+ * address — with a check that it answers.
+ */
+@Composable
+private fun DnsPickerDialog(onDismiss: () -> Unit) {
+    val provider by AppSettings.dnsProvider.collectAsStateWithLifecycle()
+    val customUrl by AppSettings.customDns.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var checking by remember { mutableStateOf(false) }
+    var result by remember(provider, customUrl) { mutableStateOf<String?>(null) }
+    val okLabel = stringResource(R.string.dns_ok)
+    val failedLabel = stringResource(R.string.dns_failed)
+    val server = if (provider == com.music.bitchord.data.net.SecureDns.Provider.CUSTOM) customUrl.trim() else provider.url.orEmpty()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.dns_server)) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    stringResource(R.string.dns_server_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                com.music.bitchord.data.net.SecureDns.Provider.entries.forEach { option ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { AppSettings.setDnsProvider(option) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = provider == option,
+                            onClick = { AppSettings.setDnsProvider(option) },
+                        )
+                        Text(dnsProviderLabel(option), style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+                if (provider == com.music.bitchord.data.net.SecureDns.Provider.CUSTOM) {
+                    OutlinedTextField(
+                        value = customUrl,
+                        onValueChange = AppSettings::setCustomDns,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.dns_custom_url)) },
+                        placeholder = { Text("https://dns.example.com/dns-query") },
+                        singleLine = true,
+                        isError = customUrl.isNotBlank() && !customUrl.trim().startsWith("https://"),
+                    )
+                }
+                if (provider != com.music.bitchord.data.net.SecureDns.Provider.SYSTEM) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            enabled = !checking && server.startsWith("https://"),
+                            onClick = {
+                                checking = true
+                                scope.launch {
+                                    val started = System.nanoTime()
+                                    val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        runCatching { com.music.bitchord.data.net.SecureDns.probe(server) }
+                                    }
+                                    val ms = (System.nanoTime() - started) / 1_000_000
+                                    result = outcome.fold(
+                                        { "$okLabel · $ms ms · ${it.first().hostAddress}" },
+                                        { "$failedLabel · ${it.message ?: it::class.simpleName}" },
+                                    )
+                                    checking = false
+                                }
+                            },
+                        ) { Text(stringResource(if (checking) R.string.dns_checking else R.string.dns_check)) }
+                        result?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.done)) } },
+    )
 }
 
 @Composable

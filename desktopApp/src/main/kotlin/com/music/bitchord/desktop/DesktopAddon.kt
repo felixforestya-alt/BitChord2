@@ -4,7 +4,6 @@ import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -470,7 +469,7 @@ internal class DesktopAddonClient(rawBaseUrl: String) {
         }
 
         /** A ceiling on the whole call: the spec asks addons to answer in seconds, not minutes. */
-        private val http = HttpClient(CIO) {
+        private val http = desktopHttpClient {
             install(HttpTimeout) { requestTimeoutMillis = CALL_TIMEOUT_MS }
         }
 
@@ -918,7 +917,7 @@ internal object DesktopSourceFormats {
         }
     }
 
-    private val http = HttpClient(CIO) {
+    private val http = desktopHttpClient {
         install(HttpTimeout) { requestTimeoutMillis = DesktopAddonClient.CALL_TIMEOUT_MS }
     }
 }

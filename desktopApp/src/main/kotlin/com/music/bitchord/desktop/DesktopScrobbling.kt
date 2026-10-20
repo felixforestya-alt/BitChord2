@@ -3,7 +3,6 @@ package com.music.bitchord.desktop
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.durationMillis
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -43,7 +42,7 @@ object DesktopScrobbling {
     private const val LAST_FM_ENDPOINT = "https://ws.audioscrobbler.com/2.0/"
     private const val LISTENBRAINZ_ENDPOINT = "https://api.listenbrainz.org/1/submit-listens"
 
-    private val client = HttpClient(CIO) {
+    private val client = desktopHttpClient {
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

@@ -4,7 +4,6 @@ import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.Song
 import io.ktor.client.HttpClient
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -70,7 +69,7 @@ internal object DesktopJioSaavn {
         explicitNulls = false
     }
 
-    private val client = HttpClient(CIO) {
+    private val client = desktopHttpClient {
         install(ContentNegotiation) { json(json) }
     }
 

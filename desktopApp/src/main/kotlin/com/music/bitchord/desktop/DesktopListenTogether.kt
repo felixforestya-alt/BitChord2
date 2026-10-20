@@ -14,7 +14,6 @@ import com.music.bitchord.data.listentogether.PartyTrack
 import com.music.bitchord.data.listentogether.ServerClock
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -127,7 +126,7 @@ internal object DesktopListenTogether {
             .orEmpty()
     }
 
-    private val http = HttpClient(CIO) {
+    private val http = desktopHttpClient {
         install(ContentNegotiation) { json(json) }
         install(WebSockets)
         install(HttpTimeout) {

@@ -1,0 +1,18 @@
+# BitChord Listen Together on Cloudflare Workers (free plan, no card).
+# Deploy: npm install && npx wrangler login && npx wrangler deploy
+name = "bitchord-party"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "PARTY"
+class_name = "PartyRoom"
+
+[[durable_objects.bindings]]
+name = "REGISTRY"
+class_name = "Registry"
+
+# SQLite-backed Durable Objects: the only kind the free plan has.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PartyRoom", "Registry"]

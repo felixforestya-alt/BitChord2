@@ -101,7 +101,45 @@ fun YtMusicLoginScreen(
                 settings.domStorageEnabled = true
                 configureWebView(this)
 
+                // A page that failed to load — the network dropped as the screen opened, or came
+                // back with its old connections dead — stayed an error page for good: nothing
+                // asked again. It is asked again on a short timer and the moment a network is
+                // back, a few times, then left for the listener to close and reopen.
+                var failedLoads = 0
+                // Only the page on screen being an error page is a reason to reload: a page that
+                // loaded is never reloaded under someone typing into it.
+                var showingError = false
+                val connectivity = context.getSystemService(android.net.ConnectivityManager::class.java)
+                val retryOnNetwork = object : android.net.ConnectivityManager.NetworkCallback() {
+                    override fun onAvailable(network: android.net.Network) {
+                        if (showingError) post { reload() }
+                    }
+                }
+                runCatching { connectivity?.registerDefaultNetworkCallback(retryOnNetwork) }
+                addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: android.view.View) = Unit
+                    override fun onViewDetachedFromWindow(v: android.view.View) {
+                        runCatching { connectivity?.unregisterNetworkCallback(retryOnNetwork) }
+                    }
+                })
+
                 webViewClient = object : WebViewClient() {
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: android.webkit.WebResourceRequest?,
+                        error: android.webkit.WebResourceError?,
+                    ) {
+                        if (request?.isForMainFrame != true) return
+                        showingError = true
+                        if (failedLoads >= MAX_RELOADS) return
+                        failedLoads++
+                        view?.postDelayed({ view.reload() }, RELOAD_DELAY_MS * failedLoads)
+                    }
+
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                        showingError = false
+                    }
+
                     override fun onPageFinished(view: WebView?, url: String?) {
                         // Reaching the Music origin only enables confirmation.
                         // A multi-channel login can still be waiting for the
@@ -207,3 +245,9 @@ private fun String?.parseConfig(): JsonObject? =
 
 private fun JsonObject.string(key: String): String? =
     (this[key] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
+/** How many times a failed sign-in page is loaded again by itself. */
+private const val MAX_RELOADS = 5
+
+/** The wait before the first reload, growing with each one after it. */
+private const val RELOAD_DELAY_MS = 2_000L

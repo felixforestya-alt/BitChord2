@@ -15,7 +15,7 @@ internal object DesktopNetworkSettings {
 
     private val persistence by lazy { DesktopPersistence() }
 
-    private val _bypass = MutableStateFlow(persistence.boolean(KEY_BYPASS, inRussia()))
+    private val _bypass = MutableStateFlow(persistence.boolean(KEY_BYPASS, false))
 
     /**
      * On by default where YouTube is known to be slowed — Russia, judged by the system's region
@@ -61,20 +61,6 @@ internal object DesktopNetworkSettings {
         SecureDns.provider = _dns.value
     }
 
-    private fun inRussia(): Boolean {
-        if (Locale.getDefault().country.equals("RU", ignoreCase = true)) return true
-        val zone = runCatching { ZoneId.systemDefault().id }.getOrDefault("")
-        return zone in RUSSIAN_ZONES
-    }
-
-    private val RUSSIAN_ZONES = setOf(
-        "Europe/Moscow", "Europe/Kaliningrad", "Europe/Samara", "Europe/Volgograd", "Europe/Saratov",
-        "Europe/Ulyanovsk", "Europe/Astrakhan", "Europe/Kirov", "Asia/Yekaterinburg", "Asia/Omsk",
-        "Asia/Novosibirsk", "Asia/Barnaul", "Asia/Tomsk", "Asia/Novokuznetsk", "Asia/Krasnoyarsk",
-        "Asia/Irkutsk", "Asia/Chita", "Asia/Yakutsk", "Asia/Khandyga", "Asia/Vladivostok",
-        "Asia/Ust-Nera", "Asia/Magadan", "Asia/Sakhalin", "Asia/Srednekolymsk", "Asia/Kamchatka",
-        "Asia/Anadyr", "W-SU",
-    )
 
     private const val KEY_BYPASS = "net_dpi_bypass"
     private const val KEY_DNS = "net_dns_provider"

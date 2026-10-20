@@ -267,8 +267,7 @@ object AppSettings {
 
     /**
      * Getting round a network that throttles YouTube (Russia's): see
-     * [DpiBypass][com.music.bitchord.data.net.DpiBypass]. On by default where the
-     * phone's region or time zone says Russia.
+     * [DpiBypass][com.music.bitchord.data.net.DpiBypass]. Off unless switched on.
      */
     val dpiBypass = MutableStateFlow(false)
 
@@ -845,7 +844,7 @@ object AppSettings {
         }.getOrDefault(OutputPcmMode.PCM_16)
         preferUsbDac.value = prefs.getBoolean(KEY_PREFER_USB_DAC, false)
         loudnessNormalization.value = prefs.getBoolean(KEY_LOUDNESS_NORMALIZATION, true)
-        dpiBypass.value = prefs.getBoolean(KEY_DPI_BYPASS, inRussia())
+        dpiBypass.value = prefs.getBoolean(KEY_DPI_BYPASS, false)
         dnsProvider.value = runCatching {
             com.music.bitchord.data.net.SecureDns.Provider.valueOf(
                 prefs.getString(KEY_DNS_PROVIDER, null) ?: com.music.bitchord.data.net.SecureDns.Provider.SYSTEM.name,
@@ -1606,20 +1605,6 @@ object AppSettings {
         com.music.bitchord.data.net.SecureDns.provider = dnsProvider.value
     }
 
-    /** Russia, by the phone's region or its time zone — where YouTube is known to be slowed. */
-    private fun inRussia(): Boolean {
-        if (java.util.Locale.getDefault().country.equals("RU", ignoreCase = true)) return true
-        val zone = runCatching { java.util.TimeZone.getDefault().id }.getOrDefault("")
-        return zone.startsWith("Europe/Moscow") || zone in RUSSIAN_ZONES
-    }
-
-    private val RUSSIAN_ZONES = setOf(
-        "Europe/Kaliningrad", "Europe/Samara", "Europe/Volgograd", "Europe/Saratov", "Europe/Ulyanovsk",
-        "Europe/Astrakhan", "Europe/Kirov", "Asia/Yekaterinburg", "Asia/Omsk", "Asia/Novosibirsk",
-        "Asia/Barnaul", "Asia/Tomsk", "Asia/Novokuznetsk", "Asia/Krasnoyarsk", "Asia/Irkutsk",
-        "Asia/Chita", "Asia/Yakutsk", "Asia/Khandyga", "Asia/Vladivostok", "Asia/Ust-Nera",
-        "Asia/Magadan", "Asia/Sakhalin", "Asia/Srednekolymsk", "Asia/Kamchatka", "Asia/Anadyr", "W-SU",
-    )
 
     fun setLoudnessNormalization(value: Boolean) {
         loudnessNormalization.value = value

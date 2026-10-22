@@ -531,6 +531,8 @@ compose.desktop {
         jvmArgs("-Dsun.java2d.d3d=false", "-Dsun.java2d.noddraw=true")
         // Windows' proxy, as a VPN app in system-proxy mode sets it: see Main.kt.
         jvmArgs("-Djava.net.useSystemProxies=true")
+        // A native crash's report beside the app, where the next start finds it: see DesktopHangWatch.
+        jvmArgs("-XX:ErrorFile=\$APPDIR/hs_err_%p.log")
         jvmArgs("-Dbitchord.version=$appVersion")
         if (desktopModuleIndexUrl.isNotBlank()) {
             jvmArgs("-Dbitchord.module.index=$desktopModuleIndexUrl")

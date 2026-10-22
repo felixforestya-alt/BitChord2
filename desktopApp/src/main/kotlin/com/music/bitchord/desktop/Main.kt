@@ -36,6 +36,8 @@ fun main() {
     if (System.getProperty("java.net.useSystemProxies") == null) System.setProperty("java.net.useSystemProxies", "true")
     // Already running — in the tray, say: bring that one forward rather than start a second.
     if (!DesktopSingleInstance.claim()) kotlin.system.exitProcess(0)
+    // A frozen window or a crash leaves its reason in the log — see [DesktopHangWatch].
+    DesktopHangWatch.start()
     // The graphics API Skia draws through — OpenGL unless set otherwise, see DesktopGraphicsSettings.
     DesktopGraphicsSettings.apply()
     DesktopFramePacing.prepare()

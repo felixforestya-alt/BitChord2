@@ -216,6 +216,7 @@ class DesktopPlaybackEngine(
 
     fun load(song: Song, playWhenReady: Boolean = true, startAtMs: Long = 0L) {
         retryingSongId = null
+        earlyEndReopens.clear()
         loadInternal(
             song,
             playWhenReady,
@@ -826,6 +827,7 @@ class DesktopPlaybackEngine(
         val block = readCurrent(track)
         val count = currentReadCount
         if (block == null) {
+            if (fadeRemaining == 0 && reopenIfCutShort(track)) return
             if (fadeRemaining > 0 && upcoming != null) {
                 val channels = sink.format.channels.coerceAtLeast(1)
                 val wanted = MIX_END_PADDING_FRAMES * channels
@@ -1124,6 +1126,36 @@ class DesktopPlaybackEngine(
         val out = processor.process(samples, count)
         return out to processor.outputCount
     }
+
+    /**
+     * A network stream that ran out well before its stated length: the connection broke off
+     * mid-track (a window refused, a link that expired while paused) rather than the song ending.
+     * It was taken as the end, and the next track started by itself in the middle of this one —
+     * read by the listener as the player skipping on its own. Opened again where it stopped,
+     * a couple of times per track, so a stream that really is shorter still ends.
+     */
+    private fun reopenIfCutShort(track: Track): Boolean {
+        if (!track.stream.url.startsWith("http")) return false
+        val durationMs = (track.decoder.durationUs ?: return false) / 1_000
+        val heardMs = _state.value.positionMs
+        if (_state.value.song?.videoId != track.song.videoId) return false
+        if (durationMs < EARLY_END_MARGIN_MS * 2 || heardMs <= 0 || heardMs >= durationMs - EARLY_END_MARGIN_MS) return false
+        val tries = earlyEndReopens.merge(track.song.videoId, 1, Int::plus) ?: 1
+        if (tries > MAX_EARLY_END_REOPENS) return false
+        DesktopTrackLog.log(
+            "'${track.song.title}' ran out at ${heardMs / 1_000}s of ${durationMs / 1_000}s — " +
+                "the stream broke off; opening it again there",
+        )
+        // A googlevideo URL that broke off is not to be handed out again.
+        com.music.bitchord.data.innertube.StreamResolver.onPlaybackRefused(track.stream.url, 403)
+        current = null
+        track.decoder.close()
+        loadInternal(track.song, playWhenReady = true, startAtMs = heardMs)
+        return true
+    }
+
+    /** Reopens per track for a stream that ended early; see [reopenIfCutShort]. */
+    private val earlyEndReopens = ConcurrentHashMap<String, Int>()
 
     /** End of a track. */
     private fun finishTrack(track: Track) {
@@ -1946,6 +1978,12 @@ class DesktopPlaybackEngine(
     }
 
     companion object {
+        /** How far short of its stated length a stream has to stop to count as cut off. */
+        private const val EARLY_END_MARGIN_MS = 5_000L
+
+        /** Reopens per track before a short stream is believed. */
+        private const val MAX_EARLY_END_REOPENS = 2
+
         /** How many times a lossy substitute is asked to be beaten before the question is closed. */
         private const val LOSSLESS_FOLLOW_UPS = 2
 

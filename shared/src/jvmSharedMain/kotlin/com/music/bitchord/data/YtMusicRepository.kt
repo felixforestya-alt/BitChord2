@@ -157,23 +157,6 @@ object YtMusicRepository {
         InnertubeParser.collectSongsDeep(raw).distinctBy { it.videoId } to InnertubeParser.historyRemovalTokens(raw)
     }
 
-    /** The history in the periods YouTube Music groups it by, newest first, under its own titles. */
-    suspend fun historyShelves(): Result<List<Pair<String, List<Song>>>> = call("history") {
-        val periods = LinkedHashMap<String, List<Song>>()
-        var page = Innertube.browse(HISTORY)
-        for (fetched in 1..HISTORY_PAGES) {
-            for ((title, songs) in InnertubeParser.titledShelves(page)) {
-                // A period running on over a page break comes back with no title of its own.
-                val key = title.ifBlank { periods.keys.lastOrNull() ?: continue }
-                periods[key] = periods[key].orEmpty() + songs
-            }
-            val token = InnertubeParser.continuationToken(page) ?: break
-            // What was read so far is still an answer.
-            page = runCatching { Innertube.browseContinuation(token) }.getOrNull() ?: break
-        }
-        periods.map { (title, songs) -> title to songs.distinctBy { it.videoId } }
-    }
-
     /** Takes rows out of the account's history, by the tokens [historyWithRemoval] gave them. */
     suspend fun removeFromHistory(tokens: List<String>): Result<Unit> = call("history:remove") {
         tokens.forEach { Innertube.sendFeedback(it) }
@@ -277,9 +260,6 @@ object YtMusicRepository {
     }
 
     private const val HISTORY = "FEmusic_history"
-
-    /** How far back a look through the history goes. */
-    private const val HISTORY_PAGES = 10
     private const val RECENT_TITLE = "Recents"
 
     /** Enough to scroll through, short of turning the shelf into the history page. */

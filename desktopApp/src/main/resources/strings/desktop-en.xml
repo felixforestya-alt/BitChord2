@@ -417,6 +417,4 @@
     <string name="d_alerts_open_log">Open the log folder</string>
     <string name="d_alert_session_back">You are signed in again</string>
     <string name="d_alert_session_over">Your sign-in has ended; please sign in again</string>
-    <string name="d_time_machine">Time machine</string>
-    <string name="d_time_machine_detail">Tracks from back then: %s</string>
 </resources>

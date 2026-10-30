@@ -113,14 +113,6 @@ object DesktopListeningStats {
         }
     }
 
-    /** What was heard most in [month], most first. */
-    fun songsOf(month: YearMonth): List<Song> = synchronized(lock) {
-        read().firstOrNull { it.month == month.toString() }?.tracks?.values
-            ?.sortedByDescending(DesktopReplayEntry::listenedMs)
-            ?.map(DesktopReplayEntry::song)
-            .orEmpty()
-    }
-
     fun summary(period: DesktopReplayPeriod = DesktopReplayPeriod.ALL_TIME): DesktopReplaySummary =
         synchronized(lock) { summarise(read(), period, LocalDate.now()) }
 

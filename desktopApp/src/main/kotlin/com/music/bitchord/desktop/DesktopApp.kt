@@ -849,11 +849,6 @@ fun BitChordDesktopApp() {
     LaunchedEffect(Unit) {
         DesktopAccounts.healed.collect { if (it > 0) sessionRevision++ }
     }
-    var timeMachine by remember { mutableStateOf<DesktopTimeMachine.Memory?>(null) }
-    LaunchedEffect(sessionRevision, sessionSettled) {
-        if (!sessionSettled) return@LaunchedEffect
-        timeMachine = withContext(Dispatchers.IO) { runCatching { DesktopTimeMachine.load() }.getOrNull() }
-    }
     var audioQuality by remember { mutableStateOf(persistence.audioQuality()) }
     var sourceConfigs by remember { mutableStateOf(persistence.sourceConfigs()) }
     var sourceStatus by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -5802,25 +5797,12 @@ fun BitChordDesktopApp() {
                                 // The phone's wallet of Replay cards, or nothing until there is
                                 // listening to deal them from.
                                 val cards = remember(replaySummary) { replaySummary.heroCards() }
-                                val memory = timeMachine
-                                if ((memory != null || (!replaySummary.isEmpty && cards.isNotEmpty())) && !DesktopLibrarySections.isHidden(libraryHidden, DesktopLibrarySections.REPLAY)) {
+                                if (!replaySummary.isEmpty && cards.isNotEmpty() && !DesktopLibrarySections.isHidden(libraryHidden, DesktopLibrarySections.REPLAY)) {
                                     ShelfRow(
                                         modifier = Modifier.padding(vertical = 6.dp),
                                         contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
-                                        if (memory != null) item(key = "time-machine") {
-                                            ReplayCreditCard(
-                                                label = DesktopStrings["d_time_machine", "Time machine"],
-                                                value = memory.title,
-                                                detail = DesktopStrings["d_time_machine_detail", "Tracks from back then: %s"].format(memory.songs.size),
-                                                artworkUrl = memory.songs.firstOrNull()?.thumbnailUrl,
-                                                holder = replayHolder,
-                                                memberSince = replaySummary.memberSince(),
-                                                onClick = { playSongs(memory.songs) },
-                                                modifier = Modifier.width(300.dp),
-                                            )
-                                        }
                                         items(cards, key = { it.label }) { card ->
                                             ReplayCreditCard(
                                                 label = card.label,

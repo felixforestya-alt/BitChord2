@@ -595,6 +595,4 @@
     <string name="d_alerts_open_log">Открыть папку с логом</string>
     <string name="d_alert_session_back">Вход восстановлен</string>
     <string name="d_alert_session_over">Вход завершился, войдите снова</string>
-    <string name="d_time_machine">Машина времени</string>
-    <string name="d_time_machine_detail">Треков из того времени: %s</string>
 </resources>

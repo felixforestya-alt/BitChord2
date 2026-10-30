@@ -500,36 +500,6 @@ object InnertubeParser {
     }
 
     /**
-     * Every shelf of songs under [root], in page order, by its displayed title. The rest of a shelf
-     * cut by a page break has none, and comes back under a blank one.
-     */
-    fun titledShelves(root: JsonElement): List<Pair<String, List<Song>>> {
-        val out = ArrayList<Pair<String, List<Song>>>()
-        fun walk(node: JsonElement) {
-            when (node) {
-                is JsonObject -> {
-                    val shelf = node["musicShelfRenderer"] as? JsonObject
-                    val title = (shelf?.get("title") as? JsonObject)?.get("runs")
-                        ?.let { it as? JsonArray }
-                        ?.joinToString("") { run -> ((run as? JsonObject)?.get("text") as? JsonPrimitive)?.content.orEmpty() }
-                    val more = node["musicShelfContinuation"]
-                    if (shelf != null && !title.isNullOrBlank()) {
-                        out += title to collectSongsDeep(shelf)
-                    } else if (more != null) {
-                        out += "" to collectSongsDeep(more)
-                    } else {
-                        node.values.forEach(::walk)
-                    }
-                }
-                is JsonArray -> node.forEach(::walk)
-                else -> Unit
-            }
-        }
-        walk(root)
-        return out
-    }
-
-    /**
      * For each row of the history page, the token that takes it out of the history — the row
      * menu's "Remove from history", which YouTube Music sends as a feedback token. By video id;
      * the first row of a track wins, as [collectSongsDeep] keeps the first of it too.

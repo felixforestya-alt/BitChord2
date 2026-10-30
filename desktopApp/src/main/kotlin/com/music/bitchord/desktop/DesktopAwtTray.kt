@@ -11,7 +11,7 @@ import javax.imageio.ImageIO
 internal object DesktopAwtTray {
 
     private val lock = Any()
-    private var icon: TrayIcon? = null
+    @Volatile private var icon: TrayIcon? = null
     private var image: BufferedImage? = null
     private var tooltip: String = APP_NAME
 
@@ -57,6 +57,14 @@ internal object DesktopAwtTray {
                     .onFailure { DesktopTrackLog.log("tray unavailable: ${it.message}") }
             }
         }
+    }
+
+    /**
+     * A system notification, for what cannot be said inside the window. Takes no lock and does not
+     * need the UI thread, because it is used when that thread has stopped answering.
+     */
+    fun notify(title: String, text: String) {
+        runCatching { icon?.displayMessage(title, text, TrayIcon.MessageType.WARNING) }
     }
 
     fun stop() {

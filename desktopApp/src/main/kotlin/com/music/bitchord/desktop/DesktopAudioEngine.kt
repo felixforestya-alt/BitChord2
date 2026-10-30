@@ -273,6 +273,11 @@ class DesktopPlaybackEngine(
                 },
                 onFailure = { failure ->
                     val reported = priorFailure ?: failure
+                    DesktopAlerts.raise(
+                        kind = "track",
+                        title = DesktopStrings["d_alert_track_failed", "Could not play '%s'"].format(song.title),
+                        detail = reported.message,
+                    )
                     _state.value = DesktopPlaybackState(
                         song = song,
                         volume = volume,
@@ -295,6 +300,7 @@ class DesktopPlaybackEngine(
                 requested = DesktopPcmFormat(44_100, 2, bytesPerSample = 4, isFloat = true),
                 windowed = stream.windowedReads,
                 transport = stream.transport,
+                renew = stream.renew,
             ).map {
                 if (startAtMs > 0) decoder.seek(startAtMs * 1_000)
                 // From here the decoder belongs to its own read-ahead thread: the audio thread only
@@ -332,6 +338,11 @@ class DesktopPlaybackEngine(
                 loadInternal(song, playWhenReady, excludedSourceId = stream.sourceId, priorFailure = failure)
             }
         } else {
+            DesktopAlerts.raise(
+                kind = "track",
+                title = DesktopStrings["d_alert_track_failed", "Could not play '%s'"].format(song.title),
+                detail = listOfNotNull(failure.message, DesktopAlerts.lastStreamProblem).joinToString(" · "),
+            )
             _state.value = DesktopPlaybackState(
                 song = song,
                 volume = volume,
@@ -1148,6 +1159,11 @@ class DesktopPlaybackEngine(
         DesktopTrackLog.log(
             "'${track.song.title}' ran out at ${heardMs / 1_000}s of ${durationMs / 1_000}s — " +
                 "the stream broke off; opening it again there",
+        )
+        DesktopAlerts.raise(
+            kind = "stream",
+            title = DesktopStrings["d_alert_stream_lost", "'%s' lost its connection; opening it again"].format(track.song.title),
+            detail = DesktopAlerts.lastStreamProblem,
         )
         current = null
         track.decoder.close()

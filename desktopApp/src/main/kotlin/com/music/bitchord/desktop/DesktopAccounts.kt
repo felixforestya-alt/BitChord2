@@ -2,6 +2,7 @@ package com.music.bitchord.desktop
 
 import com.music.bitchord.data.model.Account
 import com.music.bitchord.data.model.AccountChannel
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -125,9 +126,54 @@ internal object DesktopAccounts {
             // Anonymous rather than broken.
             DesktopTrackLog.log("could not renew the session; browsing as a guest until it is signed in again")
             DesktopYouTubeAuth.adopt(null)
+            healLater()
         }
         return renewed
     }
+
+    private val healScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    @Volatile private var healing: kotlinx.coroutines.Job? = null
+
+    /** Bumped when a session comes back by itself, so that what was loaded as a guest loads again. */
+    val healed = kotlinx.coroutines.flow.MutableStateFlow(0)
+
+    /**
+     * Asks again, for a while, after YouTube answered a stored session as signed out.
+     *
+     * That answer has not meant the session is gone: the same stored cookie has been answered
+     * signed-in again minutes or hours later, with no new sign-in, while the app sat as a guest for
+     * as long as it stayed open. The credential is left alone throughout, so a session that really
+     * has ended only ever costs these few requests.
+     */
+    private fun healLater() {
+        if (healing?.isActive == true) return
+        DesktopAlerts.raise(
+            kind = "session",
+            title = DesktopStrings["d_alert_session_lost", "YouTube is answering as if you are signed out; trying again in the background"],
+        )
+        healing = healScope.launch {
+            for (waitMs in HEAL_AFTER_MS) {
+                kotlinx.coroutines.delay(waitMs)
+                // Signed in by hand in the meantime, or the account removed.
+                if (DesktopYouTubeAuth.session != null || active() == null) return@launch
+                if (activate() != null) {
+                    DesktopAlerts.raise(
+                        kind = "session",
+                        title = DesktopStrings["d_alert_session_back", "You are signed in again"],
+                        popup = false,
+                    )
+                    healed.value++
+                    return@launch
+                }
+            }
+            DesktopAlerts.raise(
+                kind = "session-over",
+                title = DesktopStrings["d_alert_session_over", "Your sign-in has ended; please sign in again"],
+            )
+        }
+    }
+
+    private val HEAL_AFTER_MS = listOf(20_000L, 60_000L, 180_000L, 300_000L, 600_000L, 900_000L, 1_800_000L, 3_600_000L)
 
     /**
      * The live shell's own answer about who this cookie acts as, unless the

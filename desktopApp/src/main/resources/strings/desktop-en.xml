@@ -397,4 +397,24 @@
     <string name="d_images">Images</string>
     <string name="lt_server_ours">BitChord² (ours)</string>
     <string name="lt_server_upstream">BitChord (original author\'s)</string>
+    <string name="d_alert_link_renewed">YouTube link replaced on the fly; the track kept playing</string>
+    <string name="d_alert_stream_lost">\'%s\' lost its connection; opening it again</string>
+    <string name="d_alert_track_failed">Could not play \'%s\'</string>
+    <string name="d_alert_sound_gap">Sound stopped for %s s: the music did not arrive in time</string>
+    <string name="d_alert_audio_fallback">Windows audio would not open; using the fallback output</string>
+    <string name="d_alert_session_lost">YouTube is answering as if you are signed out; trying again in the background</string>
+    <string name="d_alert_hang_now">BitChord is not responding</string>
+    <string name="d_alert_hang_over">The window froze for %s s</string>
+    <string name="d_alert_cause_unknown">cause unknown</string>
+    <string name="d_alert_cause_audio">waiting for Windows\' audio system</string>
+    <string name="d_alert_cause_monitor">waiting for the monitor</string>
+    <string name="d_alert_cause_gpu">waiting for the graphics card</string>
+    <string name="d_alert_cause_network">waiting for the network</string>
+    <string name="d_alert_crash">BitChord crashed last time. The report is in the log</string>
+    <string name="d_alerts_title">What went wrong</string>
+    <string name="d_alerts_subtitle">Freezes, sound gaps and failed tracks since BitChord was started, and why</string>
+    <string name="d_alerts_empty">Nothing so far</string>
+    <string name="d_alerts_open_log">Open the log folder</string>
+    <string name="d_alert_session_back">You are signed in again</string>
+    <string name="d_alert_session_over">Your sign-in has ended; please sign in again</string>
 </resources>

@@ -171,6 +171,89 @@ class DesktopRangeStreamTest {
         }
     }
 
+    /** Serves [total] bytes on /good, refuses /bad from [refuseFrom] on. */
+    private fun twoLinks(total: Int, refuseFrom: Int, block: (base: String) -> Unit) {
+        val file = ByteArray(total) { (it % 251).toByte() }
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val answer = { exchange: com.sun.net.httpserver.HttpExchange, limit: Int ->
+            val match = Regex("bytes=(\\d+)-(\\d+)").find(exchange.requestHeaders.getFirst("Range").orEmpty())!!
+            val from = match.groupValues[1].toInt()
+            val to = minOf(match.groupValues[2].toInt(), file.size - 1)
+            if (from >= limit) {
+                exchange.sendResponseHeaders(403, -1)
+                exchange.close()
+            } else {
+                val slice = file.copyOfRange(from, to + 1)
+                exchange.responseHeaders.add("Content-Range", "bytes $from-$to/${file.size}")
+                exchange.sendResponseHeaders(206, slice.size.toLong())
+                exchange.responseBody.use { it.write(slice) }
+            }
+        }
+        server.createContext("/good") { answer(it, Int.MAX_VALUE) }
+        server.createContext("/bad") { answer(it, refuseFrom) }
+        server.start()
+        try {
+            block("http://127.0.0.1:${server.address.port}")
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    private fun readAll(stream: DesktopRangeStream): ByteArray {
+        val all = java.io.ByteArrayOutputStream()
+        val into = ByteArray(1024)
+        while (true) {
+            val taken = stream.read(into, into.size)
+            if (taken <= 0) break
+            all.write(into, 0, taken)
+        }
+        return all.toByteArray()
+    }
+
+    @Test
+    fun `a refused link is swapped for a fresh one and the bytes carry on`() = twoLinks(8192, 2048) { base ->
+        var asked = 0
+        val stream = DesktopRangeStream("$base/bad", windowBytes = 1024, renew = {
+            asked++
+            DesktopRangeStream.Link("$base/good", emptyMap())
+        })
+        assertContentEquals(ByteArray(8192) { (it % 251).toByte() }, readAll(stream))
+        assertEquals(false, stream.brokeOff)
+        assertEquals(1, asked)
+    }
+
+    @Test
+    fun `a fresh link to a different file is a break, not spliced in`() = twoLinks(4096, 2048) { base ->
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/other") { exchange ->
+            val slice = ByteArray(1024)
+            exchange.responseHeaders.add("Content-Range", "bytes 2048-3071/9999")
+            exchange.sendResponseHeaders(206, slice.size.toLong())
+            exchange.responseBody.use { it.write(slice) }
+        }
+        server.start()
+        try {
+            val other = "http://127.0.0.1:${server.address.port}/other"
+            val stream = DesktopRangeStream("$base/bad", windowBytes = 1024, renew = { DesktopRangeStream.Link(other, emptyMap()) })
+            assertEquals(2048, readAll(stream).size)
+            assertTrue(stream.brokeOff)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `links that keep being refused are a break, and stop being asked for`() = twoLinks(4096, 1024) { base ->
+        var asked = 0
+        val stream = DesktopRangeStream("$base/bad", windowBytes = 1024, renew = {
+            asked++
+            DesktopRangeStream.Link("$base/bad?$asked", emptyMap())
+        })
+        assertEquals(1024, readAll(stream).size)
+        assertTrue(stream.brokeOff)
+        assertEquals(2, asked)
+    }
+
     @Test
     fun `a page where the audio should be is a break, not data`() {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)

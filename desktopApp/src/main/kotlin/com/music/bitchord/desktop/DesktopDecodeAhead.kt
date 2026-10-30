@@ -83,6 +83,15 @@ internal class DesktopDecodeAhead(
             val waitedMs = (System.nanoTime() - waitedFrom) / 1_000_000
             if (started && waitedMs >= STARVED_LOG_MS) {
                 DesktopTrackLog.log("decode-ahead ran dry: the audio thread waited ${waitedMs}ms for the decoder")
+                // The upper bound is the computer sleeping, which the clock counts.
+                if (waitedMs in SOUND_GAP_ALERT_MS..SLEPT_MS) {
+                    DesktopAlerts.raise(
+                        kind = "gap",
+                        title = DesktopStrings["d_alert_sound_gap", "Sound stopped for %s s: the music did not arrive in time"]
+                            .format(waitedMs / 1_000),
+                        detail = DesktopAlerts.lastStreamProblem,
+                    )
+                }
             }
         }
         val block = queue.removeFirstOrNull()
@@ -180,5 +189,9 @@ internal class DesktopDecodeAhead(
 
         /** Waits shorter than this are ordinary scheduling, not a network stall worth logging. */
         const val STARVED_LOG_MS = 20L
+
+        /** A gap long enough that the listener is wondering what happened. */
+        const val SOUND_GAP_ALERT_MS = 3_000L
+        const val SLEPT_MS = 600_000L
     }
 }

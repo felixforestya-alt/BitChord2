@@ -76,6 +76,8 @@ internal data class DesktopStream(
      * [DesktopRangeStream].
      */
     val windowedReads: Boolean = false,
+    /** Another link to this same stream, for when this one goes bad mid-track. */
+    val renew: (() -> DesktopRangeStream.Link?)? = null,
 )
 
 data class DesktopStreamFormat(
@@ -183,14 +185,7 @@ data class DesktopStreamFormat(
  */
 internal object DesktopStreamClient {
     suspend fun resolve(song: Song, maxKbps: Int = Int.MAX_VALUE): Result<DesktopStream> = runCatching {
-        val url = withContext(Dispatchers.IO) {
-            ceiling.set(maxKbps)
-            try {
-                StreamResolver.resolve(song.videoId)
-            } finally {
-                ceiling.remove()
-            }
-        }
+        val url = withContext(Dispatchers.IO) { mint(song, maxKbps) }
         DesktopTrackLog.log("  youtube: resolved '${song.title}' through InnerTubeX")
         DesktopStream(
             url = url,
@@ -203,7 +198,24 @@ internal object DesktopStreamClient {
             // Google's media servers answer 403 to a request for a whole file and 206 to one for
             // a window of it, and FFmpeg's own HTTP client asks for the whole thing.
             windowedReads = true,
+            renew = {
+                runCatching {
+                    kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                        val fresh = mint(song, maxKbps)
+                        DesktopRangeStream.Link(fresh, StreamResolver.mediaHeadersFor(fresh))
+                    }
+                }.getOrNull()
+            },
         )
+    }
+
+    private suspend fun mint(song: Song, maxKbps: Int): String {
+        ceiling.set(maxKbps)
+        try {
+            return StreamResolver.resolve(song.videoId)
+        } finally {
+            ceiling.remove()
+        }
     }
 
     suspend fun resolveUrl(song: Song): Result<String> = resolve(song).map(DesktopStream::url)

@@ -22,6 +22,9 @@ internal object DesktopTrackLog {
         }.getOrNull()
     }
 
+    /** The folder the log is in, for showing it to someone. */
+    val folder: Path? get() = file?.parent
+
     fun log(line: String) {
         val stamped = "${LocalTime.now().format(clock)}  $line"
         println("BitChord: $stamped")

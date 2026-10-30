@@ -7,10 +7,21 @@ import okhttp3.Request
 
 /** Reads a remote file in bounded windows rather than as one open-ended request. */
 internal class DesktopRangeStream(
-    private val url: String,
-    private val headers: Map<String, String> = emptyMap(),
+    private var url: String,
+    private var headers: Map<String, String> = emptyMap(),
     private val windowBytes: Int = DEFAULT_WINDOW,
+    /**
+     * Another link to the same track, for when this one is refused or stops answering. Called on
+     * the decoding thread, and may take its time: what is already decoded plays on meanwhile, so
+     * the listener hears nothing happen.
+     */
+    private val renew: (() -> Link?)? = null,
 ) {
+
+    internal class Link(val url: String, val headers: Map<String, String>)
+
+    private var renewals = 0
+    private var renewed = false
 
     /** Total length in bytes, or -1 until the first response has stated one. */
     var length: Long = -1L
@@ -58,11 +69,80 @@ internal class DesktopRangeStream(
     private fun holds(at: Long): Boolean =
         windowStart >= 0 && at >= windowStart && at < windowStart + window.size
 
-    /** Fetches the window containing [at]. */
+    /** Fetches the window containing [at], on a fresh link if the one in hand has gone bad. */
     private fun fetchWindowFor(at: Long): Boolean {
         // Straight on from a window that came up short, so what did arrive is not asked for again.
         val start = if (windowStart >= 0 && at == windowStart + window.size) at else at - (at % windowBytes)
         val end = start + windowBytes - 1
+
+        val startedAt = System.nanoTime()
+        var attempt = 0
+        var refusals = 0
+        while (true) {
+            if (Thread.currentThread().isInterrupted) return false
+            val outcome = runCatching { fetch(requestFor(start, end)) }
+            val got = outcome.getOrNull()
+            val problem = when {
+                got == null -> "not fetched: ${outcome.exceptionOrNull()?.message}"
+                got.status >= 500 -> "answered HTTP ${got.status}"
+                got.status !in 200..299 -> "refused with HTTP ${got.status}"
+                got.body.isEmpty() -> "answered HTTP ${got.status} with nothing in it"
+                got.isNotMedia -> "answered HTTP ${got.status}, ${got.type}: ${got.preview()}"
+                else -> null
+            }
+            if (problem == null && got != null) {
+                if (!sameFile(got.stated)) {
+                    // A different rendition: its bytes would land mid-frame in this one. The engine
+                    // reopens by time instead, which costs a moment and not the track.
+                    giveUp(at, "the new link is a different file (${got.stated} against $length bytes)")
+                    return false
+                }
+                accept(got, start)
+                val spentMs = (System.nanoTime() - startedAt) / 1_000_000
+                if (renewed) {
+                    renewed = false
+                    DesktopAlerts.raise(
+                        kind = "link",
+                        title = DesktopStrings["d_alert_link_renewed", "YouTube link replaced on the fly; the track kept playing"],
+                        detail = "byte $at, ${spentMs}ms",
+                        popup = false,
+                    )
+                } else if (spentMs >= SLOW_WINDOW_MS) {
+                    DesktopTrackLog.log("stream: window at $at took ${spentMs}ms for ${got.body.size} bytes")
+                }
+                return got.body.isNotEmpty()
+            }
+
+            // A refusal is an answer and is not asked twice. Anything else — a dropped connection,
+            // a server hiccup — is asked again while there is time.
+            val refused = got != null && got.status in 300..499
+            if (!refused) {
+                attempt++
+                val spentMs = (System.nanoTime() - startedAt) / 1_000_000
+                if (attempt <= RETRIES && spentMs <= RETRY_BUDGET_MS) {
+                    runCatching { Thread.sleep(300L * attempt) }.onFailure { return false }
+                    continue
+                }
+            }
+            DesktopTrackLog.log("stream: window at $at $problem")
+            if (refused) {
+                refusals++
+                // The first refusal costs only this link: another from the same client takes
+                // under a second, inside what the decode-ahead holds, where benching the client
+                // sends the resolver through ones that refuse too for up to 15 seconds. A second
+                // means it is the client, and the resolver is told, as the phone's
+                // ChunkedDataSource tells it.
+                if (refusals > 1 || renew == null) StreamResolver.onPlaybackRefused(url, got?.status ?: 403)
+            }
+            if (refusals > MAX_RENEWALS || !renewLink()) {
+                giveUp(at, problem ?: "failed")
+                return false
+            }
+            attempt = 0
+        }
+    }
+
+    private fun requestFor(start: Long, end: Long): Request {
         val request = Request.Builder().url(url)
             .header("Range", "bytes=$start-$end")
             .header("Accept", "*/*")
@@ -70,66 +150,47 @@ internal class DesktopRangeStream(
             // would stop meaning anything.
             .header("Accept-Encoding", "identity")
         headers.forEach { (name, value) -> runCatching { request.header(name, value) } }
+        return request.get().build()
+    }
 
-        // The app's own client, so the media goes the way the rest of YouTube does — including
-        // round a network that throttles it, when that is switched on (see DpiBypass).
-        // A dropped connection or a server hiccup used to end the stream on the spot, which FFmpeg
-        // reports as "Invalid data" and the track was skipped. Asked again while there is time; a
-        // refusal is an answer and is not asked twice.
-        val startedAt = System.nanoTime()
-        var attempt = 0
-        var answer: Answer
-        while (true) {
-            if (Thread.currentThread().isInterrupted) return false
-            val outcome = runCatching { fetch(request.get().build()) }
-            val got = outcome.getOrNull()
-            val problem = when {
-                got == null -> "not fetched: ${outcome.exceptionOrNull()?.message}"
-                got.status >= 500 -> "answered HTTP ${got.status}"
-                got.status !in 200..299 -> null
-                got.body.isEmpty() -> "answered HTTP ${got.status} with nothing in it"
-                got.isNotMedia -> "answered HTTP ${got.status}, ${got.type}: ${got.preview()}"
-                else -> null
-            }
-            if (problem == null && got != null) {
-                answer = got
-                break
-            }
-            attempt++
-            val spentMs = (System.nanoTime() - startedAt) / 1_000_000
-            if (attempt > RETRIES || spentMs > RETRY_BUDGET_MS) {
-                DesktopTrackLog.log("stream: window at $at $problem")
-                brokeOff = true
-                return false
-            }
-            runCatching { Thread.sleep(300L * attempt) }.onFailure { return false }
-        }
-        val status = answer.status
-        val body = answer.body
-        val stated = answer.stated
-        if (status !in 200..299) {
-            DesktopTrackLog.log("stream: window at $at refused with HTTP $status")
-            brokeOff = true
-            // A URL cleared before playback has been refused mid-track: tell the resolver, as the
-            // phone's ChunkedDataSource does, so it forgets it and benches the client that minted it.
-            StreamResolver.onPlaybackRefused(url, status)
-            return false
-        }
-        val spentMs = (System.nanoTime() - startedAt) / 1_000_000
-        if (spentMs >= SLOW_WINDOW_MS) DesktopTrackLog.log("stream: window at $at took ${spentMs}ms for ${body.size} bytes")
+    /** Whether a window that says [stated] belongs to the file being read. */
+    private fun sameFile(stated: String?): Boolean {
+        if (length < 0 || stated == null) return true
+        val total = stated.substringAfterLast('/').trim().toLongOrNull() ?: return true
+        return total == length
+    }
 
+    private fun accept(got: Answer, start: Long) {
         // A server that honoured the range says where the bytes came from and how many there are in
         // total.
-        if (stated != null) {
-            windowStart = stated.substringAfter("bytes ").substringBefore('-').trim().toLongOrNull() ?: start
-            length = stated.substringAfterLast('/').trim().toLongOrNull() ?: length
+        if (got.stated != null) {
+            windowStart = got.stated.substringAfter("bytes ").substringBefore('-').trim().toLongOrNull() ?: start
+            length = got.stated.substringAfterLast('/').trim().toLongOrNull() ?: length
         } else {
             windowStart = 0
-            length = body.size.toLong()
+            length = got.body.size.toLong()
         }
-        window = body
-        if (length < 0) length = windowStart + body.size
-        return body.isNotEmpty()
+        window = got.body
+        if (length < 0) length = windowStart + got.body.size
+    }
+
+    /** A fresh link in place of this one; false when there is none to be had. */
+    private fun renewLink(): Boolean {
+        val asked = renew ?: return false
+        if (renewals >= MAX_RENEWALS_PER_STREAM) return false
+        renewals++
+        StreamResolver.forget(url)
+        val fresh = runCatching { asked() }.getOrNull() ?: return false
+        if (fresh.url == url) return false
+        url = fresh.url
+        headers = fresh.headers
+        renewed = true
+        return true
+    }
+
+    private fun giveUp(at: Long, why: String) {
+        DesktopAlerts.lastStreamProblem = "byte $at: $why"
+        brokeOff = true
     }
 
     /** One request. On a connection too slow to finish in time, what did arrive still counts. */
@@ -158,6 +219,12 @@ internal class DesktopRangeStream(
 
         /** Further tries for a window that failed on the way, not by refusal. */
         const val RETRIES = 2
+
+        /** Links tried for one window before the engine is left to reopen the track. */
+        const val MAX_RENEWALS = 2
+
+        /** Links tried over one play of a track, so that a dead track cannot spin on them. */
+        const val MAX_RENEWALS_PER_STREAM = 8
 
         /** Past this, the decode-ahead is close to dry: the rest of the round is not worth waiting for. */
         const val RETRY_BUDGET_MS = 20_000L

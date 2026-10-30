@@ -846,6 +846,9 @@ fun BitChordDesktopApp() {
             sessionRevision++
         }
     }
+    LaunchedEffect(Unit) {
+        DesktopAccounts.healed.collect { if (it > 0) sessionRevision++ }
+    }
     var audioQuality by remember { mutableStateOf(persistence.audioQuality()) }
     var sourceConfigs by remember { mutableStateOf(persistence.sourceConfigs()) }
     var sourceStatus by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -4820,6 +4823,7 @@ fun BitChordDesktopApp() {
                                     .padding(horizontal = 18.dp, vertical = 10.dp),
                             )
                         }
+                        DesktopAlertNotice(Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp))
                     }
                     if (overlays.accounts) {
                         DesktopAccountSelector(
@@ -8425,6 +8429,9 @@ private fun DesktopSettingsScreen(
                                     graphicsApi,
                                     DesktopGraphicsSettings::setApi,
                                 )
+                                val alertsTitle = DesktopStrings["d_alerts_title", "What went wrong"]
+                                val alertsSubtitle = DesktopStrings["d_alerts_subtitle", "Freezes, sound gaps and failed tracks since BitChord was started, and why"]
+                                if (settingsRowVisible(alertsTitle, alertsSubtitle)) DesktopAlertsHistory(alertsTitle, alertsSubtitle)
                             }
                             }
                             SettingsSection.UPDATES -> {

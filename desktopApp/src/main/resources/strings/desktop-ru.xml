@@ -575,4 +575,24 @@
     <string name="d_images">Изображения</string>
     <string name="lt_server_ours">BitChord² (наш)</string>
     <string name="lt_server_upstream">BitChord (сервер автора)</string>
+    <string name="d_alert_link_renewed">Ссылка YouTube заменена на лету, трек продолжил играть</string>
+    <string name="d_alert_stream_lost">«%s»: связь оборвалась, открываю заново</string>
+    <string name="d_alert_track_failed">Не удалось воспроизвести «%s»</string>
+    <string name="d_alert_sound_gap">Звук пропал на %s с: музыка не успела скачаться</string>
+    <string name="d_alert_audio_fallback">Звук Windows не открылся, включён запасной вывод</string>
+    <string name="d_alert_session_lost">YouTube отвечает, будто вы не вошли. Пробую снова в фоне</string>
+    <string name="d_alert_hang_now">BitChord не отвечает</string>
+    <string name="d_alert_hang_over">Окно зависало на %s с</string>
+    <string name="d_alert_cause_unknown">причина неизвестна</string>
+    <string name="d_alert_cause_audio">ждало звуковую систему Windows</string>
+    <string name="d_alert_cause_monitor">ждало монитор</string>
+    <string name="d_alert_cause_gpu">ждало видеокарту</string>
+    <string name="d_alert_cause_network">ждало сеть</string>
+    <string name="d_alert_crash">В прошлый раз BitChord упал. Отчёт записан в лог</string>
+    <string name="d_alerts_title">Что пошло не так</string>
+    <string name="d_alerts_subtitle">Зависания, пропажи звука и сбои треков с момента запуска, и почему они случились</string>
+    <string name="d_alerts_empty">Пока ничего</string>
+    <string name="d_alerts_open_log">Открыть папку с логом</string>
+    <string name="d_alert_session_back">Вход восстановлен</string>
+    <string name="d_alert_session_over">Вход завершился, войдите снова</string>
 </resources>

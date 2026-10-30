@@ -139,6 +139,8 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
         windowed: Boolean = false,
         /** Explicit demuxer for an extensionless add-on manifest. */
         transport: String? = null,
+        /** Another link to this track, for a [windowed] read whose link goes bad. */
+        renew: (() -> DesktopRangeStream.Link?)? = null,
     ): Result<Unit> = runCatching {
         av_log_set_level(AV_LOG_ERROR)
         ensureNetwork()
@@ -158,7 +160,7 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
         av_dict_set(options, "reconnect_delay_max", "5", 0)
         av_dict_set(options, "rw_timeout", "15000000", 0)
 
-        val opened = if (windowed) windowedContext(url, headers) else AVFormatContext(null)
+        val opened = if (windowed) windowedContext(url, headers, renew) else AVFormatContext(null)
         // The code matters.
         val inputFormat: AVInputFormat? = when (transport?.lowercase()) {
             DesktopAddonStream.HLS -> av_find_input_format("hls")
@@ -267,8 +269,12 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
      * A format context reading through [DesktopRangeStream] rather than through FFmpeg's own HTTP
      * client.
      */
-    private fun windowedContext(url: String, headers: Map<String, String>): AVFormatContext {
-        val source = DesktopRangeStream(url, headers)
+    private fun windowedContext(
+        url: String,
+        headers: Map<String, String>,
+        renew: (() -> DesktopRangeStream.Link?)?,
+    ): AVFormatContext {
+        val source = DesktopRangeStream(url, headers, renew = renew)
         val scratch = ByteArray(IO_BUFFER_BYTES)
         val read = object : Read_packet_Pointer_BytePointer_int() {
             override fun call(opaque: Pointer?, buffer: BytePointer?, size: Int): Int {

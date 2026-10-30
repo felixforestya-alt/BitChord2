@@ -260,6 +260,7 @@ internal class DesktopTrackAnalyzer(
             requested = DesktopPcmFormat(rate.toInt(), channels = 1, bytesPerSample = 4, isFloat = true),
             windowed = stream.windowedReads,
             transport = stream.transport,
+            renew = stream.renew,
         )
         if (opened.isFailure) {
             decoder.close()

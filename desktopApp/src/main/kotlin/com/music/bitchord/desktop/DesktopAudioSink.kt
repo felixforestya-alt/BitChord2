@@ -64,6 +64,11 @@ internal class DesktopAudioSink {
                 return@runCatching requested
             }
             DesktopTrackLog.log("WASAPI output unavailable; trying Java Sound: ${native.exceptionOrNull()?.message}")
+            DesktopAlerts.raise(
+                kind = "audio",
+                title = DesktopStrings["d_alert_audio_fallback", "Windows audio would not open; using the fallback output"],
+                detail = native.exceptionOrNull()?.message,
+            )
         }
 
         if (windowsOutput) {

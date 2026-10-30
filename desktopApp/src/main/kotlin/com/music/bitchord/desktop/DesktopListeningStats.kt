@@ -96,7 +96,7 @@ object DesktopListeningStats {
         if (song.videoId.isBlank() || (playedMs <= 0L && !countsAsPlay)) return
         val at = Instant.now().atZone(ZoneId.systemDefault())
         synchronized(lock) {
-            val buckets = read().associateByTo(LinkedHashMap(), Bucket::month)
+            val buckets = held()
             val key = YearMonth.from(at).toString()
             val bucket = buckets.getOrPut(key) { Bucket(key) }
             val previous = bucket.tracks[song.videoId]
@@ -109,15 +109,50 @@ object DesktopListeningStats {
             bucket.hours[at.hour] += added
             val day = at.toLocalDate().toString()
             bucket.days[day] = (bucket.days[day] ?: 0L) + added
-            write(buckets.values.toList())
+            dirty = true
+            writer.isAlive
         }
     }
 
     fun summary(period: DesktopReplayPeriod = DesktopReplayPeriod.ALL_TIME): DesktopReplaySummary =
-        synchronized(lock) { summarise(read(), period, LocalDate.now()) }
+        synchronized(lock) { summarise(held().values.toList(), period, LocalDate.now()) }
+
+    /**
+     * The store as it stands, read once. Recording used to read the whole of it, decode every line,
+     * and encode and write it all back: every five seconds, and longer the more had been listened
+     * to, with up to 35 ms of it on the UI thread.
+     */
+    private fun held(): LinkedHashMap<String, Bucket> =
+        kept ?: read().associateByTo(LinkedHashMap(), Bucket::month).also { kept = it }
+
+    private var kept: LinkedHashMap<String, Bucket>? = null
+    private var dirty = false
+
+    /** Writes what has changed, at most once every [WRITE_EVERY_MS] and at exit. */
+    private val writer: Thread by lazy {
+        Runtime.getRuntime().addShutdownHook(Thread(::flush, "bitchord-stats-exit"))
+        Thread({
+            while (true) {
+                Thread.sleep(WRITE_EVERY_MS)
+                runCatching { flush() }.onFailure { DesktopTrackLog.log("stats: not written: ${it.message}") }
+            }
+        }, "bitchord-stats").apply {
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+            start()
+        }
+    }
+
+    private fun flush() = synchronized(lock) {
+        if (!dirty) return@synchronized
+        kept?.let { write(it.values.toList()) }
+        dirty = false
+    }
 
     /** Everything recorded, thrown away. */
     fun clear() = synchronized(lock) {
+        kept = null
+        dirty = false
         DesktopPreferenceChunks.write(preferences, KEY_BUCKETS, "")
         DesktopPreferenceChunks.write(preferences, KEY_ENTRIES, "")
     }
@@ -347,6 +382,7 @@ object DesktopListeningStats {
     private const val ROW_HOUR = "h"
     private const val ROW_DAY = "d"
     private const val KEY_BUCKETS = "buckets"
+    private const val WRITE_EVERY_MS = 60_000L
     private const val KEY_ENTRIES = "entries"
 }
 

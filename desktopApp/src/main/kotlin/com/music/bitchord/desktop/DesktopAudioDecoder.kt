@@ -366,20 +366,26 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
 
     /** The next block as interleaved floats, or null at the end of the stream. */
     override fun readSamples(): FloatArray? {
-        val block = read() ?: return null
-        val count = block.size / 4
-        if (samples.size < count) samples = FloatArray(count)
-        for (index in 0 until count) {
-            val at = index * 4
-            samples[index] = Float.fromBits(
-                (block[at].toInt() and 0xFF) or
-                    ((block[at + 1].toInt() and 0xFF) shl 8) or
-                    ((block[at + 2].toInt() and 0xFF) shl 16) or
-                    (block[at + 3].toInt() shl 24),
-            )
+        val context = codec ?: return null
+        val container = format ?: return null
+        val pkt = packet ?: return null
+        val decoded = frame ?: return null
+        while (true) {
+            val received = avcodec_receive_frame(context, decoded)
+            if (received == 0) {
+                val bytes = convertIntoScratch(decoded)
+                if (bytes < 0) return null
+                if (bytes == 0) continue
+                val count = bytes / 4
+                if (samples.size < count) samples = FloatArray(count)
+                java.nio.ByteBuffer.wrap(scratch, 0, bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                    .asFloatBuffer().get(samples, 0, count)
+                sampleCount = count
+                return samples
+            }
+            if (received == AVERROR_EOF) return null
+            if (!pump(container, pkt, context)) return null
         }
-        sampleCount = count
-        return samples
     }
 
     /** How much of the array [readSamples] returned is actually this block. */
@@ -401,14 +407,20 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
     }
 
     private fun convert(decoded: AVFrame): ByteArray? {
-        val swr = resampler ?: return null
+        val bytes = convertIntoScratch(decoded)
+        return if (bytes < 0) null else scratch.copyOf(bytes)
+    }
+
+    /** Resamples [decoded] into [scratch]: how many bytes, 0 for none this time, -1 for closed. */
+    private fun convertIntoScratch(decoded: AVFrame): Int {
+        val swr = resampler ?: return -1
         val target = outputFormat
         val capacity = swr_get_out_samples(swr, decoded.nb_samples()).coerceAtLeast(decoded.nb_samples())
         ensureOutputCapacity(capacity, target)
-        val planes = outputPlanes ?: return null
+        val planes = outputPlanes ?: return -1
 
         val produced = swr_convert(swr, planes, capacity, decoded.data(), decoded.nb_samples())
-        if (produced <= 0) return ByteArray(0)
+        if (produced <= 0) return 0
 
         val stamp = decoded.best_effort_timestamp().takeIf { it != AV_NOPTS_VALUE } ?: decoded.pts()
         val frameUs = if (stamp != AV_NOPTS_VALUE) {
@@ -433,15 +445,15 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
                 if (skip < produced) trimBeforeUs = null
             }
         }
-        if (skip >= produced) return ByteArray(0)
+        if (skip >= produced) return 0
 
         val bytes = (produced - skip) * target.frameBytes
         if (scratch.size < bytes) scratch = ByteArray(bytes)
-        val buffer = outputBuffer ?: return null
+        val buffer = outputBuffer ?: return -1
         buffer.position(skip.toLong() * target.frameBytes)
         buffer.limit(produced.toLong() * target.frameBytes)
         buffer.get(scratch, 0, bytes)
-        return scratch.copyOf(bytes)
+        return bytes
     }
 
     private fun ensureOutputCapacity(samples: Int, target: DesktopPcmFormat) {

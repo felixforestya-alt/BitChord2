@@ -118,7 +118,7 @@ internal fun rememberDesktopMusicVideo(
                     }
                     seekTo = null
                     lastPts = decoder.framePtsMs
-                    frames.frame = publish(withContext(Dispatchers.Default) { rasterOf(pixels, info, decoder.width) }, retired)
+                    frames.frame = publishFrame(withContext(Dispatchers.Default) { rasterOf(pixels, info, decoder.width) }, retired)
                     frames.state = DesktopVideoState.PLAYING
                 }
                 if (!playing || com.music.bitchord.ui.AppActivity.quiet) {
@@ -148,7 +148,7 @@ internal fun rememberDesktopMusicVideo(
                     wait = pts - audioNowMs()
                     if (wait > RESYNC_MS) break
                 }
-                frames.frame = publish(withContext(Dispatchers.Default) { rasterOf(pixels, info, decoder.width) }, retired)
+                frames.frame = publishFrame(withContext(Dispatchers.Default) { rasterOf(pixels, info, decoder.width) }, retired)
             }
         } finally {
             withContext(NonCancellable) {
@@ -223,7 +223,7 @@ internal fun DrawScope.drawVideoFrame(image: ImageBitmap, crop: Boolean = true) 
  */
 private fun rasterOf(pixels: ByteArray, info: ImageInfo, width: Int): Image = Image.makeRaster(info, pixels, width * 4)
 
-private fun publish(image: Image, retired: ArrayDeque<Image>): Image {
+internal fun publishFrame(image: Image, retired: ArrayDeque<Image>): Image {
     retired.addLast(image)
     // A few frames of grace: a frame the renderer recorded may still be in flight.
     while (retired.size > 3) retired.removeFirst().close()

@@ -2556,7 +2556,7 @@ fun BitChordDesktopApp() {
                 val threshold = snapshot.durationMs.takeIf { it > 0L }?.let { minOf(it / 2L, SCROBBLE_THRESHOLD_MS) }
                     ?: SCROBBLE_THRESHOLD_MS
                 val reachedThreshold = !countedAsPlay && position >= threshold
-                DesktopListeningStats.record(snapshot.song, delta, reachedThreshold)
+                withContext(Dispatchers.IO) { DesktopListeningStats.record(snapshot.song, delta, reachedThreshold) }
                 if (reachedThreshold) {
                     countedAsPlay = true
                     statsCountedSongs = statsCountedSongs + songId

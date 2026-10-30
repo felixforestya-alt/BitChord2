@@ -101,6 +101,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.model.artworkAt
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
@@ -820,47 +827,122 @@ internal fun DesktopLivingBackdrop(coverUrl: String?, modifier: Modifier = Modif
     if (!DesktopFrameProfiler.on("living")) return
     val palette = rememberVividPalette(coverUrl)
     val accent by animateColorAsState(if (coverUrl != null) palette.vivid else Color(0xFF5B4BFF), tween(2_000), label = "livingAccent")
-    val time = remember { mutableFloatStateOf(0f) }
+    var shown by remember { mutableStateOf<org.jetbrains.skia.Image?>(null) }
+    var area by remember { mutableStateOf(IntSize.Zero) }
+    val veil = remember {
+        Brush.verticalGradient(0f to Color.Black.copy(alpha = 0.35f), 1f to Color.Black.copy(alpha = 0.62f))
+    }
+    val screen = remember { org.jetbrains.skia.Paint().apply { blendMode = org.jetbrains.skia.BlendMode.SCREEN } }
     LaunchedEffect(Unit) {
+        val renderer = LivingBackdropRenderer()
+        val retired = ArrayDeque<org.jetbrains.skia.Image>()
         val start = System.nanoTime()
-        while (true) {
-            delay(50)
-            time.floatValue = (System.nanoTime() - start) / 1_000_000_000f
+        try {
+            while (true) {
+                // Nobody to see it: nothing is painted, and no frame of the window is asked for.
+                snapshotFlow { !com.music.bitchord.ui.AppActivity.quiet }.first { it }
+                val into = area
+                val colour = accent
+                if (into != IntSize.Zero) {
+                    val t = (System.nanoTime() - start) / 1_000_000_000f
+                    val level = DesktopAudioAnalyzer.levelAt(System.nanoTime())
+                    shown = publishFrame(
+                        withContext(Dispatchers.Default) { renderer.paint(into, t, level, colour) },
+                        retired,
+                    )
+                }
+                delay(50)
+            }
+        } finally {
+            withContext(NonCancellable) {
+                // Off the screen first, then, a couple of frames later when nothing can be drawing
+                // them, freed.
+                shown = null
+                androidx.compose.runtime.withFrameNanos { }
+                androidx.compose.runtime.withFrameNanos { }
+                while (retired.isNotEmpty()) retired.removeFirst().close()
+                renderer.close()
+            }
         }
     }
-    Canvas(modifier) {
-        val t = time.floatValue
-        val level = DesktopAudioAnalyzer.levelAt(System.nanoTime())
-        val lights = listOf(
-            accent.hueShifted(0f, 0.85f),
-            accent.hueShifted(45f, 0.7f),
-            accent.hueShifted(-50f, 0.65f),
-            accent.hueShifted(170f, 0.45f),
-        )
-        lights.forEachIndexed { i, colour ->
-            val cx = size.width * (0.5f + 0.42f * sin(t * (0.045f + i * 0.011f) + i * 1.9f))
-            val cy = size.height * (0.4f + 0.40f * cos(t * (0.037f + i * 0.009f) + i * 2.6f))
-            val radius = size.maxDimension * (0.42f + 0.06f * sin(t * 0.3f + i) + level * 0.05f)
-            drawCircle(
-                Brush.radialGradient(
-                    0f to colour.copy(alpha = 0.34f),
-                    0.6f to colour.copy(alpha = 0.10f),
-                    1f to Color.Transparent,
-                    center = Offset(cx, cy),
-                    radius = radius,
-                ),
-                radius = radius,
-                center = Offset(cx, cy),
-                blendMode = BlendMode.Screen,
-            )
+    Canvas(modifier.onSizeChanged { area = it }) {
+        shown?.let { image ->
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawImageRect(
+                    image,
+                    org.jetbrains.skia.Rect.makeWH(image.width.toFloat(), image.height.toFloat()),
+                    org.jetbrains.skia.Rect.makeWH(size.width, size.height),
+                    org.jetbrains.skia.SamplingMode.LINEAR,
+                    screen,
+                    false,
+                )
+            }
         }
         // The veil that keeps text on the page readable.
-        drawRect(
-            Brush.verticalGradient(
-                0f to Color.Black.copy(alpha = 0.35f),
-                1f to Color.Black.copy(alpha = 0.62f),
-            ),
-        )
+        drawRect(veil)
+    }
+}
+
+/**
+ * Paints the backdrop's lights small, off the UI thread, for the window to stretch.
+ *
+ * Painted in the window's own frame, four window-sized gradients blended over each other were half
+ * of what the graphics card did for every frame of the window, and nearly all of its dropped ones:
+ * with this layer off, scrolling Home went from a dozen missed frames to none. They have no edges
+ * to lose by being small. Screen is associative, so drawing the finished lights over the page with
+ * Screen gives what drawing them over it one by one gave.
+ */
+private class LivingBackdropRenderer {
+    private var surface: org.jetbrains.skia.Surface? = null
+    private val paint = org.jetbrains.skia.Paint().apply {
+        blendMode = org.jetbrains.skia.BlendMode.SCREEN
+        isDither = true
+    }
+    private val positions = floatArrayOf(0f, 0.6f, 1f)
+    private val colours = IntArray(3)
+
+    fun paint(window: IntSize, t: Float, level: Float, accent: Color): org.jetbrains.skia.Image {
+        val width = (window.width / SHRINK).coerceAtLeast(2)
+        val height = (window.height / SHRINK).coerceAtLeast(2)
+        val target = surface?.takeIf { it.width == width && it.height == height }
+            ?: org.jetbrains.skia.Surface.makeRasterN32Premul(width, height).also {
+                surface?.close()
+                surface = it
+            }
+        val canvas = target.canvas
+        canvas.clear(0)
+        val most = maxOf(width, height).toFloat()
+        for (i in 0 until LIGHTS) {
+            val colour = when (i) {
+                0 -> accent.hueShifted(0f, 0.85f)
+                1 -> accent.hueShifted(45f, 0.7f)
+                2 -> accent.hueShifted(-50f, 0.65f)
+                else -> accent.hueShifted(170f, 0.45f)
+            }
+            val cx = width * (0.5f + 0.42f * sin(t * (0.045f + i * 0.011f) + i * 1.9f))
+            val cy = height * (0.4f + 0.40f * cos(t * (0.037f + i * 0.009f) + i * 2.6f))
+            val radius = most * (0.42f + 0.06f * sin(t * 0.3f + i) + level * 0.05f)
+            colours[0] = colour.copy(alpha = 0.34f).toArgb()
+            colours[1] = colour.copy(alpha = 0.10f).toArgb()
+            colours[2] = 0
+            val shader = org.jetbrains.skia.Shader.makeRadialGradient(cx, cy, radius, colours, positions)
+            paint.shader = shader
+            canvas.drawCircle(cx, cy, radius, paint)
+            paint.shader = null
+            shader.close()
+        }
+        return target.makeImageSnapshot()
+    }
+
+    fun close() {
+        surface?.close()
+        surface = null
+        paint.close()
+    }
+
+    private companion object {
+        const val SHRINK = 8
+        const val LIGHTS = 4
     }
 }
 

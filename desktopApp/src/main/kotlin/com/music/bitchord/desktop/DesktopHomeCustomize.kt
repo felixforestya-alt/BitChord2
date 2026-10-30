@@ -181,6 +181,7 @@ internal fun DesktopWaveCard(
     val moving = playing && !paused
     // Read only while drawing, so the wave moves by redrawing alone and nothing recomposes for it.
     val phase = com.music.bitchord.ui.rememberLoopingFraction(if (moving) 2_600 else 9_000)
+    val wave = androidx.compose.runtime.remember { Path() }
     Box(
         Modifier
             // Folds up into the card above as it joins: shorter by as much, from the top.
@@ -203,7 +204,7 @@ internal fun DesktopWaveCard(
                 .drawBehind {
                     // The wave: lines drifting across, in the light of the cover.
                     for (k in 0 until 3) {
-                        val path = Path()
+                        val path = wave.apply { rewind() }
                         val amp = size.height * ((if (moving) 0.13f else 0.07f) + k * 0.035f)
                         val mid = size.height * (0.52f + k * 0.09f)
                         val shift = (phase.value + k * 0.23f) * 2f * PI.toFloat()

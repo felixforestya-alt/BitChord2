@@ -18,7 +18,8 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.unit.IntOffset
@@ -51,7 +52,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
     val canvas = spec.canvas
-    var frame by remember(canvas) { mutableStateOf<ImageBitmap?>(null) }
+    var frame by remember(canvas) { mutableStateOf<Image?>(null) }
     val rendered = frame != null
     val running by rememberUpdatedState(spec.isPlaying && !spec.pausedForTransition)
     val reportAspect by rememberUpdatedState(spec.onAspectRatioChanged)
@@ -61,6 +62,8 @@ internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
     val presentationAlpha by rememberUpdatedState(spec.presentationAlpha)
 
     LaunchedEffect(canvas) {
+        val retired = ArrayDeque<Image>()
+        try {
         // Round and round for as long as the clip is mounted: a canvas is a few
         // seconds long, and the decoder cannot be relied on to rewind an HLS
         // manifest itself, so each pass reopens it.
@@ -98,9 +101,13 @@ internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
                     val decoded = withContext(Dispatchers.IO) { decoder.nextFrame(pixels) }
                     if (!decoded) break
                     shown++
-                    // Handed to Skia rather than copied, so the next frame
-                    // cannot be decoded into the same array.
-                    frame = Image.makeRaster(info, pixels.copyOf(), decoder.width * 4).toComposeImageBitmap().frozen()
+                    // Skia keeps its own copy, so the next frame can be decoded into the same
+                    // array. Off the UI thread, and closed rather than left to the collector: a
+                    // clip used to leave thirty bitmaps a second behind it.
+                    frame = publishFrame(
+                        withContext(Dispatchers.Default) { Image.makeRaster(info, pixels, decoder.width * 4) },
+                        retired,
+                    )
                     val spent = System.currentTimeMillis() - started
                     delay((decoder.frameIntervalMillis - spent).coerceAtLeast(0L))
                 }
@@ -114,6 +121,14 @@ internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
                 return@LaunchedEffect
             }
         }
+        } finally {
+            withContext(NonCancellable) {
+                frame = null
+                androidx.compose.runtime.withFrameNanos { }
+                androidx.compose.runtime.withFrameNanos { }
+                while (retired.isNotEmpty()) retired.removeFirst().close()
+            }
+        }
     }
 
     LaunchedEffect(rendered) { reportRendered(rendered) }
@@ -122,11 +137,12 @@ internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
     // clip — another every so often.
     LaunchedEffect(rendered, spec.refreshFrameEveryMs) {
         if (!rendered) return@LaunchedEffect
-        frame?.let(reportFrame)
+        // Only what a caller asks to re-tint from becomes a Compose bitmap, not every frame.
+        frame?.let { reportFrame(it.toComposeImageBitmap()) }
         val interval = spec.refreshFrameEveryMs ?: return@LaunchedEffect
         while (isActive) {
             delay(interval)
-            frame?.let(reportFrame)
+            frame?.let { reportFrame(it.toComposeImageBitmap()) }
         }
     }
 
@@ -166,13 +182,16 @@ internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
         }
         val left = (size.width - drawWidth) / 2f
         val top = if (fit && spec.alignPortraitTop) 0f else (size.height - drawHeight) / 2f
-        drawImage(
-            image = image,
-            srcOffset = IntOffset.Zero,
-            srcSize = IntSize(image.width, image.height),
-            dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
-            dstSize = IntSize(drawWidth.roundToInt(), drawHeight.roundToInt()),
-        )
+        drawIntoCanvas { target ->
+            target.nativeCanvas.drawImageRect(
+                image,
+                org.jetbrains.skia.Rect.makeWH(image.width.toFloat(), image.height.toFloat()),
+                org.jetbrains.skia.Rect.makeXYWH(left.roundToInt().toFloat(), top.roundToInt().toFloat(), drawWidth.roundToInt().toFloat(), drawHeight.roundToInt().toFloat()),
+                org.jetbrains.skia.SamplingMode.LINEAR,
+                null,
+                false,
+            )
+        }
         if (bottomFade > 0.001f) {
             val endY = bottomFadeEndPx?.coerceIn(0f, size.height) ?: size.height
             drawRect(

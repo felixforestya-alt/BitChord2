@@ -268,8 +268,8 @@ private fun DrawScope.waves(t: Float, energy: Energy, accent: Color) {
     layers.forEachIndexed { k, (level, colour, frequency) ->
         val base = size.height * (0.66f + k * 0.035f)
         val amplitude = size.height * (0.025f + level * 0.16f)
-        val line = Path()
-        val fill = Path()
+        val line = ReusedPaths.line.apply { rewind() }
+        val fill = ReusedPaths.fill.apply { rewind() }
         var x = 0f
         fill.moveTo(0f, size.height)
         while (x <= size.width + 12f) {
@@ -359,24 +359,30 @@ private class ParticleField(count: Int) {
     private var primed = false
 }
 
+/** Rewound rather than made again for every frame; only the render thread draws these. */
+private object ReusedPaths {
+    val line = Path()
+    val fill = Path()
+}
+
 // ---- Spectrum: the whole range as a glowing landscape along the floor ---------------------
 
 private fun DrawScope.spectrum(bands: FloatArray, accent: Color) {
     val n = bands.size
     val floor = size.height
     val top = size.height * 0.42f
-    val points = List(n) { i ->
-        val u = i.toFloat() / (n - 1)
-        Offset(u * size.width, floor - (size.height * 0.03f) - bands[i] * (floor - top))
-    }
-    val ridge = Path()
-    ridge.moveTo(points.first().x, points.first().y)
+    fun pointX(i: Int) = i.toFloat() / (n - 1) * size.width
+    fun pointY(i: Int) = floor - (size.height * 0.03f) - bands[i] * (floor - top)
+    val ridge = ReusedPaths.line.apply { rewind() }
+    ridge.moveTo(pointX(0), pointY(0))
     for (i in 1 until n) {
-        val mid = (points[i - 1] + points[i]) / 2f
-        ridge.quadraticTo(points[i - 1].x, points[i - 1].y, mid.x, mid.y)
+        val x0 = pointX(i - 1)
+        val y0 = pointY(i - 1)
+        ridge.quadraticTo(x0, y0, (x0 + pointX(i)) / 2f, (y0 + pointY(i)) / 2f)
     }
-    ridge.lineTo(points.last().x, points.last().y)
-    val fill = Path().apply {
+    ridge.lineTo(pointX(n - 1), pointY(n - 1))
+    val fill = ReusedPaths.fill.apply {
+        rewind()
         addPath(ridge)
         lineTo(size.width, floor)
         lineTo(0f, floor)

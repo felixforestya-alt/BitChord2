@@ -48,6 +48,10 @@ internal class DesktopDecodeAhead(
     private val wake = lock.newCondition()
 
     private val queue = ArrayDeque<FloatArray>()
+    /** Blocks done with, for the worker to fill again: a block every 20 ms, not one thrown away. */
+    private val spare = ArrayDeque<FloatArray>()
+    /** The block last handed out, which the audio thread has finished with when it asks again. */
+    private var handedOut: FloatArray? = null
     private var queuedSamples = 0
     private var ended = false
     private var closed = false
@@ -94,11 +98,14 @@ internal class DesktopDecodeAhead(
                 }
             }
         }
+        handedOut?.let(::recycle)
+        handedOut = null
         val block = queue.removeFirstOrNull()
         if (block == null) {
             sampleCount = 0
             return null
         }
+        handedOut = block
         queuedSamples -= block.size
         started = true
         wake.signal()
@@ -110,6 +117,7 @@ internal class DesktopDecodeAhead(
     fun seek(micros: Long): Boolean {
         lock.withLock {
             generation++
+            queue.forEach(::recycle)
             queue.clear()
             queuedSamples = 0
             ended = false
@@ -129,6 +137,16 @@ internal class DesktopDecodeAhead(
             wake.signal()
             ready.signalAll()
         }
+    }
+
+    private fun recycle(block: FloatArray) {
+        if (spare.size < MAX_SPARE) spare.addLast(block)
+    }
+
+    /** A spare block of exactly [size]; block sizes hardly ever change within a track. */
+    private fun takeSpare(size: Int): FloatArray? {
+        val block = spare.removeLastOrNull() ?: return null
+        return block.takeIf { it.size == size }
     }
 
     private fun decodeLoop() {
@@ -151,7 +169,12 @@ internal class DesktopDecodeAhead(
                 }
 
                 val decoded = try {
-                    source.readSamples()?.copyOf(source.sampleCount)
+                    source.readSamples()?.let { samples ->
+                        val count = source.sampleCount
+                        val block = lock.withLock { takeSpare(count) } ?: FloatArray(count)
+                        System.arraycopy(samples, 0, block, 0, count)
+                        block
+                    }
                 } catch (failure: Exception) {
                     DesktopTrackLog.log("decode-ahead: decoder failed, ending the track: ${failure.message}")
                     brokeOff = true
@@ -189,6 +212,8 @@ internal class DesktopDecodeAhead(
 
         /** Waits shorter than this are ordinary scheduling, not a network stall worth logging. */
         const val STARVED_LOG_MS = 20L
+
+        const val MAX_SPARE = 16
 
         /** A gap long enough that the listener is wondering what happened. */
         const val SOUND_GAP_ALERT_MS = 3_000L

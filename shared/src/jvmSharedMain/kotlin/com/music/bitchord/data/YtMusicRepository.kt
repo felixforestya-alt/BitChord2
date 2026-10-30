@@ -157,6 +157,11 @@ object YtMusicRepository {
         InnertubeParser.collectSongsDeep(raw).distinctBy { it.videoId } to InnertubeParser.historyRemovalTokens(raw)
     }
 
+    /** The history in the periods YouTube Music groups it by, newest first, under its own titles. */
+    suspend fun historyShelves(): Result<List<Pair<String, List<Song>>>> = call("history") {
+        InnertubeParser.titledShelves(Innertube.browse(HISTORY))
+    }
+
     /** Takes rows out of the account's history, by the tokens [historyWithRemoval] gave them. */
     suspend fun removeFromHistory(tokens: List<String>): Result<Unit> = call("history:remove") {
         tokens.forEach { Innertube.sendFeedback(it) }

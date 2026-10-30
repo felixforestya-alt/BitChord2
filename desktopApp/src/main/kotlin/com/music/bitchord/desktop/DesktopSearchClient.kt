@@ -80,6 +80,8 @@ object DesktopSearchClient {
 
     suspend fun history(): Result<List<Song>> = YtMusicRepository.history()
 
+    suspend fun historyShelves(): Result<List<Pair<String, List<Song>>>> = YtMusicRepository.historyShelves()
+
     suspend fun historyWithRemoval(): Result<Pair<List<Song>, Map<String, String>>> = YtMusicRepository.historyWithRemoval()
 
     suspend fun removeFromHistory(tokens: List<String>): Result<Unit> = YtMusicRepository.removeFromHistory(tokens)

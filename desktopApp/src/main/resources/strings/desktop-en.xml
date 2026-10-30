@@ -417,4 +417,10 @@
     <string name="d_alerts_open_log">Open the log folder</string>
     <string name="d_alert_session_back">You are signed in again</string>
     <string name="d_alert_session_over">Your sign-in has ended; please sign in again</string>
+    <string name="d_time_machine">Time machine</string>
+    <string name="d_time_machine_subtitle">What you were listening to: %s</string>
+    <string name="d_discord_join_jam">Listen together</string>
+    <string name="d_discord_jam_button">Join button while in a room</string>
+    <string name="d_discord_jam_button_subtitle">Anyone who sees your status can click it and ask to join your room</string>
+    <string name="d_invite_in_party">Leave this room to join another</string>
 </resources>

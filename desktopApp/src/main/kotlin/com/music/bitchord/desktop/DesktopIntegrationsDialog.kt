@@ -187,6 +187,7 @@ private fun DiscordSection(
     val button1Visible by DesktopDiscordSettings.button1Visible.collectAsState()
     val button2Text by DesktopDiscordSettings.button2Text.collectAsState()
     val button2Visible by DesktopDiscordSettings.button2Visible.collectAsState()
+    val jamButton by DesktopDiscordSettings.jamButton.collectAsState()
     val showAudioQuality by DesktopDiscordSettings.showAudioQuality.collectAsState()
     val nerdStats by NerdStats.current.collectAsState()
     LaunchedEffect(Unit) { DesktopDiscordRpc.refreshLocalClient() }
@@ -301,6 +302,13 @@ private fun DiscordSection(
                         ),
                     )
                 },
+            )
+            DesktopCardRule()
+            PanelSwitchRow(
+                title = DesktopStrings["d_discord_jam_button", "Join button while in a room"],
+                subtitle = DesktopStrings["d_discord_jam_button_subtitle", "Anyone who sees your status can click it and ask to join your room"],
+                checked = jamButton,
+                onCheckedChange = DesktopDiscordSettings::setJamButton,
             )
             DesktopCardRule()
             PanelSwitchRow(

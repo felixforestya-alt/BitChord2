@@ -32,7 +32,7 @@ internal object DesktopSingleInstance {
      * True when this process is the one to run. False when another already is — it has been asked
      * to come forward, and this one should exit.
      */
-    fun claim(): Boolean {
+    fun claim(link: String? = null): Boolean {
         val acquired = runCatching {
             Files.createDirectories(directory)
             RandomAccessFile(lockFile.toFile(), "rw").channel.tryLock()
@@ -40,7 +40,7 @@ internal object DesktopSingleInstance {
         if (acquired == null) {
             // The lock could not even be tried (a read-only profile, say): run rather than refuse.
             if (!Files.exists(lockFile)) return true
-            if (signalRunning()) return false
+            if (signalRunning(link)) return false
             // Held, but nobody answering: a first instance still on its way up, or one that hangs.
             // Better a second window than no window at all.
             return true
@@ -50,7 +50,7 @@ internal object DesktopSingleInstance {
         return true
     }
 
-    private fun signalRunning(): Boolean = runCatching {
+    private fun signalRunning(link: String?): Boolean = runCatching {
         val port = Files.readString(portFile).trim().toInt()
         // So the window the first instance raises is allowed to take the foreground from us.
         if (DesktopPlatform.isWindows) {
@@ -62,7 +62,7 @@ internal object DesktopSingleInstance {
         Socket().use { socket ->
             socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), CONNECT_TIMEOUT_MS)
             socket.soTimeout = CONNECT_TIMEOUT_MS
-            socket.getOutputStream().write("$SHOW\n".toByteArray())
+            socket.getOutputStream().write("${if (DesktopDeepLinks.parse(link) != null) "$OPEN$link" else SHOW}\n".toByteArray())
             socket.getOutputStream().flush()
             socket.getInputStream().read() >= 0
         }
@@ -82,6 +82,8 @@ internal object DesktopSingleInstance {
                         if (line == SHOW) {
                             DesktopTrackLog.log("another launch asked for the window; showing it")
                             DesktopWindowVisibility.show()
+                        } else if (line != null && line.startsWith(OPEN)) {
+                            DesktopDeepLinks.open(line.removePrefix(OPEN))
                         }
                         it.getOutputStream().write(1)
                     }
@@ -91,6 +93,7 @@ internal object DesktopSingleInstance {
     }
 
     private const val SHOW = "show"
+    private const val OPEN = "open "
     private const val CONNECT_TIMEOUT_MS = 2_000
     private const val ASFW_ANY = -1
 }

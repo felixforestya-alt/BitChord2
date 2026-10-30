@@ -499,6 +499,30 @@ object InnertubeParser {
         return out.values.toList()
     }
 
+    /** Every titled shelf of songs under [root], in page order, by its displayed title. */
+    fun titledShelves(root: JsonElement): List<Pair<String, List<Song>>> {
+        val out = ArrayList<Pair<String, List<Song>>>()
+        fun walk(node: JsonElement) {
+            when (node) {
+                is JsonObject -> {
+                    val shelf = node["musicShelfRenderer"] as? JsonObject
+                    val title = (shelf?.get("title") as? JsonObject)?.get("runs")
+                        ?.let { it as? JsonArray }
+                        ?.joinToString("") { run -> ((run as? JsonObject)?.get("text") as? JsonPrimitive)?.content.orEmpty() }
+                    if (shelf != null && !title.isNullOrBlank()) {
+                        out += title to collectSongsDeep(shelf)
+                    } else {
+                        node.values.forEach(::walk)
+                    }
+                }
+                is JsonArray -> node.forEach(::walk)
+                else -> Unit
+            }
+        }
+        walk(root)
+        return out
+    }
+
     /**
      * For each row of the history page, the token that takes it out of the history — the row
      * menu's "Remove from history", which YouTube Music sends as a feedback token. By video id;

@@ -849,6 +849,16 @@ fun BitChordDesktopApp() {
     LaunchedEffect(Unit) {
         DesktopAccounts.healed.collect { if (it > 0) sessionRevision++ }
     }
+    // Asked about by the Listen together screen, which is only there once it is open.
+    val waitingInvite by DesktopDeepLinks.pending.collectAsState()
+    LaunchedEffect(waitingInvite) {
+        if (waitingInvite != null) overlays.listenTogether = true
+    }
+    var timeMachine by remember { mutableStateOf<DesktopTimeMachine.Memory?>(null) }
+    LaunchedEffect(sessionRevision, sessionSettled) {
+        if (!sessionSettled) return@LaunchedEffect
+        timeMachine = withContext(Dispatchers.IO) { runCatching { DesktopTimeMachine.load() }.getOrNull() }
+    }
     var audioQuality by remember { mutableStateOf(persistence.audioQuality()) }
     var sourceConfigs by remember { mutableStateOf(persistence.sourceConfigs()) }
     var sourceStatus by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -2522,7 +2532,7 @@ fun BitChordDesktopApp() {
     }
     // Keyed on the same things, plus the rate: Discord counts the bar down on
     // its own clock, so only a change to what it was told is worth another push.
-    LaunchedEffect(playback.song?.videoId, playback.isPlaying, playback.durationMs, playbackSpeed, playback.streamFormat) {
+    LaunchedEffect(partyState.code, DesktopDiscordSettings.jamButton.collectAsState().value, playback.song?.videoId, playback.isPlaying, playback.durationMs, playbackSpeed, playback.streamFormat) {
         DesktopDiscordRpc.onPlaybackStateChanged(playback, playbackSpeed)
     }
     // The account's own history on YouTube Music, which is what the home feed is built out of.
@@ -5571,10 +5581,10 @@ fun BitChordDesktopApp() {
                             loadingMore = homeLoadingMore,
                             recentlyPlayedLoading = homeRecentsLoading,
                             leadHero = false,
-                            lead = if (waveShown) {
+                            lead = if (waveShown || timeMachine != null) {
                                 {
                                     val jamOn = selectedSong?.radioName == DesktopMyWave.radioName
-                                    DesktopWaveCard(
+                                    if (waveShown) DesktopWaveCard(
                                         starting = waveStarting,
                                         playing = jamOn,
                                         paused = !playback.isPlaying,
@@ -5592,6 +5602,13 @@ fun BitChordDesktopApp() {
                                         heroVisible = { if (heroAnchor.present) heroAnchor.visible else 1f },
                                         modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 12.dp),
                                     )
+                                    timeMachine?.let { memory ->
+                                        DesktopTimeMachineCard(
+                                            memory = memory,
+                                            onPlay = { playSongs(memory.songs) },
+                                            modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 8.dp),
+                                        )
+                                    }
                                 }
                             } else {
                                 null

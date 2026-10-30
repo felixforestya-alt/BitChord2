@@ -86,27 +86,6 @@ internal fun DesktopListenTogetherDialog(autoplayEnabled: Boolean, onDismiss: ()
         if (serverDraft == server || serverDraft.isBlank()) serverDraft = server
     }
 
-    // An invite link: straight to the confirmation, with the room it names. Still the listener's
-    // click that joins it.
-    LaunchedEffect(Unit) {
-        DesktopDeepLinks.pending.collect { link ->
-            if (link == null) return@collect
-            DesktopDeepLinks.pending.value = null
-            if (state.inParty) {
-                DesktopPlayerHost.showMessage(DesktopStrings["d_invite_in_party", "Leave this room to join another"])
-                return@collect
-            }
-            link.server?.let { DesktopListenTogether.setCustomServerUrl(it) }
-            code = link.code
-            localError = null
-            busy = true
-            DesktopListenTogether.previewParty(link.code)
-                .onSuccess { preview = it }
-                .onFailure { localError = it.message }
-            busy = false
-        }
-    }
-
     DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 920) {
         Column(desktopPanelBody(cardMax = 760.dp, cardMin = 560.dp, fill = true)) {
             Row(

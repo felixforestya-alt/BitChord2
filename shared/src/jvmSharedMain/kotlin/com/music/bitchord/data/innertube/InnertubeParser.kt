@@ -499,7 +499,10 @@ object InnertubeParser {
         return out.values.toList()
     }
 
-    /** Every titled shelf of songs under [root], in page order, by its displayed title. */
+    /**
+     * Every shelf of songs under [root], in page order, by its displayed title. The rest of a shelf
+     * cut by a page break has none, and comes back under a blank one.
+     */
     fun titledShelves(root: JsonElement): List<Pair<String, List<Song>>> {
         val out = ArrayList<Pair<String, List<Song>>>()
         fun walk(node: JsonElement) {
@@ -509,8 +512,11 @@ object InnertubeParser {
                     val title = (shelf?.get("title") as? JsonObject)?.get("runs")
                         ?.let { it as? JsonArray }
                         ?.joinToString("") { run -> ((run as? JsonObject)?.get("text") as? JsonPrimitive)?.content.orEmpty() }
+                    val more = node["musicShelfContinuation"]
                     if (shelf != null && !title.isNullOrBlank()) {
                         out += title to collectSongsDeep(shelf)
+                    } else if (more != null) {
+                        out += "" to collectSongsDeep(more)
                     } else {
                         node.values.forEach(::walk)
                     }

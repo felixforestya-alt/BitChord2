@@ -849,11 +849,6 @@ fun BitChordDesktopApp() {
     LaunchedEffect(Unit) {
         DesktopAccounts.healed.collect { if (it > 0) sessionRevision++ }
     }
-    // Asked about by the Listen together screen, which is only there once it is open.
-    val waitingInvite by DesktopDeepLinks.pending.collectAsState()
-    LaunchedEffect(waitingInvite) {
-        if (waitingInvite != null) overlays.listenTogether = true
-    }
     var timeMachine by remember { mutableStateOf<DesktopTimeMachine.Memory?>(null) }
     LaunchedEffect(sessionRevision, sessionSettled) {
         if (!sessionSettled) return@LaunchedEffect
@@ -2532,7 +2527,7 @@ fun BitChordDesktopApp() {
     }
     // Keyed on the same things, plus the rate: Discord counts the bar down on
     // its own clock, so only a change to what it was told is worth another push.
-    LaunchedEffect(partyState.code, DesktopDiscordSettings.jamButton.collectAsState().value, playback.song?.videoId, playback.isPlaying, playback.durationMs, playbackSpeed, playback.streamFormat) {
+    LaunchedEffect(playback.song?.videoId, playback.isPlaying, playback.durationMs, playbackSpeed, playback.streamFormat) {
         DesktopDiscordRpc.onPlaybackStateChanged(playback, playbackSpeed)
     }
     // The account's own history on YouTube Music, which is what the home feed is built out of.
@@ -5581,10 +5576,10 @@ fun BitChordDesktopApp() {
                             loadingMore = homeLoadingMore,
                             recentlyPlayedLoading = homeRecentsLoading,
                             leadHero = false,
-                            lead = if (waveShown || timeMachine != null) {
+                            lead = if (waveShown) {
                                 {
                                     val jamOn = selectedSong?.radioName == DesktopMyWave.radioName
-                                    if (waveShown) DesktopWaveCard(
+                                    DesktopWaveCard(
                                         starting = waveStarting,
                                         playing = jamOn,
                                         paused = !playback.isPlaying,
@@ -5602,13 +5597,6 @@ fun BitChordDesktopApp() {
                                         heroVisible = { if (heroAnchor.present) heroAnchor.visible else 1f },
                                         modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 12.dp),
                                     )
-                                    timeMachine?.let { memory ->
-                                        DesktopTimeMachineCard(
-                                            memory = memory,
-                                            onPlay = { playSongs(memory.songs) },
-                                            modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 8.dp),
-                                        )
-                                    }
                                 }
                             } else {
                                 null
@@ -5814,12 +5802,25 @@ fun BitChordDesktopApp() {
                                 // The phone's wallet of Replay cards, or nothing until there is
                                 // listening to deal them from.
                                 val cards = remember(replaySummary) { replaySummary.heroCards() }
-                                if (!replaySummary.isEmpty && cards.isNotEmpty() && !DesktopLibrarySections.isHidden(libraryHidden, DesktopLibrarySections.REPLAY)) {
+                                val memory = timeMachine
+                                if ((memory != null || (!replaySummary.isEmpty && cards.isNotEmpty())) && !DesktopLibrarySections.isHidden(libraryHidden, DesktopLibrarySections.REPLAY)) {
                                     ShelfRow(
                                         modifier = Modifier.padding(vertical = 6.dp),
                                         contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
+                                        if (memory != null) item(key = "time-machine") {
+                                            ReplayCreditCard(
+                                                label = DesktopStrings["d_time_machine", "Time machine"],
+                                                value = memory.title,
+                                                detail = DesktopStrings["d_time_machine_detail", "Tracks from back then: %s"].format(memory.songs.size),
+                                                artworkUrl = memory.songs.firstOrNull()?.thumbnailUrl,
+                                                holder = replayHolder,
+                                                memberSince = replaySummary.memberSince(),
+                                                onClick = { playSongs(memory.songs) },
+                                                modifier = Modifier.width(300.dp),
+                                            )
+                                        }
                                         items(cards, key = { it.label }) { card ->
                                             ReplayCreditCard(
                                                 label = card.label,

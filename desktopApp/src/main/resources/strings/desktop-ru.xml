@@ -596,9 +596,5 @@
     <string name="d_alert_session_back">Вход восстановлен</string>
     <string name="d_alert_session_over">Вход завершился, войдите снова</string>
     <string name="d_time_machine">Машина времени</string>
-    <string name="d_time_machine_subtitle">Твоя музыка тогда: %s</string>
-    <string name="d_discord_join_jam">Слушать вместе</string>
-    <string name="d_discord_jam_button">Кнопка входа, пока ты в комнате</string>
-    <string name="d_discord_jam_button_subtitle">Любой, кто видит твой статус, сможет нажать её и попроситься в комнату</string>
-    <string name="d_invite_in_party">Выйди из этой комнаты, чтобы зайти в другую</string>
+    <string name="d_time_machine_detail">Треков из того времени: %s</string>
 </resources>

@@ -171,8 +171,7 @@ internal object DesktopDiscordRpc {
         // that fills that in runs after this one in the same frame, so it would
         // still hold the previous track's format.
         val quality = qualityLine(state)
-        val room = DesktopListenTogether.state.value.code.takeIf { DesktopDiscordSettings.jamButton.value }
-        val key = "${song.videoId}|${state.durationMs}|$speed|$quality|$room"
+        val key = "${song.videoId}|${state.durationMs}|$speed|$quality"
         val position = state.positionMs
         val duration = state.durationMs.takeIf { it > 0 } ?: 0L
         scope.launch {
@@ -312,10 +311,6 @@ internal object DesktopDiscordRpc {
     /** The buttons as configured: text with its variables filled in, and hidden ones dropped. */
     private fun buttonLabels(song: Song): List<Pair<String, String>> = buildList {
         val settings = DesktopDiscordSettings
-        // First, because Discord shows two at most and this is the one that does something.
-        val party = DesktopListenTogether.state.value
-        val room = party.code?.takeIf { party.inParty && settings.jamButton.value }
-        if (room != null) add(DesktopStrings["d_discord_join_jam", "Listen together"] to DesktopListenTogether.inviteUrl(room))
         if (settings.button1Visible.value) {
             val text = settings.button1Text.value.ifEmpty { DesktopDiscordSettings.DEFAULT_BUTTON_1 }
             add(settings.resolveVariables(text, song.title, song.artist, song.albumName) to watchUrl(song))
@@ -324,7 +319,7 @@ internal object DesktopDiscordRpc {
             val text = settings.button2Text.value.ifEmpty { DesktopDiscordSettings.DEFAULT_BUTTON_2 }
             add(settings.resolveVariables(text, song.title, song.artist, song.albumName) to PROJECT_URL)
         }
-    }.take(MAX_BUTTONS)
+    }
 
     /**
      * The `X-Super-Properties` header Discord's own client sends.
@@ -359,9 +354,6 @@ internal object DesktopDiscordRpc {
     private fun superProperties(): String = superProperties
 
     private fun watchUrl(song: Song) = "https://music.youtube.com/watch?v=${song.videoId}"
-
-    /** All that Discord will show on an activity. */
-    private const val MAX_BUTTONS = 2
 
     private const val KEY_TOKEN = "discord_token"
     private const val KEY_USERNAME = "discord_username"

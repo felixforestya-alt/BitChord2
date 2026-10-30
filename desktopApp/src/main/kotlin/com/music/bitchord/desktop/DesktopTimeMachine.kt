@@ -1,39 +1,11 @@
 package com.music.bitchord.desktop
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.music.bitchord.data.model.Song
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 /**
- * What the listener was playing a while ago, offered back to them on Home.
+ * What the listener was playing a while ago, offered back to them among the Library's Replay cards.
  *
  * Two memories to draw on, because neither is enough alone. This computer's monthly listening is
  * exact but only goes back as far as the app has been installed; the account's YouTube Music
@@ -61,7 +33,6 @@ internal object DesktopTimeMachine {
 
     /** The oldest period of the account's history, without what has been played again lately. */
     private fun fromHistory(shelves: List<Pair<String, List<Song>>>): Memory? {
-        // Today and yesterday, or this week: not a memory yet.
         if (shelves.size <= RECENT_SHELVES) return null
         val recent = shelves.take(RECENT_SHELVES).flatMap { it.second }.mapTo(HashSet()) { it.videoId }
         val (title, songs) = shelves.drop(RECENT_SHELVES).lastOrNull { it.second.size >= MIN_SONGS } ?: return null
@@ -87,57 +58,7 @@ internal object DesktopTimeMachine {
 
     private const val MIN_SONGS = 5
     private const val MAX_SONGS = 30
-    private const val RECENT_SHELVES = 2
-}
 
-/** The card on Home: when it is from, the covers, and a click that plays them. */
-@Composable
-internal fun DesktopTimeMachineCard(
-    memory: DesktopTimeMachine.Memory,
-    onPlay: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier
-            .fillMaxWidth()
-            .height(112.dp)
-            .clip(RoundedCornerShape(26.dp))
-            .background(Color.White.copy(alpha = 0.05f))
-            .border(1.dp, DesktopCardEdge, RoundedCornerShape(26.dp))
-            .clickable(onClick = onPlay)
-            .padding(horizontal = 24.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(56.dp).clip(CircleShape).background(Color.White),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Rounded.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(30.dp))
-        }
-        Spacer(Modifier.width(18.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                DesktopStrings["d_time_machine", "Time machine"],
-                color = Color.White,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-            )
-            Text(
-                DesktopStrings["d_time_machine_subtitle", "What you were listening to: %s"].format(memory.title),
-                color = DesktopSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.width(18.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            memory.songs.take(COVERS).forEach { song ->
-                DesktopArtwork(song.thumbnailUrl, Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)), px = COVER_PX)
-            }
-        }
-    }
+    /** Today, yesterday, this week and last week: not a memory yet. */
+    private const val RECENT_SHELVES = 4
 }
-
-private const val COVERS = 4
-private const val COVER_PX = 128

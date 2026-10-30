@@ -355,6 +355,9 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
         }
     }
 
+    /** See [DesktopSampleSource.brokeOff]. */
+    override val brokeOff: Boolean get() = rangeSource?.brokeOff == true
+
     /** The next block as interleaved floats, or null at the end of the stream. */
     override fun readSamples(): FloatArray? {
         val block = read() ?: return null

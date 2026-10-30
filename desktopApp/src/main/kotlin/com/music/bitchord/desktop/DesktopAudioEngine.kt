@@ -323,7 +323,9 @@ class DesktopPlaybackEngine(
                 // not YouTube unable to play the track: struck off YouTube's cache, and the track
                 // asked of YouTube again. Struck off as a source instead, as it was, a track with
                 // no other source never played again in the session, and sat on 0:00 "playing".
-                com.music.bitchord.data.innertube.StreamResolver.onPlaybackRefused(stream.url, 403)
+                // Forgotten rather than reported refused: a real refusal has been reported by the
+                // reader that got it, and a timeout says nothing against the client that minted it.
+                com.music.bitchord.data.innertube.StreamResolver.forget(stream.url)
                 loadInternal(song, playWhenReady, priorFailure = failure)
             } else {
                 stream.sourceId?.let { refusedSources[song.videoId] = it }
@@ -1128,26 +1130,25 @@ class DesktopPlaybackEngine(
     }
 
     /**
-     * A network stream that ran out well before its stated length: the connection broke off
-     * mid-track (a window refused, a link that expired while paused) rather than the song ending.
-     * It was taken as the end, and the next track started by itself in the middle of this one —
-     * read by the listener as the player skipping on its own. Opened again where it stopped,
-     * a couple of times per track, so a stream that really is shorter still ends.
+     * A stream whose connection failed mid-track (a window refused, a link that expired while
+     * paused) rather than one that reached its end. It was taken as the end, and the next track
+     * started by itself in the middle of this one. Opened again where it stopped, a couple of times
+     * per track. Asked of the reader, not worked out from the length: the position heard can run
+     * behind the file, so a track that had reached its end looked cut short, and treating that as a
+     * failure cost its last seconds a quarter of a minute of silence and a good link.
      */
     private fun reopenIfCutShort(track: Track): Boolean {
-        if (!track.stream.url.startsWith("http")) return false
-        val durationMs = (track.decoder.durationUs ?: return false) / 1_000
-        val heardMs = _state.value.positionMs
+        if (!track.decoder.brokeOff) return false
         if (_state.value.song?.videoId != track.song.videoId) return false
-        if (durationMs < EARLY_END_MARGIN_MS * 2 || heardMs <= 0 || heardMs >= durationMs - EARLY_END_MARGIN_MS) return false
+        val heardMs = _state.value.positionMs.coerceAtLeast(0)
+        val durationMs = (track.decoder.durationUs ?: 0L) / 1_000
+        if (durationMs > 0 && heardMs >= durationMs - EARLY_END_MARGIN_MS) return false
         val tries = earlyEndReopens.merge(track.song.videoId, 1, Int::plus) ?: 1
         if (tries > MAX_EARLY_END_REOPENS) return false
         DesktopTrackLog.log(
             "'${track.song.title}' ran out at ${heardMs / 1_000}s of ${durationMs / 1_000}s — " +
                 "the stream broke off; opening it again there",
         )
-        // A googlevideo URL that broke off is not to be handed out again.
-        com.music.bitchord.data.innertube.StreamResolver.onPlaybackRefused(track.stream.url, 403)
         current = null
         track.decoder.close()
         loadInternal(track.song, playWhenReady = true, startAtMs = heardMs)
@@ -1978,10 +1979,10 @@ class DesktopPlaybackEngine(
     }
 
     companion object {
-        /** How far short of its stated length a stream has to stop to count as cut off. */
-        private const val EARLY_END_MARGIN_MS = 5_000L
+        /** So close to the end that a failed connection costs nothing worth reopening for. */
+        private const val EARLY_END_MARGIN_MS = 2_000L
 
-        /** Reopens per track before a short stream is believed. */
+        /** Reopens per track before the connection is given up on. */
         private const val MAX_EARLY_END_REOPENS = 2
 
         /** How many times a lossy substitute is asked to be beaten before the question is closed. */

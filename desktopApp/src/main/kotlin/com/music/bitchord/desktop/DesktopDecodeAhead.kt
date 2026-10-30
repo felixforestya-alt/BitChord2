@@ -14,6 +14,9 @@ internal interface DesktopSampleSource {
     fun seek(micros: Long): Boolean
 
     fun close()
+
+    /** Whether the end just reached was the connection failing rather than the file ending. */
+    val brokeOff: Boolean get() = false
 }
 
 /**
@@ -56,6 +59,11 @@ internal class DesktopDecodeAhead(
 
     /** How much of the array [readSamples] returned is actually this block. */
     var sampleCount: Int = 0
+        private set
+
+    /** The end reached was a failed connection, not the end of the file. */
+    @Volatile
+    var brokeOff = false
         private set
 
     private val worker = Thread(::decodeLoop, name).apply {
@@ -137,8 +145,10 @@ internal class DesktopDecodeAhead(
                     source.readSamples()?.copyOf(source.sampleCount)
                 } catch (failure: Exception) {
                     DesktopTrackLog.log("decode-ahead: decoder failed, ending the track: ${failure.message}")
+                    brokeOff = true
                     null
                 }
+                if (decoded == null && source.brokeOff) brokeOff = true
                 lock.withLock {
                     // A seek came in while this block was being read; it belongs to the old position.
                     if (decodingFor != generation) return@withLock

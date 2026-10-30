@@ -847,6 +847,14 @@ object StreamResolver {
         recent.remove(videoId)
     }
 
+    /**
+     * A URL that failed for no reason its server gave — a timeout, a connection that dropped — is
+     * not handed out again, and nothing is held against the client that minted it.
+     */
+    fun forget(url: String) {
+        recent.entries.removeAll { it.value.url == url }
+    }
+
     // ---- Failsafe -----------------------------------------------------------
 
     /**

@@ -56,8 +56,9 @@ internal class DesktopAudioSink {
                 submittedFrames = framesPlayed()
                 stage.reset()
                 closeLine(previous)
+                knownDeviceName = DesktopWindowsAudio.deviceName()
                 DesktopTrackLog.log(
-                    "audio output opened: ${deviceName ?: "Windows system default"} · " +
+                    "audio output opened: ${knownDeviceName ?: "Windows system default"} · " +
                         "${requested.sampleRate} Hz · ${requested.channels} ch · WASAPI shared",
                 )
                 return@runCatching requested
@@ -136,15 +137,34 @@ internal class DesktopAudioSink {
      *
      * The mixer's own name, not `lineInfo`, which describes the line's capabilities — "interface
      * SourceDataLine supporting 36 audio formats" is not a device.
+     *
+     * Never waits for Windows' audio: this is read on the UI thread, and the native name sits behind
+     * the lock the audio thread holds while it moves to another device. That froze the whole window
+     * for seconds at a time. What is known is answered, and asked again off to the side.
      */
     val deviceName: String?
         get() = runCatching {
             if (windowsOutput) {
-                DesktopWindowsAudio.deviceName()
+                refreshDeviceName()
+                knownDeviceName
             } else {
                 line?.let { openedOn ?: AudioSystem.getMixer(null).mixerInfo?.name?.takeIf(String::isNotBlank) }
             }
         }.getOrNull()
+
+    @Volatile private var knownDeviceName: String? = null
+    private val askingDeviceName = java.util.concurrent.atomic.AtomicBoolean()
+
+    private fun refreshDeviceName() {
+        if (!askingDeviceName.compareAndSet(false, true)) return
+        Thread({
+            try {
+                knownDeviceName = runCatching { DesktopWindowsAudio.deviceName() }.getOrDefault(knownDeviceName)
+            } finally {
+                askingDeviceName.set(false)
+            }
+        }, "bitchord-audio-device-name").apply { isDaemon = true }.start()
+    }
 
     /** The mixer this line was actually opened on, when it was not the system default. */
     private var openedOn: String? = null

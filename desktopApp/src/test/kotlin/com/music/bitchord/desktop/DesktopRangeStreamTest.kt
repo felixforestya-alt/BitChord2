@@ -105,6 +105,92 @@ class DesktopRangeStreamTest {
     }
 
     @Test
+    fun `the end of the file is not a break`() = serve { url, _ ->
+        val stream = DesktopRangeStream(url, windowBytes = 32 * 1024)
+        val into = ByteArray(16 * 1024)
+        while (stream.read(into, into.size) > 0) Unit
+        assertEquals(false, stream.brokeOff)
+    }
+
+    @Test
+    fun `a refused window is a break and is asked for once`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var asked = 0
+        server.createContext("/media") { exchange ->
+            asked++
+            if (asked == 1) {
+                val slice = ByteArray(1024)
+                exchange.responseHeaders.add("Content-Range", "bytes 0-1023/4096")
+                exchange.sendResponseHeaders(206, slice.size.toLong())
+                exchange.responseBody.use { it.write(slice) }
+            } else {
+                exchange.sendResponseHeaders(403, -1)
+                exchange.close()
+            }
+        }
+        server.start()
+        try {
+            val stream = DesktopRangeStream("http://127.0.0.1:${server.address.port}/media", windowBytes = 1024)
+            val into = ByteArray(1024)
+            assertEquals(1024, stream.read(into, into.size))
+            assertEquals(-1, stream.read(into, into.size))
+            assertTrue(stream.brokeOff)
+            // FFmpeg asks again after a failed read; nothing more goes out.
+            assertEquals(-1, stream.read(into, into.size))
+            assertEquals(2, asked)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `a window that fails on the way is asked for again`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var asked = 0
+        server.createContext("/media") { exchange ->
+            asked++
+            if (asked == 1) {
+                exchange.sendResponseHeaders(503, -1)
+                exchange.close()
+            } else {
+                val slice = ByteArray(1024) { 7 }
+                exchange.responseHeaders.add("Content-Range", "bytes 0-1023/1024")
+                exchange.sendResponseHeaders(206, slice.size.toLong())
+                exchange.responseBody.use { it.write(slice) }
+            }
+        }
+        server.start()
+        try {
+            val stream = DesktopRangeStream("http://127.0.0.1:${server.address.port}/media", windowBytes = 1024)
+            val into = ByteArray(1024)
+            assertEquals(1024, stream.read(into, into.size))
+            assertEquals(false, stream.brokeOff)
+            assertEquals(2, asked)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
+    fun `a page where the audio should be is a break, not data`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/media") { exchange ->
+            val page = "<html>blocked</html>".toByteArray()
+            exchange.responseHeaders.add("Content-Type", "text/html")
+            exchange.sendResponseHeaders(200, page.size.toLong())
+            exchange.responseBody.use { it.write(page) }
+        }
+        server.start()
+        try {
+            val stream = DesktopRangeStream("http://127.0.0.1:${server.address.port}/media", windowBytes = 1024)
+            assertEquals(-1, stream.read(ByteArray(1024), 1024))
+            assertTrue(stream.brokeOff)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun `a server that ignores ranges is still read`() {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         val whole = ByteArray(4_096) { (it % 97).toByte() }

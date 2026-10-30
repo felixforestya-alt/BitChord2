@@ -82,7 +82,8 @@ internal object DesktopFramePacing {
 
         private var last = 0L
         /** The monitor's refresh period. */
-        private var refresh = 6_250_000L
+        @Volatile private var refresh = 6_250_000L
+        private val askingRefresh = java.util.concurrent.atomic.AtomicBoolean()
         /** A frame's: the refresh (more, when measuring — see [FORCED_DIVISOR]). */
         private var period = 6_250_000L
         private var periodCheckedAt = Long.MIN_VALUE / 2
@@ -90,7 +91,16 @@ internal object DesktopFramePacing {
         override fun onRender(canvas: Canvas, width: Int, height: Int, nanoTime: Long) {
             val start = System.nanoTime()
             if (start - periodCheckedAt > PERIOD_CHECK_NANOS) {
-                refresh = periodNanos(window)
+                // Off to the side: asked on this thread, a monitor waking up held the UI for 25s.
+                if (askingRefresh.compareAndSet(false, true)) {
+                    Thread({
+                        try {
+                            refresh = periodNanos(window)
+                        } finally {
+                            askingRefresh.set(false)
+                        }
+                    }, "bitchord-refresh-rate").apply { isDaemon = true }.start()
+                }
                 periodCheckedAt = start
                 Blanks.follow(window)
             }

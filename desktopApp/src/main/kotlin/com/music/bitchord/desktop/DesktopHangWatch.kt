@@ -21,8 +21,14 @@ internal object DesktopHangWatch {
         adoptCrashReports()
         Thread({
             var reported = false
+            var tickedAt = System.nanoTime()
             while (true) {
                 runCatching { Thread.sleep(PING_MS) }.onFailure { return@Thread }
+                // This thread itself did not run on time: the computer slept, which the clock
+                // counts. Ten hours of sleep is not a ten-hour hang.
+                val now = System.nanoTime()
+                if ((now - tickedAt) / 1_000_000 > PING_MS * MISSED_TICKS) answeredAt = now
+                tickedAt = now
                 SwingUtilities.invokeLater { answeredAt = System.nanoTime() }
                 val silentMs = (System.nanoTime() - answeredAt) / 1_000_000
                 if (silentMs >= STALL_MS && !reported) {
@@ -68,6 +74,7 @@ internal object DesktopHangWatch {
 
     private const val PING_MS = 1_000L
     private const val STALL_MS = 5_000L
+    private const val MISSED_TICKS = 3
     private const val STACK_DEPTH = 25
     private const val CRASH_LINES = 90
 }

@@ -134,7 +134,12 @@ object DesktopLyricsClient {
                 Result.success(DesktopLyrics(found.source.label, found.lines))
             }
         }
-        cache[cacheKey] = Cached(System.currentTimeMillis(), result)
+        val now = System.currentTimeMillis()
+        cache[cacheKey] = Cached(now, result)
+        // An answer past its time is never handed out again, and it was never let go either: in a
+        // window that lives in the tray for days, every track's lyrics stayed in memory for the
+        // life of the process.
+        cache.entries.removeIf { now - it.value.createdAt >= CACHE_TTL_MS }
         return result
     }
 

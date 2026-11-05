@@ -424,25 +424,21 @@ private const val LOADING_MIN_MS = 600L
  */
 @Composable
 private fun MixSheen(height: Dp, color: Color) {
-    val transition = rememberInfiniteTransition(label = "mixSheen")
-    val phase by transition.animateFloat(
-        initialValue = -SHEEN_BAND_FRACTION,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000, easing = LinearEasing),
-            // Reverses rather than restarting: a restart teleports the band
-            // back to the far edge every second, which is a hitch the eye
-            // catches each time. Ping-pong has no edge to fall off.
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "mixSheenPhase",
-    )
+    // There and back in two seconds: reverses rather than restarting, as a
+    // restart teleports the band back to the far edge every second, which is
+    // a hitch the eye catches each time. Ping-pong has no edge to fall off.
+    // A loop of its own rather than an infinite transition, so it holds still
+    // while nobody can see the window instead of drawing it all mix long.
+    val loop = com.music.bitchord.ui.rememberLoopingFraction(2000)
     Canvas(
         Modifier
             .fillMaxWidth()
             .height(height),
     ) {
         val band = size.width * SHEEN_BAND_FRACTION
+        val f = loop.value
+        val there = if (f < 0.5f) f * 2f else 2f - f * 2f
+        val phase = -SHEEN_BAND_FRACTION + (1f + SHEEN_BAND_FRACTION) * there
         val x = phase * size.width
         drawRoundRect(
             brush = Brush.horizontalGradient(

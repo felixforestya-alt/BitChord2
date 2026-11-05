@@ -144,16 +144,9 @@ internal fun DesktopThinSlider(
  */
 @Composable
 private fun DesktopMixSheen(height: Dp) {
-    val transition = rememberInfiniteTransition(label = "mixSheen")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 500, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "mixSheenPhase",
-    )
+    // Holds still while nobody can see the window: an infinite transition kept the window
+    // drawing at the display's full rate for the whole of every mix, eight to twelve seconds.
+    val loop = com.music.bitchord.ui.rememberLoopingFraction(500)
     Canvas(
         Modifier
             .fillMaxWidth()
@@ -162,7 +155,7 @@ private fun DesktopMixSheen(height: Dp) {
         val band = size.width * SHEEN_BAND_FRACTION
         // Travels from fully off the left edge to fully off the right, so the highlight enters and
         // leaves rather than materialising mid-bar.
-        val centre = -band + (size.width + band * 2f) * phase
+        val centre = -band + (size.width + band * 2f) * loop.value
         drawRoundRect(
             brush = Brush.linearGradient(
                 colorStops = arrayOf(

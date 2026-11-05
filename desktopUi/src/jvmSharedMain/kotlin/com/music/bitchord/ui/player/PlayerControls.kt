@@ -1717,15 +1717,9 @@ private fun LosslessLabel(
     // label then just holds still, which says "waiting" well enough.
     val reduceAnimation by PlayerSettings.reduceAnimation.collectAsStateWithLifecycle()
     val pulse = if (pulsing && !reduceAnimation) {
-        rememberInfiniteTransition(label = "upgradingPulse").animateFloat(
-            initialValue = 1f,
-            targetValue = UPGRADING_PULSE_LOW,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = UPGRADING_PULSE_MS, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "upgradingPulseAlpha",
-        )
+        // Down and back up, eased each way; holds still while nobody can see
+        // the window, as an infinite transition does not.
+        com.music.bitchord.ui.rememberLoopingFraction(UPGRADING_PULSE_MS * 2)
     } else {
         null
     }
@@ -1735,7 +1729,10 @@ private fun LosslessLabel(
         // call in place rather than through an offscreen buffer: the glyph and
         // the word never overlap, so there is nothing a buffer would fix.
         modifier = modifier.graphicsLayer {
-            alpha = pulse?.value ?: 1f
+            alpha = pulse?.value?.let { f ->
+                val down = FastOutSlowInEasing.transform(if (f < 0.5f) f * 2f else 2f - f * 2f)
+                1f + (UPGRADING_PULSE_LOW - 1f) * down
+            } ?: 1f
             compositingStrategy = CompositingStrategy.ModulateAlpha
         },
         horizontalArrangement = Arrangement.Center,

@@ -168,7 +168,6 @@ internal fun DesktopHomeHeader(
             delay(20_000)
         }
     }
-    val sweep = sweepAnim.value
     val entrance = remember { Animatable(0f) }
     LaunchedEffect(Unit) { entrance.animateTo(1f, tween(900, easing = EASE_OUT_EXPO)) }
 
@@ -182,22 +181,10 @@ internal fun DesktopHomeHeader(
             },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            greeting(),
-            modifier = Modifier.weight(1f),
-            style = TextStyle(
-                brush = Brush.linearGradient(
-                    listOf(Color.White, lerpTo(accent, 0.25f), accent.hueShifted(40f, 1f), Color.White),
-                    start = Offset(sweep * 1600f - 800f, 0f),
-                    end = Offset(sweep * 1600f, 120f),
-                    tileMode = TileMode.Mirror,
-                ),
-                fontFamily = MaterialTheme.typography.displayLarge.fontFamily,
-                fontWeight = FontWeight.Black,
-                fontSize = 46.sp,
-                letterSpacing = (-1.2).sp,
-            ),
-        )
+        // Where the sweep has got to is read inside the greeting alone: read here, every frame
+        // of its four seconds recomposed the whole header — the date formatted again, the
+        // customise button, the room for the card.
+        HomeGreeting(sweep = { sweepAnim.value }, accent = accent, modifier = Modifier.weight(1f))
         if (onCustomize != null) {
             Row(
                 Modifier
@@ -949,6 +936,28 @@ private class LivingBackdropRenderer {
         const val SHRINK = 8
         const val LIGHTS = 4
     }
+}
+
+/** The time of day's greeting, lit by the light [sweep] says has got this far across it. */
+@Composable
+private fun HomeGreeting(sweep: () -> Float, accent: Color, modifier: Modifier) {
+    val at = sweep()
+    Text(
+        greeting(),
+        modifier = modifier,
+        style = TextStyle(
+            brush = Brush.linearGradient(
+                listOf(Color.White, lerpTo(accent, 0.25f), accent.hueShifted(40f, 1f), Color.White),
+                start = Offset(at * 1600f - 800f, 0f),
+                end = Offset(at * 1600f, 120f),
+                tileMode = TileMode.Mirror,
+            ),
+            fontFamily = MaterialTheme.typography.displayLarge.fontFamily,
+            fontWeight = FontWeight.Black,
+            fontSize = 46.sp,
+            letterSpacing = (-1.2).sp,
+        ),
+    )
 }
 
 @Composable

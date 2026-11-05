@@ -64,14 +64,31 @@ internal class DesktopVarispeed(private val channels: Int) {
             val phase = ((position - whole) * PHASES).toInt().coerceIn(0, PHASES - 1)
             val weights = phase * taps
             val first = whole - TAPS_EACH_SIDE + 1
-            for (channel in 0 until channels) {
-                var sum = 0f
-                var at = first * channels + channel
+            if (channels == 2) {
+                // Both sides in one pass over the taps, each weight read once for the two: stereo
+                // is nearly every track, and a pass per channel read the table and walked the input
+                // twice. Each side still sums its taps in the same order, to the same result.
+                var left = 0f
+                var right = 0f
+                var at = first * 2
                 for (tap in 0 until taps) {
-                    sum += input[at] * table[weights + tap]
-                    at += channels
+                    val weight = table[weights + tap]
+                    left += input[at] * weight
+                    right += input[at + 1] * weight
+                    at += 2
                 }
-                output[produced * channels + channel] = sum
+                output[produced * 2] = left
+                output[produced * 2 + 1] = right
+            } else {
+                for (channel in 0 until channels) {
+                    var sum = 0f
+                    var at = first * channels + channel
+                    for (tap in 0 until taps) {
+                        sum += input[at] * table[weights + tap]
+                        at += channels
+                    }
+                    output[produced * channels + channel] = sum
+                }
             }
             produced++
             position += rate

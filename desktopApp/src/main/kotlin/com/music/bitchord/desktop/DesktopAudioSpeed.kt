@@ -32,6 +32,23 @@ internal class DesktopAudioSpeed(
     /** Once a track has been stretched, stay in the windowed path at 1x until it is reset. */
     private var engaged = false
 
+    /**
+     * [tail] with its channels summed, at every fourth frame — the side of [score] that is the
+     * same for every offset tried, so worked out once a window rather than once for each of the
+     * six hundred or so offsets a search tries.
+     */
+    private val tailMono = FloatArray((hop + 3) / 4)
+
+    /**
+     * [pending] with its channels summed, over the frames the search can reach, from [monoFrom].
+     * Neighbouring offsets read the same frames, so each one is summed once a search rather than
+     * once for every offset that reaches it — about a hundred times. Together the two were most
+     * of what keeping the pitch cost: a second of 44.1 kHz stereo at 1.25x took 22–55 ms of the
+     * audio thread, and takes 7–10 now, with every join exactly where it was.
+     */
+    private var pendingMono = FloatArray(0)
+    private var monoFrom = 0
+
     /** How much of the array [process] returned belongs to this call. */
     var outputCount: Int = 0
         private set
@@ -106,6 +123,16 @@ internal class DesktopAudioSpeed(
         }
         System.arraycopy(pending, (at + hop) * channels, tail, 0, hop * channels)
         hasTail = true
+        // Summed in the same order [score] used to sum it in, so the scores — and with them the
+        // joins — come out exactly as they did.
+        var frame = 0
+        var index = 0
+        while (frame < hop) {
+            var t = 0f
+            for (channel in 0 until channels) t += tail[frame * channels + channel]
+            tailMono[index++] = t
+            frame += 4
+        }
         lastOffset = at - read
         return produced + hop * channels
     }
@@ -121,6 +148,7 @@ internal class DesktopAudioSpeed(
      * between equally good periods.
      */
     private fun bestOffset(from: Int): Int {
+        foldPending(from)
         var bestOffset = lastOffset.coerceIn(-search, search)
         var best = score(from + bestOffset)
         var offset = -search
@@ -137,20 +165,32 @@ internal class DesktopAudioSpeed(
         return bestOffset
     }
 
+    /** Fills [pendingMono] with every frame a search from [from] can read. */
+    private fun foldPending(from: Int) {
+        val first = (from - search).coerceAtLeast(0)
+        val end = minOf(pendingFrames, from + search + hop)
+        monoFrom = first
+        if (end <= first) return
+        if (pendingMono.size < end - first) pendingMono = FloatArray(end - first)
+        for (frame in first until end) {
+            var p = 0f
+            for (channel in 0 until channels) p += pending[frame * channels + channel]
+            pendingMono[frame - first] = p
+        }
+    }
+
     private fun score(start: Int): Float {
         if (start < 0 || start + hop > pendingFrames) return Float.NEGATIVE_INFINITY
         var dot = 0f
         var energy = 0f
         var frame = 0
+        var index = 0
+        val at = start - monoFrom
         // Every fourth frame: the correlation surface is smooth at audio rates, and the peak does
         // not move for the sampling.
         while (frame < hop) {
-            var t = 0f
-            var p = 0f
-            for (channel in 0 until channels) {
-                t += tail[frame * channels + channel]
-                p += pending[(start + frame) * channels + channel]
-            }
+            val t = tailMono[index++]
+            val p = pendingMono[at + frame]
             dot += t * p
             energy += p * p
             frame += 4

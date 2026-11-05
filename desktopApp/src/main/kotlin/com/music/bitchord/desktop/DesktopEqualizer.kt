@@ -62,6 +62,27 @@ internal class DesktopEqualizer {
     private val activeSlots = IntArray(EqLayout.SLOTS)
     private val running = BooleanArray(EqLayout.SLOTS)
 
+    /**
+     * What each slot's coefficients were last worked out from — NaN until they have been, and
+     * again whenever the stream changes. A curve at rest is the same gains and Qs block after
+     * block, and a `pow`, a `tan` and a square root per section every 64 frames is an answer that
+     * has not changed.
+     */
+    private val coefficientsGainDb = FloatArray(EqLayout.SLOTS) { Float.NaN }
+    private val coefficientsQ = FloatArray(EqLayout.SLOTS) { Float.NaN }
+    private var channelGainPreampDb = Float.NaN
+    private var channelGainBalance = Float.NaN
+
+    /**
+     * The target the last glide went towards, and whether that glide moved nothing. The glide is a
+     * fixed sum of where things are and where they are going, so once a step towards a target
+     * leaves every value where it was, every later step towards that same target does too — and
+     * each one is ten logarithm pairs and an exponential that can be skipped.
+     */
+    private var glidedCurve: EqCurve? = null
+    private var glidedBalance = Float.NaN
+    private var glideStill = false
+
     /** Two integrator states per section, per channel. */
     private var state = FloatArray(0)
 
@@ -88,6 +109,11 @@ internal class DesktopEqualizer {
         state = FloatArray(this.channels * EqLayout.SLOTS * 2)
         channelGain = FloatArray(this.channels) { 1f }
         running.fill(false)
+        // Worked out for another rate, or for a gain array that is no longer there.
+        coefficientsGainDb.fill(Float.NaN)
+        coefficientsQ.fill(Float.NaN)
+        channelGainPreampDb = Float.NaN
+        channelGainBalance = Float.NaN
         limiter.configure(sampleRate)
         snapToTarget()
     }
@@ -161,18 +187,33 @@ internal class DesktopEqualizer {
         tuning.curve.qs.copyInto(currentQ)
         currentPreampDb = tuning.curve.preampDb
         currentBalance = tuning.balance
+        // Moved by something other than a glide: the next one has to be taken to know.
+        glideStill = false
     }
 
     private fun glideTowards(tuning: Tuning) {
+        // Compared by instance: the engine hands over the same curve block after block until the
+        // listener changes it, and a new curve, equal or not, is simply glided towards again.
+        if (glideStill && tuning.curve === glidedCurve && tuning.balance.toRawBits() == glidedBalance.toRawBits()) return
+        var moved = false
         for (slot in 0 until EqLayout.SLOTS) {
             // Decibels, not linear gain: it is the perceptual unit, and it puts the resting point
             // at zero so a band crossing from cut to boost passes through flat.
-            currentGainDb[slot] = linearGlide(currentGainDb[slot], tuning.curve.gainsDb[slot])
+            val gain = linearGlide(currentGainDb[slot], tuning.curve.gainsDb[slot])
             // Q the other way round — a bandwidth halves and doubles, it does not step.
-            currentQ[slot] = geometricGlide(currentQ[slot], tuning.curve.qs[slot])
+            val q = geometricGlide(currentQ[slot], tuning.curve.qs[slot])
+            if (gain.toRawBits() != currentGainDb[slot].toRawBits() || q.toRawBits() != currentQ[slot].toRawBits()) moved = true
+            currentGainDb[slot] = gain
+            currentQ[slot] = q
         }
-        currentPreampDb = linearGlide(currentPreampDb, tuning.curve.preampDb)
-        currentBalance = linearGlide(currentBalance, tuning.balance)
+        val preamp = linearGlide(currentPreampDb, tuning.curve.preampDb)
+        val balance = linearGlide(currentBalance, tuning.balance)
+        if (preamp.toRawBits() != currentPreampDb.toRawBits() || balance.toRawBits() != currentBalance.toRawBits()) moved = true
+        currentPreampDb = preamp
+        currentBalance = balance
+        glidedCurve = tuning.curve
+        glidedBalance = tuning.balance
+        glideStill = !moved
     }
 
     private fun linearGlide(current: Float, target: Float): Float =
@@ -223,9 +264,18 @@ internal class DesktopEqualizer {
     }
 
     private fun updateCoefficients(slot: Int) {
+        val gainDb = currentGainDb[slot]
+        val rawQ = currentQ[slot]
+        if (gainDb.toRawBits() == coefficientsGainDb[slot].toRawBits() &&
+            rawQ.toRawBits() == coefficientsQ[slot].toRawBits()
+        ) {
+            return
+        }
+        coefficientsGainDb[slot] = gainDb
+        coefficientsQ[slot] = rawQ
         val spec = EqLayout.slots[slot]
-        val a = 10f.pow(currentGainDb[slot] / 40f)
-        val q = currentQ[slot].coerceAtLeast(MIN_Q)
+        val a = 10f.pow(gainDb / 40f)
+        val q = rawQ.coerceAtLeast(MIN_Q)
         val base = tan(PI * usableFrequency(spec.frequencyHz) / sampleRate).toFloat()
         val g: Float
         val k: Float
@@ -263,6 +313,13 @@ internal class DesktopEqualizer {
         hz.coerceIn(MIN_HZ, sampleRate * MAX_FREQUENCY_FRACTION)
 
     private fun prepareChannelGains() {
+        if (currentPreampDb.toRawBits() == channelGainPreampDb.toRawBits() &&
+            currentBalance.toRawBits() == channelGainBalance.toRawBits()
+        ) {
+            return
+        }
+        channelGainPreampDb = currentPreampDb
+        channelGainBalance = currentBalance
         val preamp = 10f.pow(currentPreampDb / 20f)
         if (channels == 2) {
             // Attenuate the far side rather than lift the near one: a balance that made things

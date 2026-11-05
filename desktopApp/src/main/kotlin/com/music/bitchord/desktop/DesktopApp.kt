@@ -640,15 +640,10 @@ fun BitChordDesktopApp() {
     var moodGenreReloads by remember { mutableStateOf(0) }
     var moodGenreShelves by remember { mutableStateOf<UiState<List<HomeShelf>>>(UiState.Loading) }
     var selectedSong by remember { mutableStateOf<Song?>(null) }
+    // Last time's queue, history, likes and the rest: read ahead in main(), see DesktopSavedState.
+    val saved = remember { DesktopSavedState.take(persistence) }
     // The live queue: what is playing, what played before it, what is next.
-    var liveQueue by remember {
-        mutableStateOf(
-            DesktopQueue.restored(
-                persistence.queue(),
-                persistence.string("queue_index", "0").toIntOrNull() ?: 0,
-            ),
-        )
-    }
+    var liveQueue by remember { mutableStateOf(DesktopQueue.restored(saved.queue, saved.queueIndex)) }
     // The order the queue was in before shuffle rearranged it, so the toggle can be undone.
     var preShuffleOrder by remember { mutableStateOf<List<String>>(emptyList()) }
     // One party AutoPlay top-up at a time; see topUpPartyAutoplay.
@@ -657,16 +652,16 @@ fun BitChordDesktopApp() {
     // What was played on this computer. The account's own history replaces it
     // while signed in — see [remoteHistory] — because that is what Android's
     // History screen is and what makes a phone and a desktop agree.
-    var history by remember { mutableStateOf(persistence.history()) }
+    var history by remember { mutableStateOf(saved.history) }
     var remoteHistory by remember { mutableStateOf<List<Song>>(emptyList()) }
     /** For each track of [remoteHistory], the token that takes it out of the account's history. */
     var remoteHistoryTokens by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var likedIds by remember { mutableStateOf(persistence.likedIds()) }
+    var likedIds by remember { mutableStateOf(saved.likedIds) }
     // In-flight tail of the Liked Music chain; replaced whenever the library is fetched again.
     var likedSyncJob by remember { mutableStateOf<Job?>(null) }
-    var dislikedIds by remember { mutableStateOf(persistence.dislikedIds()) }
+    var dislikedIds by remember { mutableStateOf(saved.dislikedIds) }
     val overlays = remember { DesktopOverlays() }
-    var downloads by remember { mutableStateOf(persistence.downloads()) }
+    var downloads by remember { mutableStateOf(saved.downloads) }
     var localSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
     // Which tracks are downloading, not how far along they are: the progress moves on with every
     // 8 KB that arrives, and read here it recomposed the whole window on every frame for as long as
@@ -674,7 +669,7 @@ fun BitChordDesktopApp() {
     val downloadInProgress by remember {
         DesktopDownloadQueue.active.map { it.keys }.distinctUntilChanged()
     }.collectAsState(DesktopDownloadQueue.active.value.keys)
-    var playlists by remember { mutableStateOf(persistence.playlists()) }
+    var playlists by remember { mutableStateOf(saved.playlists) }
     var statsRevision by remember { mutableStateOf(0L) }
     var replayPeriod by remember { mutableStateOf(DesktopReplayPeriod.ALL_TIME) }
     val replayHolder = remember { DesktopAccounts.active()?.name.orEmpty() }

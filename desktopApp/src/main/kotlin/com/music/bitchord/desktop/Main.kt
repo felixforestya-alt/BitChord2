@@ -50,6 +50,8 @@ fun main() {
     // A frozen window or a crash leaves its reason in the log — see [DesktopHangWatch].
     DesktopHangWatch.start()
     DesktopSchedulingBoost.keepOutOfThrottling()
+    // Last time's queue, likes and playlists, decoded while the window comes up.
+    DesktopSavedState.start()
     // The graphics API Skia draws through — OpenGL unless set otherwise, see DesktopGraphicsSettings.
     DesktopGraphicsSettings.apply()
     DesktopFramePacing.prepare()

@@ -24,6 +24,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -1376,21 +1377,7 @@ internal fun MarqueeText(
             }
 
             val offsetX = remember { Animatable(0f) }
-            LaunchedEffect(text, travelPx, startDelayMillis) {
-                offsetX.snapTo(0f)
-                if (travelPx <= 0) return@LaunchedEffect
-                val pxPerMs = with(density) { MARQUEE_DP_PER_SEC.dp.toPx() } / 1000f
-                val scrollMs = (travelPx / pxPerMs).roundToInt().coerceAtLeast(400)
-                delay(startDelayMillis)
-                while (true) {
-                    offsetX.animateTo(-travelPx.toFloat(), tween(scrollMs, easing = LinearEasing))
-                    // Invisible: the trailing copy has arrived at the leading
-                    // one's starting mark, so the line is already back where
-                    // this puts it.
-                    offsetX.snapTo(0f)
-                    delay(MARQUEE_REST_MS)
-                }
-            }
+            MarqueeCrawl(offsetX, text, travelPx, startDelayMillis)
 
             Row(
                 // Measured unbounded so the copies actually lay out at their
@@ -1408,6 +1395,54 @@ internal fun MarqueeText(
                     MarqueeLine(text = text, style = style, color = color)
                 }
             }
+        }
+    }
+}
+
+/**
+ * Where a marquee's crawl has got to, kept across a spell out of sight: whether it has set off,
+ * and whether it was resting between laps. New words or a new width start a new one.
+ */
+private class MarqueeProgress {
+    var setOff = false
+    var resting = false
+}
+
+/**
+ * The crawl of [MarqueeText] and [ArtistCreditsMarquee]: after [startDelayMillis], one lap of
+ * [travelPx] at the marquee's pace, a rest of [MARQUEE_REST_MS], and round again.
+ *
+ * Held where it is while nobody can see the window (see AppActivity), as everything else that
+ * moves on its own is: with the player open behind a game it asked for a frame of the whole window
+ * at the display's rate, for as long as a long title was playing. Back in sight it carries on
+ * from where it stopped, at the same pace — the rest of a lap, or a whole rest if it was resting.
+ */
+@Composable
+private fun MarqueeCrawl(offsetX: Animatable<Float, AnimationVector1D>, text: String, travelPx: Int, startDelayMillis: Long) {
+    val density = LocalDensity.current
+    val progress = remember(text, travelPx, startDelayMillis) { MarqueeProgress() }
+    val quiet = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(progress, quiet) {
+        if (!progress.setOff) offsetX.snapTo(0f)
+        if (travelPx <= 0 || quiet) return@LaunchedEffect
+        val pxPerMs = with(density) { MARQUEE_DP_PER_SEC.dp.toPx() } / 1000f
+        val scrollMs = (travelPx / pxPerMs).roundToInt().coerceAtLeast(400)
+        if (!progress.setOff) {
+            delay(startDelayMillis)
+            progress.setOff = true
+        } else if (progress.resting) {
+            delay(MARQUEE_REST_MS)
+        }
+        while (true) {
+            progress.resting = false
+            // All of a lap, unless the window went out of sight partway through one.
+            val left = 1f + offsetX.value / travelPx
+            offsetX.animateTo(-travelPx.toFloat(), tween((scrollMs * left).roundToInt().coerceAtLeast(1), easing = LinearEasing))
+            // Invisible: the trailing copy has arrived at the leading one's starting mark, so the
+            // line is already back where this puts it.
+            offsetX.snapTo(0f)
+            progress.resting = true
+            delay(MARQUEE_REST_MS)
         }
     }
 }
@@ -1489,20 +1524,8 @@ internal fun ArtistCreditsMarquee(
             }
 
             val offsetX = remember { Animatable(0f) }
-            LaunchedEffect(text, travelPx, startDelayMillis) {
-                offsetX.snapTo(0f)
-                if (travelPx <= 0) return@LaunchedEffect
-                val pxPerMs = with(density) { MARQUEE_DP_PER_SEC.dp.toPx() } / 1000f
-                val scrollMs = (travelPx / pxPerMs).roundToInt().coerceAtLeast(400)
-                delay(startDelayMillis)
-                while (true) {
-                    offsetX.animateTo(-travelPx.toFloat(), tween(scrollMs, easing = LinearEasing))
-                    // Invisible, for the reason the single-line version's is: the
-                    // trailing copy has arrived where the leading one started.
-                    offsetX.snapTo(0f)
-                    delay(MARQUEE_REST_MS)
-                }
-            }
+            // The same crawl as the single-line version's, step for step.
+            MarqueeCrawl(offsetX, text, travelPx, startDelayMillis)
 
             Row(
                 modifier = Modifier

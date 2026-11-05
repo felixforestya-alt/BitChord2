@@ -121,18 +121,24 @@ internal class DesktopEqualizer {
             val active = prepareSections()
             prepareChannelGains()
 
-            var at = index
             val end = index + block_
+            // A section at a time across the sub-block, rather than every section for each sample
+            // in turn: its coefficients and its two integrators stay in registers for the 64
+            // frames instead of being read from and written back to their arrays on every sample of
+            // every section. Each sample still meets the sections in the same order and each
+            // section its samples in time order, with the same arithmetic, so the result is the
+            // same to the last bit.
+            for (slot in 0 until active) {
+                filterSection(block, index, end, activeSlots[slot])
+            }
+
+            var at = index
             while (at < end) {
                 val frameStart = at
                 var peak = 0f
                 for (channel in 0 until channels) {
                     if (at >= end) break
-                    var sample = block[at]
-                    for (slot in 0 until active) {
-                        sample = section(activeSlots[slot], channel, sample)
-                    }
-                    sample *= channelGain[channel]
+                    val sample = block[at] * channelGain[channel]
                     block[at] = sample
                     if (abs(sample) > peak) peak = abs(sample)
                     at++
@@ -270,16 +276,77 @@ internal class DesktopEqualizer {
 
     // ---- Filter ------------------------------------------------------------
 
-    private fun section(slot: Int, channel: Int, input: Float): Float {
-        val i = (channel * EqLayout.SLOTS + slot) * 2
-        val ic1 = state[i]
-        val ic2 = state[i + 1]
-        val v3 = input - ic2
-        val v1 = coeffA1[slot] * ic1 + coeffA2[slot] * v3
-        val v2 = ic2 + coeffA2[slot] * ic1 + coeffA3[slot] * v3
-        state[i] = 2f * v1 - ic1
-        state[i + 1] = 2f * v2 - ic2
-        return mixInput[slot] * input + mixBand[slot] * v1 + mixLow[slot] * v2
+    /** Runs one section over the interleaved samples of [block] from [from] until [end], in place. */
+    private fun filterSection(block: FloatArray, from: Int, end: Int, slot: Int) {
+        val a1 = coeffA1[slot]
+        val a2 = coeffA2[slot]
+        val a3 = coeffA3[slot]
+        val m0 = mixInput[slot]
+        val m1 = mixBand[slot]
+        val m2 = mixLow[slot]
+        if (channels == 2) {
+            // Both sides in one loop: each side's integrators depend on its previous sample, so a
+            // side alone is one long chain of dependent arithmetic; two side by side keep the
+            // processor busy with one while the other waits.
+            val left = slot * 2
+            val right = (EqLayout.SLOTS + slot) * 2
+            var l1 = state[left]
+            var l2 = state[left + 1]
+            var r1 = state[right]
+            var r2 = state[right + 1]
+            var at = from
+            while (at + 1 < end) {
+                val inL = block[at]
+                val v3L = inL - l2
+                val v1L = a1 * l1 + a2 * v3L
+                val v2L = l2 + a2 * l1 + a3 * v3L
+                l1 = 2f * v1L - l1
+                l2 = 2f * v2L - l2
+                block[at] = m0 * inL + m1 * v1L + m2 * v2L
+                val inR = block[at + 1]
+                val v3R = inR - r2
+                val v1R = a1 * r1 + a2 * v3R
+                val v2R = r2 + a2 * r1 + a3 * v3R
+                r1 = 2f * v1R - r1
+                r2 = 2f * v2R - r2
+                block[at + 1] = m0 * inR + m1 * v1R + m2 * v2R
+                at += 2
+            }
+            if (at < end) {
+                // A block cut off after its left sample.
+                val inL = block[at]
+                val v3L = inL - l2
+                val v1L = a1 * l1 + a2 * v3L
+                val v2L = l2 + a2 * l1 + a3 * v3L
+                l1 = 2f * v1L - l1
+                l2 = 2f * v2L - l2
+                block[at] = m0 * inL + m1 * v1L + m2 * v2L
+            }
+            state[left] = l1
+            state[left + 1] = l2
+            state[right] = r1
+            state[right + 1] = r2
+            return
+        }
+        // [from] is always on a frame boundary, so the channel of each sample is its offset.
+        for (channel in 0 until channels) {
+            val i = (channel * EqLayout.SLOTS + slot) * 2
+            var ic1 = state[i]
+            var ic2 = state[i + 1]
+            var at = from + channel
+            while (at < end) {
+                val input = block[at]
+                val v3 = input - ic2
+                val v1 = a1 * ic1 + a2 * v3
+                val v2 = ic2 + a2 * ic1 + a3 * v3
+                ic1 = 2f * v1 - ic1
+                ic2 = 2f * v2 - ic2
+                block[at] = m0 * input + m1 * v1 + m2 * v2
+                at += channels
+            }
+            state[i] = ic1
+            state[i + 1] = ic2
+        }
     }
 
     private fun clearState(slot: Int) {

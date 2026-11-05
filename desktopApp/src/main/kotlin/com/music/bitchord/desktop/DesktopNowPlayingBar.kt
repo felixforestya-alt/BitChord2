@@ -106,9 +106,6 @@ internal fun DesktopNowPlayingBar(
 ) {
     val palette = rememberVividPalette(song.thumbnailUrl)
     val accent by animateColorAsState(palette.vivid, tween(1_200), label = "barAccent")
-    // The seek bar moves with every frame the display shows while something is playing, and
-    // rests otherwise.
-    val clock = rememberFrameClock(isPlaying)
     // A pill, like the drop the top player becomes.
     val barShape = RoundedCornerShape(BAR_CORNER)
     val tinted by DesktopStyleSettings.barTinted.collectAsState()
@@ -201,7 +198,6 @@ internal fun DesktopNowPlayingBar(
                 position = position,
                 durationMs = durationMs,
                 isPlaying = isPlaying,
-                clock = { clock.floatValue },
                 accent = accent,
                 onSeek = onSeek,
             )
@@ -256,7 +252,6 @@ internal fun DesktopHeroTransport(
 ) {
     val palette = rememberVividPalette(song.thumbnailUrl)
     val accent by animateColorAsState(palette.vivid, tween(1_200), label = "heroTransportAccent")
-    val clock = rememberFrameClock(isPlaying)
     val lastAudible = remember { mutableFloatStateOf(volume.takeIf { it > 0.005f } ?: 0.6f) }
     LaunchedEffect(volume) { if (volume > 0.005f) lastAudible.floatValue = volume }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -273,7 +268,6 @@ internal fun DesktopHeroTransport(
                 position = position,
                 durationMs = durationMs,
                 isPlaying = isPlaying,
-                clock = { clock.floatValue },
                 accent = accent,
                 onSeek = onSeek,
             )

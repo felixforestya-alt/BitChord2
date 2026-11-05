@@ -1830,13 +1830,20 @@ private fun AmbientArtwork(url: String?, modifier: Modifier) {
 
 // ---- Shared with the bottom bar --------------------------------------------------------------
 
-/** A seek bar that runs on the frame clock between playhead reports, and seeks on release. */
+/**
+ * A seek bar that runs on between playhead reports, and seeks on release.
+ *
+ * It asks for a frame only when its end has moved far enough to show: an eighth of a pixel.
+ * Driven by every frame of the display, a four-minute track on a bar a thousand pixels wide
+ * redrew the whole window, glass and blur and all, 180 times a second to move its end four
+ * pixels — on a second screen beside a game, that was the player's whole cost. An eighth of a
+ * pixel is below what antialiasing can show, so the bar moves as smoothly as it did.
+ */
 @Composable
 internal fun DesktopSeekBar(
     position: PlaybackPosition,
     durationMs: Long,
     isPlaying: Boolean,
-    clock: () -> Float,
     accent: Color,
     onSeek: (Long) -> Unit,
 ) {
@@ -1846,6 +1853,21 @@ internal fun DesktopSeekBar(
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     val thickness by animateDpAsState(if (hovered || dragging != null) 7.dp else 4.dp, spring(Spring.DampingRatioMediumBouncy), label = "scrub")
+    // The bar's length in pixels, as last laid out: only the stepping below reads it.
+    val length = remember { FloatArray(1) }
+    val step = remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val quiet = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(isPlaying, quiet, position, durationMs) {
+        if (!isPlaying || quiet || !position.advancing || durationMs <= 0L) return@LaunchedEffect
+        while (true) {
+            // How long the end takes to cover an eighth of a pixel; shorter than a frame on a
+            // short track or a wide bar, and then it steps every frame as before.
+            val px = length[0]
+            val waitMs = if (px > 0f) durationMs / (px * 8f) else 250f
+            if (waitMs >= 8f) delay(waitMs.toLong())
+            com.music.bitchord.ui.awaitAmbientFrame { step.intValue++ }
+        }
+    }
 
     fun liveFraction(): Float {
         val d = duration.takeIf { it > 0 } ?: return 0f
@@ -1883,9 +1905,10 @@ internal fun DesktopSeekBar(
                     }
                 },
         ) {
-            clock()
+            step.intValue
             val f = liveFraction()
             val h = thickness.toPx()
+            length[0] = size.width - h
             val y = size.height / 2f
             drawLine(Color.White.copy(alpha = 0.22f), Offset(h / 2, y), Offset(size.width - h / 2, y), h, StrokeCap.Round)
             if (f > 0f) {

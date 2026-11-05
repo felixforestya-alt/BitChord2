@@ -1,0 +1,6 @@
+build/
+.gradle/
+.kotlin/
+harness-logic/src/main/kotlin/repo/
+harness-logic/src/main/kotlin/baseline/
+harness-logic/src/test/kotlin/repo/

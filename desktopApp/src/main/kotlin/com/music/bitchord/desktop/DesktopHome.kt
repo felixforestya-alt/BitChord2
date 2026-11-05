@@ -161,11 +161,16 @@ internal fun DesktopHomeHeader(
     // without end: a sweep that never stops redraws the whole window on every frame of the
     // display for as long as Home is open, with nothing else on it moving.
     val sweepAnim = remember { Animatable(0f) }
-    LaunchedEffect(Unit) {
+    // And not while nobody can see the window (see AppActivity): it holds where it is, and on the
+    // way back carries on from there at the same pace.
+    val quiet = com.music.bitchord.ui.AppActivity.quiet
+    LaunchedEffect(quiet) {
+        if (quiet) return@LaunchedEffect
         while (true) {
-            sweepAnim.snapTo(0f)
-            sweepAnim.animateTo(1f, tween(4_000, easing = LinearEasing))
+            val left = 1f - sweepAnim.value
+            if (left > 0f) sweepAnim.animateTo(1f, tween((4_000 * left).toInt().coerceAtLeast(1), easing = LinearEasing))
             delay(20_000)
+            sweepAnim.snapTo(0f)
         }
     }
     val entrance = remember { Animatable(0f) }

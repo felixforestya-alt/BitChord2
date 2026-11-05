@@ -69,8 +69,8 @@ internal object DesktopEqualizerSettings {
     fun setTone(x: Int, y: Int) {
         _toneX.value = clampStep(x)
         _toneY.value = clampStep(y)
-        persistence.saveString(KEY_TONE_X, _toneX.value.toString())
-        persistence.saveString(KEY_TONE_Y, _toneY.value.toString())
+        persistence.saveStringSoon(KEY_TONE_X, _toneX.value.toString())
+        persistence.saveStringSoon(KEY_TONE_Y, _toneY.value.toString())
     }
 
     fun setFocused(value: Boolean) {
@@ -80,7 +80,7 @@ internal object DesktopEqualizerSettings {
 
     fun setBalance(value: Float) {
         _balance.value = value.coerceIn(-1f, 1f)
-        persistence.saveString(KEY_BALANCE, _balance.value.toString())
+        persistence.saveStringSoon(KEY_BALANCE, _balance.value.toString())
     }
 
     /**
@@ -94,7 +94,7 @@ internal object DesktopEqualizerSettings {
         }
         _bands.value = clamped
         _preset.value = EqualizerPreset.matching(clamped)
-        persistence.saveString(KEY_BANDS, clamped.joinToString(","))
+        persistence.saveStringSoon(KEY_BANDS, clamped.joinToString(","))
     }
 
     /** Applies a preset's curve. [EqualizerPreset.CUSTOM] carries none, so it does nothing. */

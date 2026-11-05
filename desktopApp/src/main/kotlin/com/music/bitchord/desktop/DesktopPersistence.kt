@@ -76,11 +76,13 @@ class DesktopPersistence {
 
     fun history(): List<Song> = readSongs(KEY_HISTORY)
 
-    fun saveHistory(songs: List<Song>) = writeSongs(KEY_HISTORY, songs.take(MAX_HISTORY))
+    /** Written off the calling thread — see [DesktopPreferenceWriter]: every track change saves it. */
+    fun saveHistory(songs: List<Song>) = writeSongsSoon(KEY_HISTORY, songs.take(MAX_HISTORY))
 
     fun queue(): List<Song> = readSongs(KEY_QUEUE)
 
-    fun saveQueue(songs: List<Song>) = writeSongs(KEY_QUEUE, songs.take(MAX_QUEUE))
+    /** Written off the calling thread — see [DesktopPreferenceWriter]: every track change saves it. */
+    fun saveQueue(songs: List<Song>) = writeSongsSoon(KEY_QUEUE, songs.take(MAX_QUEUE))
 
     /** Tracks pinned to YouTube's own upload — see [DesktopOriginalVersion]. */
     internal fun originalVersionIds(): Set<String> = readLines(KEY_ORIGINAL_VERSIONS).toSet()
@@ -204,10 +206,19 @@ class DesktopPersistence {
     }
 
     fun string(key: String, default: String = ""): String =
-        DesktopPreferenceChunks.read(preferences, key) ?: default
+        DesktopPreferenceWriter.waiting(preferences, key)
+            ?: DesktopPreferenceChunks.read(preferences, key)
+            ?: default
 
     fun saveString(key: String, value: String) =
         DesktopPreferenceChunks.write(preferences, key, value)
+
+    /**
+     * [saveString] off the calling thread, for what is saved many times a second while a control
+     * is dragged — see [DesktopPreferenceWriter]. Every save of [key] has to come through here.
+     */
+    fun saveStringSoon(key: String, value: String) =
+        DesktopPreferenceWriter.save(preferences, key) { value }
 
     /** A configured module index, when one is still set up. */
     fun moduleIndexUrl(): String =
@@ -232,8 +243,12 @@ class DesktopPersistence {
     private fun writeSongs(key: String, songs: List<Song>) =
         writeLines(key, songs.map(::encodeSong))
 
+    /** Encoded on the writing thread too: [songs] is a copy, and a [Song] does not change. */
+    private fun writeSongsSoon(key: String, songs: List<Song>) =
+        DesktopPreferenceWriter.save(preferences, key) { songs.joinToString("\n", transform = ::encodeSong) }
+
     private fun readLines(key: String): List<String> =
-        DesktopPreferenceChunks.read(preferences, key).orEmpty()
+        (DesktopPreferenceWriter.waiting(preferences, key) ?: DesktopPreferenceChunks.read(preferences, key)).orEmpty()
             .split('\n')
             .filter(String::isNotBlank)
 

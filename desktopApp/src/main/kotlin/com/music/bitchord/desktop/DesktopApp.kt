@@ -903,7 +903,7 @@ fun BitChordDesktopApp() {
         // after a process restart.
         if (DesktopListenTogether.state.value.inParty) return
         persistence.saveQueue(liveQueue.songs)
-        persistence.saveString("queue_index", liveQueue.index.toString())
+        persistence.saveStringSoon("queue_index", liveQueue.index.toString())
     }
 
     /** Opens whatever the queue is currently pointing at. */
@@ -2069,7 +2069,7 @@ fun BitChordDesktopApp() {
             },
             onVolumeChanged = { value ->
                 volume = value.toFloat().coerceIn(0.0f, 1.0f)
-                persistence.saveString("volume", volume.toString())
+                persistence.saveStringSoon("volume", volume.toString())
             },
             onSeek = { positionMs ->
                 if (!DesktopListenTogether.state.value.controlsLocked) {
@@ -3618,7 +3618,7 @@ fun BitChordDesktopApp() {
         DesktopPlayerHost.volumeLevel.value = volume
         DesktopPlayerHost.onVolumeChange = {
             volume = it
-            persistence.saveString("volume", it.toString())
+            persistence.saveStringSoon("volume", it.toString())
         }
     }
 
@@ -3799,7 +3799,7 @@ fun BitChordDesktopApp() {
             },
             onVolumeChange = {
                 volume = it
-                persistence.saveString("volume", it.toString())
+                persistence.saveStringSoon("volume", it.toString())
             },
             onOpenLyrics = { overlays.toggleSidePanel(DesktopSidePanel.LYRICS) },
             onOpenQueue = { overlays.toggleSidePanel(DesktopSidePanel.QUEUE) },
@@ -3834,7 +3834,7 @@ fun BitChordDesktopApp() {
             },
             onVolumeChange = {
                 volume = it
-                persistence.saveString("volume", it.toString())
+                persistence.saveStringSoon("volume", it.toString())
             },
         )
     }
@@ -4355,7 +4355,7 @@ fun BitChordDesktopApp() {
                         onOpenNowPlaying = { overlays.nowPlaying = true },
                         onVolumeChange = {
                             volume = it
-                            persistence.saveString("volume", it.toString())
+                            persistence.saveStringSoon("volume", it.toString())
                         },
                         onOpenAudioOutput = { overlays.audioOutput = true },
                         // A second click on the same button puts the column away, as in Apple Music.
@@ -4573,7 +4573,7 @@ fun BitChordDesktopApp() {
                                 onToggleLike = { toggleLike(current) },
                                 onVolumeChange = {
                                     volume = it
-                                    persistence.saveString("volume", it.toString())
+                                    persistence.saveStringSoon("volume", it.toString())
                                 },
                                 onCollapse = {
                                     DesktopWindowMode.exit()

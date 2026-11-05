@@ -24,7 +24,7 @@ internal object DesktopSpeedControl {
         val speed = value.coerceIn(MIN, MAX)
         if (speed == _speed.value) return
         _speed.value = speed
-        persistence.saveString(KEY, speed.toString())
+        persistence.saveStringSoon(KEY, speed.toString())
     }
 
     /**

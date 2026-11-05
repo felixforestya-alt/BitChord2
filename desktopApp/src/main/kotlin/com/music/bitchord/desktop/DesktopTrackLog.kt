@@ -43,7 +43,11 @@ internal object DesktopTrackLog {
     }, "bitchord-log").apply {
         isDaemon = true
         priority = Thread.MIN_PRIORITY
-        Runtime.getRuntime().addShutdownHook(Thread({ drain() }, "bitchord-log-exit"))
+        // Only an orderly exit gets here, so a log that stops without this line was killed or crashed.
+        Runtime.getRuntime().addShutdownHook(Thread({
+            log("exiting in an orderly way")
+            drain()
+        }, "bitchord-log-exit"))
         start()
     }
 

@@ -1013,7 +1013,10 @@ private fun SweptLyricLine(
         }
         Text(
             text = line.text,
-            style = style,
+            // No shadow of its own: the dim copy beneath already lays the line's shadow, the
+            // whole length of it. Drawn again here, clipped to what is lit, it doubled under the
+            // sung words and ended at the sweep and at the row's top in a hard-edged dark box.
+            style = if (style.shadow != null) style.copy(shadow = null) else style,
             color = color,
             maxLines = maxLines,
             overflow = overflow,
@@ -3329,6 +3332,8 @@ fun KaraokeLyricLine(
             overflow = TextOverflow.Ellipsis,
             glowAlpha = glowAlpha,
             rise = false,
+            // A single line on its own: its light runs out softly ahead of the voice.
+            feather = true,
         )
     } else {
         Text(line.text, style = style, color = Color.White, maxLines = maxLines, overflow = TextOverflow.Ellipsis, modifier = modifier)

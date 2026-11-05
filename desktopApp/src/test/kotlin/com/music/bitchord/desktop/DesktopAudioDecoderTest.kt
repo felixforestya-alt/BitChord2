@@ -1,13 +1,16 @@
 package com.music.bitchord.desktop
 
+import com.sun.net.httpserver.HttpServer
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.net.InetSocketAddress
 import javax.sound.sampled.AudioFileFormat
 import javax.sound.sampled.AudioFormat
 import javax.sound.sampled.AudioInputStream
 import javax.sound.sampled.AudioSystem
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.roundToLong
 import kotlin.math.sin
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -137,6 +140,42 @@ class DesktopAudioDecoderTest {
         // And a decoder that never opened reads nothing rather than crashing.
         assertNull(decoder.read())
         decoder.close()
+    }
+
+    @Test
+    fun `more windowed streams than JavaCPP has callback slots open and stay apart`() {
+        // Each path a different length, so a reader crossed with another would show in its duration.
+        fun wavOf(tenths: Int): ByteArray = tone(seconds = tenths / 10.0, rate = 44_100, hz = 440.0).readBytes()
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { exchange ->
+            val wav = wavOf(exchange.requestURI.path.removePrefix("/").toInt())
+            val (from, asked) = exchange.requestHeaders.getFirst("Range").removePrefix("bytes=").split("-").map { it.toInt() }
+            val to = minOf(asked, wav.size - 1)
+            exchange.responseHeaders.add("Content-Range", "bytes $from-$to/${wav.size}")
+            val slice = wav.copyOfRange(from, to + 1)
+            exchange.sendResponseHeaders(206, slice.size.toLong())
+            exchange.responseBody.use { it.write(slice) }
+        }
+        server.start()
+        val open = mutableListOf<Pair<Int, DesktopAudioDecoder>>()
+        try {
+            for (tenths in 1..25) {
+                val decoder = DesktopAudioDecoder()
+                open += tenths to decoder
+                decoder.open(
+                    "http://127.0.0.1:${server.address.port}/$tenths",
+                    requested = DesktopPcmFormat(44_100, 2, 2),
+                    windowed = true,
+                ).getOrThrow()
+            }
+            for ((tenths, decoder) in open) {
+                assertEquals(tenths * 100_000L, assertNotNull(decoder.durationUs).toDouble().let { (it / 100_000).roundToLong() * 100_000L })
+                assertTrue(abs(tenths * 4_410 * 2 * 2 - decoder.readAll().size) <= 16)
+            }
+        } finally {
+            open.forEach { (_, decoder) -> decoder.close() }
+            server.stop(0)
+        }
     }
 
     private fun DesktopAudioDecoder.readAll(): ByteArray {

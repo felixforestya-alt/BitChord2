@@ -7,17 +7,14 @@ import com.sun.jna.WString
 import com.sun.jna.ptr.IntByReference
 
 /**
- * Asks Windows to schedule the app the way it does a game or a media player, so frames come out
- * evenly even with the rest of the machine busy: the process a step above ordinary programs, and
- * the thread that draws each frame registered with the Multimedia Class Scheduler (MMCSS) under
- * its "Games" task — which keeps that thread from being pushed off the CPU part-way through a
- * frame by background work. Each step is best effort; anything missing is skipped quietly.
+ * What the app asks of Windows' schedulers. It is meant to be light enough not to need more than
+ * this: the GPU's queue while it can be seen, the class for audio on the sound's thread, and the
+ * threads that matter kept out of power throttling. Each is best effort; what is missing is skipped.
  */
 internal object DesktopSchedulingBoost {
 
     private interface Kernel32 : Library {
         fun GetCurrentProcess(): Pointer
-        fun SetPriorityClass(process: Pointer, priorityClass: Int): Boolean
         fun GetCurrentThread(): Pointer
         fun SetProcessInformation(process: Pointer, infoClass: Int, info: Pointer, size: Int): Boolean
         fun SetThreadInformation(thread: Pointer, infoClass: Int, info: Pointer, size: Int): Boolean
@@ -57,6 +54,16 @@ internal object DesktopSchedulingBoost {
         }.onFailure { DesktopTrackLog.log("scheduling: power throttling unavailable: ${it.message}") }
     }
 
+    /**
+     * The whole process out of power throttling, once at start. Without it, a player on a second
+     * screen beside a game in front was background work to Windows: its threads moved to slow
+     * cores and its timers coarsened to the system tick, and it stuttered like a minimised window
+     * while in full view. No priority is raised: it is only kept from being slowed down.
+     */
+    fun keepOutOfThrottling() {
+        if (DesktopPlatform.isWindows) noPowerThrottling()
+    }
+
     /** The same, for the calling thread alone. */
     private fun noThreadPowerThrottling() {
         val kernel = kernel ?: return
@@ -74,75 +81,56 @@ internal object DesktopSchedulingBoost {
         fun AvSetMmThreadCharacteristicsW(task: WString, taskIndex: IntByReference): Pointer?
     }
 
-    private const val ABOVE_NORMAL_PRIORITY_CLASS = 0x00008000
-    private const val NORMAL_PRIORITY_CLASS = 0x00000020
     private const val GPU_PRIORITY_NORMAL = 2
     private const val GPU_PRIORITY_ABOVE_NORMAL = 3
     private const val GPU_PRIORITY_HIGH = 4
 
     @Volatile
-    private var inFront = true
+    private var gpuRaised = false
 
     /**
-     * Ahead of other programs only while the window is the one being used. Behind something else —
-     * a game, above all — the app goes back to an ordinary process's place on the CPU and the
-     * GPU: raised then, it took its frames out of the game's, and the two fought over the GPU
-     * with both of them stuttering. The sound is unaffected: its thread keeps its own priority.
+     * Ahead of a game on the GPU while the window can be seen, as on a second screen beside it: its
+     * frames are small and due every few milliseconds, and behind a game's large ones in the queue
+     * they came late, which is the disc stuttering. Out of sight it draws nothing and asks for
+     * nothing. The processor's priority stays an ordinary program's throughout.
      */
-    @Volatile
-    private var seen = true
-
-    /**
-     * [front]: the window is the one in use. [visible]: it can be seen at all. The processor's
-     * priority is raised only in front; the GPU's whenever the window can be seen — its frames are
-     * small and due every few milliseconds, and behind a game's large ones in the GPU's queue they
-     * came late, which is what made the disc stutter beside a game. Out of sight, nothing is raised.
-     */
-    fun setInFront(front: Boolean, visible: Boolean = front) {
-        if (!DesktopPlatform.isWindows || (front == inFront && visible == seen)) return
-        inFront = front
-        seen = visible
+    fun setSeen(seen: Boolean) {
+        if (!DesktopPlatform.isWindows || seen == gpuRaised) return
+        gpuRaised = seen
+        if (System.getenv("BITCHORD_GPU_ARM") == "normal") return
         runCatching {
             val kernel = Native.load("kernel32", Kernel32::class.java)
             val gdi = Native.load("gdi32", Gdi32::class.java)
             val process = kernel.GetCurrentProcess()
-            kernel.SetPriorityClass(process, if (front) ABOVE_NORMAL_PRIORITY_CLASS else NORMAL_PRIORITY_CLASS)
-            val gpu = if (visible) GPU_PRIORITY_HIGH else GPU_PRIORITY_NORMAL
-            if (gdi.D3DKMTSetProcessSchedulingPriorityClass(process, gpu) != 0 && visible) {
-                gdi.D3DKMTSetProcessSchedulingPriorityClass(process, GPU_PRIORITY_ABOVE_NORMAL)
+            val outcome = if (!seen) {
+                gdi.D3DKMTSetProcessSchedulingPriorityClass(process, GPU_PRIORITY_NORMAL)
+                "normal"
+            } else if (gdi.D3DKMTSetProcessSchedulingPriorityClass(process, GPU_PRIORITY_HIGH) == 0) {
+                "high"
+            } else if (gdi.D3DKMTSetProcessSchedulingPriorityClass(process, GPU_PRIORITY_ABOVE_NORMAL) == 0) {
+                "above normal"
+            } else {
+                "unchanged"
             }
-            DesktopTrackLog.log("scheduling: ${if (front) "in front" else "behind"}, ${if (visible) "seen" else "out of sight"}")
-        }.onFailure { DesktopTrackLog.log("scheduling: priority change failed: ${it.message}") }
-    }
-
-    /** Raises the whole process; call once at start. */
-    fun boostProcess() {
-        if (!DesktopPlatform.isWindows) return
-        runCatching {
-            val kernel = Native.load("kernel32", Kernel32::class.java)
-            kernel.SetPriorityClass(kernel.GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS)
-        }.onFailure { DesktopTrackLog.log("scheduling: process priority unavailable: ${it.message}") }
-        noPowerThrottling()
-    }
-
-    /**
-     * Ahead of ordinary programs on the GPU as well: a game or a video running alongside fills
-     * the GPU's queue, and this app's frames — small, and due every few milliseconds — waited
-     * behind its large ones. HIGH where Windows allows it, ABOVE_NORMAL otherwise.
-     */
-    fun boostGpu() {
-        if (!DesktopPlatform.isWindows) return
-        runCatching {
-            val kernel = Native.load("kernel32", Kernel32::class.java)
-            val gdi = Native.load("gdi32", Gdi32::class.java)
-            val process = kernel.GetCurrentProcess()
-            val high = gdi.D3DKMTSetProcessSchedulingPriorityClass(process, GPU_PRIORITY_HIGH)
-            val result = if (high == 0) "high" else {
-                val above = gdi.D3DKMTSetProcessSchedulingPriorityClass(process, GPU_PRIORITY_ABOVE_NORMAL)
-                if (above == 0) "above normal" else "unchanged (0x%08x)".format(above)
-            }
-            DesktopTrackLog.log("scheduling: GPU priority $result")
+            DesktopTrackLog.log("scheduling: GPU priority $outcome")
         }.onFailure { DesktopTrackLog.log("scheduling: GPU priority unavailable: ${it.message}") }
+    }
+
+    /**
+     * The sound's own thread, in the class Windows keeps for audio, so a game holding every core
+     * does not make it late with the device's next block. Out of power throttling as well: on a
+     * chip with efficiency cores it would otherwise be moved to them behind a game.
+     */
+    fun boostAudioThread() {
+        if (!DesktopPlatform.isWindows) return
+        noThreadPowerThrottling()
+        runCatching {
+            val avrt = com.sun.jna.NativeLibrary.getInstance("avrt")
+            val task = com.sun.jna.ptr.IntByReference(0)
+            val handle = avrt.getFunction("AvSetMmThreadCharacteristicsW")
+                .invokePointer(arrayOf(WString("Audio"), task))
+            DesktopTrackLog.log("scheduling: audio thread ${if (handle != null) "registered for audio" else "not registered"}")
+        }.onFailure { DesktopTrackLog.log("scheduling: audio thread not registered: ${it.message}") }
     }
 
     /**

@@ -195,6 +195,17 @@ internal object DesktopPlayerSettings : PlayerSettingsSource {
     )
     override val legacyMeshGradient = MutableStateFlow(false)
     override val lyricsBlur = MutableStateFlow(true)
+
+    /**
+     * Whether a changed speed keeps the pitch (stretched in pieces, as YouTube does) or plays like
+     * a record, faster and higher or slower and lower, with nothing cut up — the default.
+     */
+    val speedKeepsPitch = MutableStateFlow(persistence.boolean(KEY_SPEED_KEEPS_PITCH, false))
+
+    fun setSpeedKeepsPitch(keeps: Boolean) {
+        speedKeepsPitch.value = keeps
+        persistence.saveBoolean(KEY_SPEED_KEEPS_PITCH, keeps)
+    }
     override val lyricsOffsetMs = MutableStateFlow(
         persistence.int(KEY_LYRICS_OFFSET, 0).coerceIn(MIN_LYRICS_OFFSET_MS, MAX_LYRICS_OFFSET_MS),
     )
@@ -227,6 +238,8 @@ internal object DesktopPlayerSettings : PlayerSettingsSource {
         lyricsOffsetMs.value = clamped
         persistence.saveInt(KEY_LYRICS_OFFSET, clamped)
     }
+
+    private const val KEY_SPEED_KEEPS_PITCH = "speed_keeps_pitch"
 
     private const val KEY_LAST_SCREEN = "last_player_screen"
     private const val KEY_LYRICS_OFFSET = "lyrics_offset_ms"

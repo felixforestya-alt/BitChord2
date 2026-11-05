@@ -100,6 +100,11 @@ internal object DesktopWindowsAudio {
     @JvmStatic private external fun nativeDrain()
     @JvmStatic private external fun nativeClose()
     @JvmStatic private external fun nativeDeviceName(): String
+    /** Streams rebuilt so far because the device stopped taking samples; see window_jni.cpp. */
+    fun stalls(): Int = if (available) runCatching { nativeStalls() }.getOrDefault(0) else 0
+
+    @JvmStatic private external fun nativeStalls(): Int
+
     @JvmStatic private external fun nativeLastError(): String
 
     private const val LIBRARY = "bitchord_window"

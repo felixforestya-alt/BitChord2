@@ -192,11 +192,17 @@ internal class DesktopAudioSink {
         val rate = format.sampleRate.coerceAtLeast(1)
         // How long this block waits behind what the device already holds.
         val queued = (submittedFrames - framesPlayed()).coerceAtLeast(0L)
+        noteRunOut(queued)
         DesktopAudioAnalyzer.feed(samples, count, channels, rate, queued * 1_000_000_000L / rate)
         val shaped = stage.process(samples, count, channels, rate, gain)
         if (windowsOutput) {
             // Volume and limiting are already in the samples.
             val written = DesktopWindowsAudio.write(shaped, count, 1f)
+            val stalls = DesktopWindowsAudio.stalls()
+            if (stalls != stallsSeen) {
+                stallsSeen = stalls
+                DesktopTrackLog.log("audio output: the device stopped taking sound; its stream was started again ($stalls so far)")
+            }
             submittedFrames += count / channels
             diagnose(samples, count, written)
             return written
@@ -208,6 +214,24 @@ internal class DesktopAudioSink {
         diagnose(samples, count, written)
         return written
     }
+
+    /**
+     * The device played all it had before this block came, which is heard as a click or a gap, and
+     * is the one thing a slow processor does to the sound that nothing else reports. Only between
+     * blocks that were coming steadily: a track starting or a pause empties it on purpose.
+     */
+    private fun noteRunOut(queued: Long) {
+        val now = System.nanoTime()
+        val sinceLast = now - lastWriteAt
+        lastWriteAt = now
+        if (queued > 0 || submittedFrames == 0L || sinceLast > RUN_OUT_WATCH_NANOS) return
+        runOuts++
+        DesktopTrackLog.log("audio output ran out (${runOuts} so far): the last block came ${sinceLast / 1_000_000}ms before this one")
+    }
+
+    private var lastWriteAt = 0L
+    private var stallsSeen = 0
+    private var runOuts = 0
 
     private fun diagnose(samples: FloatArray, count: Int, written: Int) {
         if (diagnosticBlocks < DIAGNOSTIC_BLOCK_LIMIT) {
@@ -314,6 +338,7 @@ internal class DesktopAudioSink {
         DataLine.Info(SourceDataLine::class.java, candidate.toAudioFormat())
 
     private companion object {
+        private const val RUN_OUT_WATCH_NANOS = 1_000_000_000L
         const val DIAGNOSTIC_BLOCK_LIMIT = 50
         const val AUDIBLE_SIGNAL_FLOOR = 0.001f
     }

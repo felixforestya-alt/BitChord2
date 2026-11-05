@@ -51,6 +51,8 @@
     <string name="d_output_precision">Output precision</string>
     <string name="d_paste_a_cookie_instead">Paste a cookie instead</string>
     <string name="d_paste_the_cookie_header_for_music_youtube_com">Paste the Cookie header for music.youtube.com.</string>
+    <string name="d_speed_keeps_pitch">Keep the pitch</string>
+    <string name="d_speed_keeps_pitch_subtitle">Off: faster sounds higher and slower lower, like a record, with nothing cut up. On: the pitch stays, as on YouTube</string>
     <string name="d_playback_speed">Playback speed</string>
     <string name="d_playlists_on_this_computer">Playlists on this computer</string>
     <string name="d_quit_bitchord">Quit BitChord</string>
@@ -398,6 +400,8 @@
     <string name="lt_server_ours">BitChord² (ours)</string>
     <string name="lt_server_upstream">BitChord (original author\'s)</string>
     <string name="d_alert_link_renewed">YouTube link replaced on the fly; the track kept playing</string>
+    <string name="d_alert_no_network">No connection; the music will carry on when it is back</string>
+    <string name="d_alert_network_back">Connection is back; carrying on with \'%s\'</string>
     <string name="d_alert_stream_lost">\'%s\' lost its connection; opening it again</string>
     <string name="d_alert_track_failed">Could not play \'%s\'</string>
     <string name="d_alert_sound_gap">Sound stopped for %s s: the music did not arrive in time</string>

@@ -44,6 +44,8 @@ import org.bytedeco.ffmpeg.global.avutil.av_get_bytes_per_sample
 import org.bytedeco.ffmpeg.global.avutil.av_strerror
 import org.bytedeco.ffmpeg.global.avutil.av_malloc
 import org.bytedeco.ffmpeg.global.avutil.av_free
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import org.bytedeco.ffmpeg.avformat.AVIOContext
 import org.bytedeco.ffmpeg.avformat.Read_packet_Pointer_BytePointer_int
 import org.bytedeco.ffmpeg.avformat.Seek_Pointer_long_int
@@ -102,8 +104,7 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
     /** Live only while this decoder reads through windowed HTTP; see [open]. */
     private var rangeSource: DesktopRangeStream? = null
     private var avio: AVIOContext? = null
-    private var readPacket: Read_packet_Pointer_BytePointer_int? = null
-    private var seekPacket: Seek_Pointer_long_int? = null
+    private var windowedKey: WindowedKey? = null
 
     /** The format samples arrive in, once [open] has succeeded. */
     var outputFormat: DesktopPcmFormat = DesktopPcmFormat(44_100, 2, 2)
@@ -275,38 +276,18 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
         renew: (() -> DesktopRangeStream.Link?)?,
     ): AVFormatContext {
         val source = DesktopRangeStream(url, headers, renew = renew)
-        val scratch = ByteArray(IO_BUFFER_BYTES)
-        val read = object : Read_packet_Pointer_BytePointer_int() {
-            override fun call(opaque: Pointer?, buffer: BytePointer?, size: Int): Int {
-                if (buffer == null) return AVERROR_EOF
-                val taken = source.read(scratch, minOf(size, scratch.size))
-                if (taken <= 0) return AVERROR_EOF
-                buffer.put(scratch, 0, taken)
-                return taken
-            }
-        }
-        val seek = object : Seek_Pointer_long_int() {
-            override fun call(opaque: Pointer?, offset: Long, whence: Int): Long {
-                // FFmpeg asks for the length this way rather than with a seek.
-                if (whence == AVSEEK_SIZE) return source.length
-                val target = when (whence) {
-                    SEEK_CUR -> source.position() + offset
-                    SEEK_END -> source.length + offset
-                    else -> offset
-                }
-                source.seek(target)
-                return target
-            }
-        }
+        val key = WindowedKey(nextWindowedKey.getAndIncrement())
+        windowedReaders[key.address()] = WindowedReader(source)
+        // Two decks and the analyser are the most that should be open; more is a decoder left behind.
+        if (windowedReaders.size > 4) DesktopTrackLog.log("stream: ${windowedReaders.size} windowed streams open at once")
         val buffer = BytePointer(av_malloc(IO_BUFFER_BYTES.toLong()))
-        val io = avio_alloc_context(buffer, IO_BUFFER_BYTES, 0, null, read, null, seek)
+        val io = avio_alloc_context(buffer, IO_BUFFER_BYTES, 0, key, sharedRead, null, sharedSeek)
         val context = avformat_alloc_context()
         // avformat_open_input sets AVFMT_FLAG_CUSTOM_IO itself when it finds a context that already
         // has a pb, so there is no flag to set here.
         context.pb(io)
         rangeSource = source
-        readPacket = read
-        seekPacket = seek
+        windowedKey = key
         avio = io
         return context
     }
@@ -510,14 +491,57 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
             avio_context_free(it)
         }
         avio = null
-        readPacket?.deallocate()
-        seekPacket?.deallocate()
-        readPacket = null
-        seekPacket = null
+        windowedKey?.let { windowedReaders.remove(it.address()) }
+        windowedKey = null
         rangeSource = null
     }
 
+    /** Which [WindowedReader] a callback is for; never dereferenced, FFmpeg only hands it back. */
+    private class WindowedKey(id: Long) : Pointer() {
+        init {
+            address = id
+        }
+    }
+
+    private class WindowedReader(val source: DesktopRangeStream) {
+        val scratch = ByteArray(IO_BUFFER_BYTES)
+    }
+
     internal companion object {
+        private val windowedReaders = ConcurrentHashMap<Long, WindowedReader>()
+        private val nextWindowedKey = AtomicLong(1)
+
+        /** How many windowed streams are open right now, for [DesktopStress]. */
+        val windowedOpen: Int get() = windowedReaders.size
+
+        // One pair for every stream, told apart by FFmpeg's opaque pointer. JavaCPP has only ten
+        // slots for each callback type: an eleventh instance gets none without a word, its first
+        // read fails, and FFmpeg calls that "Invalid data found when processing input".
+        private val sharedRead = object : Read_packet_Pointer_BytePointer_int() {
+            override fun call(opaque: Pointer?, buffer: BytePointer?, size: Int): Int {
+                val reader = opaque?.let { windowedReaders[it.address()] }
+                if (buffer == null || reader == null) return AVERROR_EOF
+                val taken = reader.source.read(reader.scratch, minOf(size, reader.scratch.size))
+                if (taken <= 0) return AVERROR_EOF
+                buffer.put(reader.scratch, 0, taken)
+                return taken
+            }
+        }
+        private val sharedSeek = object : Seek_Pointer_long_int() {
+            override fun call(opaque: Pointer?, offset: Long, whence: Int): Long {
+                val source = opaque?.let { windowedReaders[it.address()] }?.source ?: return -1L
+                // FFmpeg asks for the length this way rather than with a seek.
+                if (whence == AVSEEK_SIZE) return source.length
+                val target = when (whence) {
+                    SEEK_CUR -> source.position() + offset
+                    SEEK_END -> source.length + offset
+                    else -> offset
+                }
+                source.seek(target)
+                return target
+            }
+        }
+
         /** Shared with the canvas decoder, which needs the same one-time init. */
         fun ensureNetworkReady() = ensureNetwork()
 

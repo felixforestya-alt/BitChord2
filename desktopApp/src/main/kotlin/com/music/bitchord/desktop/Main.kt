@@ -1,6 +1,7 @@
 package com.music.bitchord.desktop
 
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import com.music.bitchord.ui.player.PlayerPlatform
 import com.music.bitchord.data.DebugLog
@@ -17,6 +18,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.window.ApplicationScope
+import androidx.compose.ui.window.DefaultWindowExceptionHandlerFactory
+import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
+import androidx.compose.ui.window.WindowExceptionHandler
+import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import bitchord.desktopapp.generated.resources.Res
@@ -35,9 +42,14 @@ fun main() {
     // sign-in page stayed white. The launcher passes this too; here for a run from Gradle.
     if (System.getProperty("java.net.useSystemProxies") == null) System.setProperty("java.net.useSystemProxies", "true")
     // Already running — in the tray, say: bring that one forward rather than start a second.
-    if (!DesktopSingleInstance.claim()) kotlin.system.exitProcess(0)
+    DesktopTrackLog.log("launched: pid ${ProcessHandle.current().pid()}, version ${System.getProperty("bitchord.version")}")
+    if (!DesktopSingleInstance.claim()) {
+        DesktopTrackLog.log("already running: left it to the BitChord that holds the lock")
+        kotlin.system.exitProcess(0)
+    }
     // A frozen window or a crash leaves its reason in the log — see [DesktopHangWatch].
     DesktopHangWatch.start()
+    DesktopSchedulingBoost.keepOutOfThrottling()
     // The graphics API Skia draws through — OpenGL unless set otherwise, see DesktopGraphicsSettings.
     DesktopGraphicsSettings.apply()
     DesktopFramePacing.prepare()
@@ -147,7 +159,22 @@ private fun installImageLoader() {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 private fun desktopMain() = application {
+    CompositionLocalProvider(
+        LocalWindowExceptionHandlerFactory provides WindowExceptionHandlerFactory { window ->
+            WindowExceptionHandler { failure ->
+                DesktopHangWatch.logUncaught("the window", failure)
+                DefaultWindowExceptionHandlerFactory.exceptionHandler(window).onException(failure)
+            }
+        },
+    ) {
+        DesktopWindowRoot()
+    }
+}
+
+@Composable
+private fun ApplicationScope.DesktopWindowRoot() {
     // No priorities raised over other programs: the app is made light enough not to need them.
     LaunchedEffect(Unit) { DesktopSchedulingBoost.boostRenderThread() }
     // Closing puts the window away rather than ending the process, while there is a tray icon to

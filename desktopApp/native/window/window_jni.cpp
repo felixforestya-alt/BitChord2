@@ -13,6 +13,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <memory>
 #include <cmath>
 #include <cstdint>
 #include <cwchar>
@@ -309,37 +312,63 @@ bool set_fullscreen(HWND window, bool on) {
 
 // ---- Shared-mode Windows audio --------------------------------------------
 //
-// One render stream, owned by the playback thread through the JNI calls below. What Kotlin asks
-// for is kept (g_audio_wanted: an endpoint id, a legacy device name, or blank for the system
-// default) separately from the endpoint actually open, because the two drift apart: Windows'
-// default moves when the user picks another output in the flyout, and a chosen DAC can be
-// unplugged and plugged back in. An IMMNotificationClient flags those moments, and the next write
-// moves the stream to wherever the request now resolves — keeping the played-frame count, so the
-// position Kotlin derives from it does not jump.
+// The playback thread never calls into WASAPI. It puts its samples in a short ring here, and a
+// render thread of our own moves them on to the endpoint. After the computer had slept, a monitor's
+// HDMI audio could leave a WASAPI call blocked for good; made on the playback thread under the one
+// lock everything shared, that call froze the player — no other track would load, and opening the
+// output list froze the window as well. Now a render thread that stops answering is left behind:
+// a fresh one takes over with a new stream, and the old one, if it ever returns, sees it is no
+// longer the current one and leaves without touching anything.
+//
+// What Kotlin asks for (g_audio_wanted: an endpoint id, a legacy device name, or blank for the
+// system default) is kept apart from the endpoint actually open: Windows' default moves when the
+// user picks another output, a chosen DAC can be unplugged and plugged back in, and an
+// IMMNotificationClient flags those moments for the render thread to follow.
 
 std::mutex g_audio_mutex;
-IAudioClient* g_audio_client = nullptr;
-IAudioRenderClient* g_audio_render = nullptr;
-UINT32 g_audio_buffer_frames = 0;
-// The format Kotlin opened with; kept across reroutes so a rebuilt stream takes the same samples.
+std::condition_variable g_audio_room;
+std::condition_variable g_audio_opened;
+
+// The format Kotlin opened with; kept across rebuilt streams so they take the same samples.
 int g_audio_rate = 0;
 UINT32 g_audio_channels = 0;
 UINT32 g_audio_bytes_per_sample = 0;
 bool g_audio_float = false;
-// Whether playback wants the stream running — independent of there being a client right now.
+bool g_audio_open = false;
+// Whether playback wants the stream running.
 bool g_audio_started = false;
-uint64_t g_audio_submitted_frames = 0;
-uint64_t g_audio_played_offset = 0;
+bool g_audio_flush = false;
+
+// Samples waiting for the device, already scaled and limited.
+std::vector<float> g_audio_ring;
+size_t g_audio_ring_read = 0;
+size_t g_audio_ring_count = 0;
+
+// Frames heard so far, across every stream since opening: Kotlin's position follows this.
+uint64_t g_audio_played = 0;
+UINT32 g_audio_padding = 0;
+UINT32 g_audio_buffer_frames = 0;
 std::wstring g_audio_wanted;
-std::wstring g_audio_endpoint_id;
 std::wstring g_audio_device_name;
 std::wstring g_audio_error;
 
-// Set from the notification thread; read by the playback thread on its next write.
+// Which render thread is the current one; a thread whose number is not this one only cleans up.
+uint64_t g_audio_generation = 0;
+// When the current render thread last went round its loop, by GetTickCount64.
+std::atomic<ULONGLONG> g_audio_heartbeat{0};
+// Set by the open: whether the new thread got a stream (1), could not (2), or has not said (0).
+int g_audio_open_result = 0;
+
 std::atomic<bool> g_audio_reroute{false};
-IMMDeviceEnumerator* g_audio_enumerator = nullptr;
+// Streams rebuilt because the device stopped taking samples or its thread stopped answering.
+std::atomic<int> g_audio_stalls{0};
 bool g_audio_watching = false;
 JavaVM* g_vm = nullptr;
+
+constexpr UINT32 RING_MS = 60;
+constexpr REFERENCE_TIME DEVICE_BUFFER_HNS = 2'000'000;
+constexpr ULONGLONG DEVICE_STALL_MS = 1'500;
+constexpr ULONGLONG THREAD_STALL_MS = 3'000;
 
 class ComScope {
 public:
@@ -351,13 +380,14 @@ public:
     HRESULT result;
 };
 
-void set_audio_error(const wchar_t* operation, HRESULT result) {
+std::wstring audio_error(const wchar_t* operation, HRESULT result) {
     wchar_t code[32] = {};
     swprintf(code, 31, L"0x%08lX", static_cast<unsigned long>(result));
-    g_audio_error = operation;
-    g_audio_error += L" failed (";
-    g_audio_error += code;
-    g_audio_error += L")";
+    std::wstring text = operation;
+    text += L" failed (";
+    text += code;
+    text += L")";
+    return text;
 }
 
 /** Tells Kotlin the device list changed. Never enumerates here: the callback thread must not. */
@@ -380,7 +410,7 @@ void notify_devices_changed() {
     if (attached) vm->DetachCurrentThread();
 }
 
-/** Lives as long as the process; registered once with the shared enumerator. */
+/** Lives as long as the process; registered once, on the enumerator kept for it. */
 class EndpointWatcher final : public IMMNotificationClient {
 public:
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** out) override {
@@ -396,8 +426,6 @@ public:
     ULONG STDMETHODCALLTYPE Release() override { return 1; }
 
     HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole, LPCWSTR) override {
-        // Fires once per role; the reroute resolves the multimedia default and is a no-op when
-        // the stream is already there, so reacting to every role costs nothing.
         if (flow == eRender) g_audio_reroute = true;
         return S_OK;
     }
@@ -416,56 +444,22 @@ private:
 
 EndpointWatcher g_audio_watcher;
 
-/**
- * The enumerator every audio call shares, created once and kept with the notification client
- * registered on it. CoIncrementMTAUsage keeps the multithreaded apartment — and so the enumerator
- * — alive between calls, which each enter and leave it.
- */
-IMMDeviceEnumerator* enumerator_locked() {
-    if (g_audio_enumerator != nullptr) return g_audio_enumerator;
-    static CO_MTA_USAGE_COOKIE mta = nullptr;
-    if (mta == nullptr) CoIncrementMTAUsage(&mta);
-    const HRESULT status = CoCreateInstance(
-        __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-        __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&g_audio_enumerator));
-    if (FAILED(status) || g_audio_enumerator == nullptr) {
-        g_audio_enumerator = nullptr;
-        set_audio_error(L"Audio endpoint discovery", status);
+/** A fresh enumerator for the calling thread; the first one made also carries the watcher. */
+IMMDeviceEnumerator* new_enumerator() {
+    IMMDeviceEnumerator* enumerator = nullptr;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator)))) {
         return nullptr;
     }
-    if (!g_audio_watching) {
-        g_audio_watching = SUCCEEDED(g_audio_enumerator->RegisterEndpointNotificationCallback(&g_audio_watcher));
-    }
-    return g_audio_enumerator;
-}
-
-/** Drops the stream itself; the format, request and running state survive for a rebuild. */
-void release_client_locked() {
-    if (g_audio_client != nullptr) g_audio_client->Stop();
-    if (g_audio_render != nullptr) {
-        g_audio_render->Release();
-        g_audio_render = nullptr;
-    }
-    if (g_audio_client != nullptr) {
-        g_audio_client->Release();
-        g_audio_client = nullptr;
-    }
-    g_audio_buffer_frames = 0;
-    g_audio_endpoint_id.clear();
-    g_audio_device_name.clear();
-}
-
-void release_audio_locked() {
-    release_client_locked();
-    g_audio_rate = 0;
-    g_audio_channels = 0;
-    g_audio_bytes_per_sample = 0;
-    g_audio_float = false;
-    g_audio_started = false;
-    g_audio_submitted_frames = 0;
-    g_audio_played_offset = 0;
-    g_audio_wanted.clear();
-    g_audio_reroute = false;
+    static std::once_flag watched;
+    std::call_once(watched, [enumerator] {
+        // Kept for the life of the process: the notifications come through this one.
+        static CO_MTA_USAGE_COOKIE mta = nullptr;
+        CoIncrementMTAUsage(&mta);
+        enumerator->AddRef();
+        g_audio_watching = SUCCEEDED(enumerator->RegisterEndpointNotificationCallback(&g_audio_watcher));
+    });
+    return enumerator;
 }
 
 std::wstring property_string(IMMDevice* device, const PROPERTYKEY& key) {
@@ -544,8 +538,7 @@ IMMDevice* device_named(IMMDeviceEnumerator* enumerator, const std::wstring& wan
  * Where [wanted] should play right now: that endpoint while it is plugged in, otherwise the
  * system default — headphones get unplugged, and that should not stop playback.
  */
-IMMDevice* resolve_device_locked(const std::wstring& wanted) {
-    IMMDeviceEnumerator* enumerator = enumerator_locked();
+IMMDevice* resolve_device(IMMDeviceEnumerator* enumerator, const std::wstring& wanted) {
     if (enumerator == nullptr) return nullptr;
     if (!wanted.empty()) {
         IMMDevice* device = nullptr;
@@ -560,26 +553,42 @@ IMMDevice* resolve_device_locked(const std::wstring& wanted) {
     return default_device(enumerator);
 }
 
-/** Builds the render stream on [device] in the stored format; starts it if playback is running. */
-bool start_client_locked(IMMDevice* device) {
-    HRESULT status = device->Activate(
-        __uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-        reinterpret_cast<void**>(&g_audio_client));
-    if (FAILED(status) || g_audio_client == nullptr) {
-        g_audio_client = nullptr;
-        set_audio_error(L"Opening the audio endpoint", status);
-        return false;
-    }
+/** One render thread's own stream: nothing in it is shared with any other thread. */
+struct Stream {
+    IAudioClient* client = nullptr;
+    IAudioRenderClient* render = nullptr;
+    UINT32 buffer_frames = 0;
+    std::wstring endpoint;
+    std::wstring name;
+    bool running = false;
 
+    void release() {
+        if (client != nullptr) client->Stop();
+        if (render != nullptr) render->Release();
+        if (client != nullptr) client->Release();
+        client = nullptr;
+        render = nullptr;
+        buffer_frames = 0;
+        running = false;
+    }
+};
+
+/** Builds a stream on [device] in the opened format. Empty on success, else what failed. */
+std::wstring open_stream(Stream& stream, IMMDevice* device, int rate, UINT32 channels, UINT32 bytes, bool floating) {
+    HRESULT status = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                      reinterpret_cast<void**>(&stream.client));
+    if (FAILED(status) || stream.client == nullptr) {
+        stream.client = nullptr;
+        return audio_error(L"Opening the audio endpoint", status);
+    }
     WAVEFORMATEX format{};
-    format.wFormatTag = g_audio_float ? WAVE_FORMAT_IEEE_FLOAT : WAVE_FORMAT_PCM;
-    format.nChannels = static_cast<WORD>(g_audio_channels);
-    format.nSamplesPerSec = static_cast<DWORD>(g_audio_rate);
-    format.wBitsPerSample = static_cast<WORD>(g_audio_bytes_per_sample * 8);
-    format.nBlockAlign = static_cast<WORD>(g_audio_channels * g_audio_bytes_per_sample);
+    format.wFormatTag = floating ? WAVE_FORMAT_IEEE_FLOAT : WAVE_FORMAT_PCM;
+    format.nChannels = static_cast<WORD>(channels);
+    format.nSamplesPerSec = static_cast<DWORD>(rate);
+    format.wBitsPerSample = static_cast<WORD>(bytes * 8);
+    format.nBlockAlign = static_cast<WORD>(channels * bytes);
     format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
     format.cbSize = 0;
-
 #ifndef AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
 #define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000
 #endif
@@ -588,176 +597,323 @@ bool start_client_locked(IMMDevice* device) {
 #endif
     const DWORD flags = AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
     // 200 ms keeps network/decoder jitter away from the device without making controls sluggish.
-    status = g_audio_client->Initialize(
-        AUDCLNT_SHAREMODE_SHARED, flags, 2'000'000, 0, &format, nullptr);
+    status = stream.client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, DEVICE_BUFFER_HNS, 0, &format, nullptr);
     if (FAILED(status)) {
-        set_audio_error(L"Starting WASAPI shared mode", status);
-        release_client_locked();
-        return false;
+        stream.release();
+        return audio_error(L"Starting WASAPI shared mode", status);
     }
-    status = g_audio_client->GetBufferSize(&g_audio_buffer_frames);
+    status = stream.client->GetBufferSize(&stream.buffer_frames);
     if (SUCCEEDED(status)) {
-        status = g_audio_client->GetService(
-            __uuidof(IAudioRenderClient), reinterpret_cast<void**>(&g_audio_render));
+        status = stream.client->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void**>(&stream.render));
     }
-    if (SUCCEEDED(status) && g_audio_started) status = g_audio_client->Start();
-    if (FAILED(status) || g_audio_render == nullptr) {
-        set_audio_error(L"Starting the WASAPI render stream", status);
-        release_client_locked();
-        return false;
+    if (FAILED(status) || stream.render == nullptr) {
+        stream.release();
+        return audio_error(L"Starting the WASAPI render stream", status);
     }
-    g_audio_endpoint_id = endpoint_id(device);
-    g_audio_device_name = property_string(device, PKEY_Device_FriendlyName);
-    return true;
+    stream.endpoint = endpoint_id(device);
+    stream.name = property_string(device, PKEY_Device_FriendlyName);
+    return L"";
 }
 
-uint64_t played_frames_locked() {
-    if (g_audio_client == nullptr) return g_audio_played_offset;
-    UINT32 padding = 0;
-    if (FAILED(g_audio_client->GetCurrentPadding(&padding))) padding = 0;
-    const uint64_t queued = std::min<uint64_t>(padding, g_audio_submitted_frames);
-    return g_audio_played_offset + g_audio_submitted_frames - queued;
-}
-
-void remember_played_and_reset_locked() {
-    g_audio_played_offset = played_frames_locked();
-    g_audio_submitted_frames = 0;
+/** Converts [frames] of scaled float samples into what the endpoint was opened with. */
+void convert_into(BYTE* target, const float* samples, size_t values, UINT32 bytes, bool floating) {
+    if (floating) {
+        std::memcpy(target, samples, values * sizeof(float));
+    } else if (bytes == 2) {
+        auto* output = reinterpret_cast<int16_t*>(target);
+        for (size_t index = 0; index < values; ++index) output[index] = static_cast<int16_t>(samples[index] * 32767.0f);
+    } else {
+        auto* output = reinterpret_cast<int32_t*>(target);
+        for (size_t index = 0; index < values; ++index) {
+            output[index] = static_cast<int32_t>(static_cast<double>(samples[index]) * 2147483647.0);
+        }
+    }
 }
 
 /**
- * Moves the stream to wherever the request resolves now. What was queued on the old endpoint is
- * dropped — a fifth of a second at most — and only what was actually heard is counted as played.
+ * The render thread. Takes from the ring whatever the device has room for, every few
+ * milliseconds; rebuilds its stream when the endpoint moves, fails or stops taking samples; and
+ * with no endpoint at all lets the ring run out in real time, so playback neither races nor waits.
  */
-void reroute_locked() {
-    g_audio_reroute = false;
-    if (g_audio_channels == 0) return;
-    IMMDevice* device = resolve_device_locked(g_audio_wanted);
-    if (device != nullptr && g_audio_client != nullptr && endpoint_id(device) == g_audio_endpoint_id) {
-        device->Release();
-        return;
+DWORD WINAPI render_thread(LPVOID parameter) {
+    const uint64_t generation = reinterpret_cast<uint64_t>(parameter);
+    ComScope com;
+    IMMDeviceEnumerator* enumerator = com.ready() ? new_enumerator() : nullptr;
+    Stream stream;
+    uint64_t submitted = 0;
+    uint64_t played_base = 0;
+    UINT32 last_padding = 0;
+    ULONGLONG full_since = 0;
+    ULONGLONG retry_at = 0;
+    ULONGLONG idle_from = 0;
+    bool reported = false;
+    std::vector<float> chunk;
+
+    auto current = [generation] { return g_audio_generation == generation; };
+    auto rebuild = [&](bool stalled) {
+        played_base += submitted - std::min<uint64_t>(last_padding, submitted);
+        submitted = 0;
+        last_padding = 0;
+        stream.release();
+        if (stalled) g_audio_stalls++;
+    };
+
+    for (;;) {
+        const ULONGLONG now = GetTickCount64();
+        if (g_audio_generation == generation) g_audio_heartbeat = now;
+        std::wstring wanted;
+        int rate;
+        UINT32 channels, bytes;
+        bool floating, started, flush;
+        {
+            std::lock_guard<std::mutex> guard(g_audio_mutex);
+            if (!current() || !g_audio_open) break;
+            wanted = g_audio_wanted;
+            rate = g_audio_rate;
+            channels = g_audio_channels;
+            bytes = g_audio_bytes_per_sample;
+            floating = g_audio_float;
+            started = g_audio_started;
+            flush = g_audio_flush;
+            g_audio_flush = false;
+        }
+
+        if (g_audio_reroute.exchange(false) && stream.client != nullptr) {
+            IMMDevice* device = resolve_device(enumerator, wanted);
+            const bool same = device != nullptr && endpoint_id(device) == stream.endpoint;
+            if (device != nullptr) device->Release();
+            if (!same) rebuild(false);
+        }
+
+        if (stream.client == nullptr && now >= retry_at) {
+            IMMDevice* device = resolve_device(enumerator, wanted);
+            std::wstring failure = device == nullptr ? L"Windows has no audio endpoint to play on"
+                                                     : open_stream(stream, device, rate, channels, bytes, floating);
+            if (device != nullptr) device->Release();
+            std::lock_guard<std::mutex> guard(g_audio_mutex);
+            if (!current()) {
+                stream.release();
+                break;
+            }
+            if (failure.empty()) {
+                g_audio_buffer_frames = stream.buffer_frames;
+                g_audio_device_name = stream.name;
+                if (!reported) g_audio_open_result = 1;
+            } else {
+                g_audio_error = failure;
+                retry_at = now + 1'000;
+                if (!reported) g_audio_open_result = 2;
+            }
+            if (!reported) {
+                reported = true;
+                g_audio_opened.notify_all();
+            }
+        }
+
+        if (stream.client != nullptr && flush) {
+            stream.client->Stop();
+            stream.client->Reset();
+            played_base += submitted - std::min<uint64_t>(last_padding, submitted);
+            submitted = 0;
+            last_padding = 0;
+            stream.running = false;
+        }
+        if (stream.client != nullptr && started != stream.running) {
+            if (started) stream.client->Start(); else stream.client->Stop();
+            stream.running = started;
+            full_since = 0;
+        }
+
+        UINT32 room = 0;
+        if (stream.client != nullptr) {
+            UINT32 padding = 0;
+            const HRESULT status = stream.client->GetCurrentPadding(&padding);
+            if (FAILED(status)) {
+                rebuild(status != AUDCLNT_E_DEVICE_INVALIDATED);
+            } else {
+                last_padding = padding;
+                room = padding < stream.buffer_frames ? stream.buffer_frames - padding : 0;
+                // Full, playing, and not one frame taken in all this time: a stream that has stopped.
+                if (started && room == 0) {
+                    if (full_since == 0) full_since = now;
+                    else if (now - full_since >= DEVICE_STALL_MS) rebuild(true);
+                } else {
+                    full_since = 0;
+                }
+            }
+        }
+
+        size_t frames = 0;
+        if (started) {
+            std::lock_guard<std::mutex> guard(g_audio_mutex);
+            if (!current()) break;
+            const size_t queued = g_audio_ring_count / std::max<UINT32>(channels, 1);
+            if (stream.client != nullptr) {
+                frames = std::min<size_t>(queued, room);
+                idle_from = 0;
+            } else {
+                // No endpoint: the samples go by in real time.
+                if (idle_from == 0) idle_from = now;
+                frames = std::min<size_t>(queued, static_cast<size_t>((now - idle_from) * rate / 1000));
+                if (frames > 0) idle_from = now;
+            }
+            const size_t values = frames * channels;
+            chunk.resize(values);
+            for (size_t index = 0; index < values; ++index) {
+                chunk[index] = g_audio_ring[(g_audio_ring_read + index) % g_audio_ring.size()];
+            }
+            if (values > 0) {
+                g_audio_ring_read = (g_audio_ring_read + values) % g_audio_ring.size();
+                g_audio_ring_count -= values;
+                g_audio_room.notify_all();
+            }
+            if (stream.client == nullptr) played_base += frames;
+        }
+
+        if (frames > 0 && stream.client != nullptr) {
+            BYTE* target = nullptr;
+            HRESULT status = stream.render->GetBuffer(static_cast<UINT32>(frames), &target);
+            if (SUCCEEDED(status) && target != nullptr) {
+                convert_into(target, chunk.data(), frames * channels, bytes, floating);
+                status = stream.render->ReleaseBuffer(static_cast<UINT32>(frames), 0);
+            }
+            if (FAILED(status)) {
+                rebuild(status != AUDCLNT_E_DEVICE_INVALIDATED);
+            } else {
+                submitted += frames;
+                last_padding += static_cast<UINT32>(frames);
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> guard(g_audio_mutex);
+            if (!current()) break;
+            g_audio_played = played_base + submitted - std::min<uint64_t>(last_padding, submitted);
+            g_audio_padding = stream.client != nullptr ? last_padding : 0;
+        }
+        Sleep(3);
     }
-    remember_played_and_reset_locked();
-    release_client_locked();
-    if (device == nullptr) {
-        g_audio_error = L"Windows has no audio endpoint to play on";
-        return;
+    stream.release();
+    if (enumerator != nullptr) enumerator->Release();
+    return 0;
+}
+
+/** Starts a render thread as the current one. Under the lock. */
+void start_render_thread_locked() {
+    const uint64_t generation = ++g_audio_generation;
+    g_audio_heartbeat = GetTickCount64();
+    HANDLE thread = CreateThread(nullptr, 0, render_thread, reinterpret_cast<LPVOID>(generation), 0, nullptr);
+    if (thread != nullptr) {
+        SetThreadPriority(thread, THREAD_PRIORITY_TIME_CRITICAL);
+        CloseHandle(thread);
     }
-    start_client_locked(device);
-    device->Release();
+}
+
+/** The current render thread has stopped answering: leave it behind and start another. Under the lock. */
+void replace_stuck_thread_locked() {
+    if (!g_audio_open || GetTickCount64() - g_audio_heartbeat.load() < THREAD_STALL_MS) return;
+    g_audio_stalls++;
+    g_audio_padding = 0;
+    start_render_thread_locked();
+}
+
+void close_audio_locked() {
+    g_audio_open = false;
+    ++g_audio_generation;
+    g_audio_started = false;
+    g_audio_ring.clear();
+    g_audio_ring_read = 0;
+    g_audio_ring_count = 0;
+    g_audio_played = 0;
+    g_audio_padding = 0;
+    g_audio_buffer_frames = 0;
+    g_audio_device_name.clear();
+    g_audio_room.notify_all();
 }
 
 int open_audio(const std::wstring& wanted, int sample_rate, int channels, int bytes_per_sample, bool floating) {
-    std::lock_guard<std::mutex> guard(g_audio_mutex);
-    release_audio_locked();
+    std::unique_lock<std::mutex> guard(g_audio_mutex);
+    close_audio_locked();
     g_audio_error.clear();
-
-    ComScope com;
-    if (!com.ready()) {
-        set_audio_error(L"COM initialization", com.result);
-        return 0;
-    }
-
-    IMMDevice* device = resolve_device_locked(wanted);
-    if (device == nullptr) {
-        if (g_audio_error.empty()) g_audio_error = L"Windows has no audio endpoint to play on";
-        return 0;
-    }
     g_audio_wanted = wanted;
     g_audio_rate = sample_rate;
     g_audio_channels = static_cast<UINT32>(channels);
     g_audio_bytes_per_sample = static_cast<UINT32>(bytes_per_sample);
     g_audio_float = floating;
+    g_audio_ring.assign(static_cast<size_t>(sample_rate) * channels * RING_MS / 1000, 0.0f);
+    g_audio_open = true;
     g_audio_started = true;
-    const bool opened = start_client_locked(device);
-    device->Release();
-    if (!opened) {
-        release_audio_locked();
+    g_audio_open_result = 0;
+    start_render_thread_locked();
+    const bool answered = g_audio_opened.wait_for(guard, std::chrono::seconds(5), [] { return g_audio_open_result != 0; });
+    if (!answered || g_audio_open_result != 1) {
+        if (g_audio_error.empty()) g_audio_error = L"The audio endpoint did not answer";
+        close_audio_locked();
         return 0;
     }
-    g_audio_reroute = false;
-    return static_cast<int>(g_audio_buffer_frames * g_audio_channels * g_audio_bytes_per_sample);
+    const size_t frames = g_audio_buffer_frames + g_audio_ring.size() / static_cast<size_t>(channels);
+    return static_cast<int>(frames * channels * bytes_per_sample);
 }
 
+/**
+ * Puts [sample_count] samples in the ring, waiting for room as the device plays — which is what
+ * keeps playback in time. Never waits on Windows itself; a render thread that has stopped is
+ * replaced from here.
+ */
 int write_audio(const float* samples, int sample_count, float gain) {
     if (samples == nullptr || sample_count <= 0) return 0;
     std::unique_lock<std::mutex> guard(g_audio_mutex);
-    ComScope com;
-    if (!com.ready() || g_audio_channels == 0) return 0;
-
-    const UINT32 total_frames = static_cast<UINT32>(sample_count) / g_audio_channels;
-    UINT32 frame_at = 0;
-    while (frame_at < total_frames) {
-        if (g_audio_reroute || g_audio_client == nullptr) reroute_locked();
-        if (g_audio_client == nullptr) {
-            // Nowhere to play. Let the rest of the block pass in real time, counted as played, so
-            // the track neither races ahead nor wedges this thread until a device appears.
-            const UINT32 skipped = total_frames - frame_at;
-            g_audio_played_offset += skipped;
-            frame_at = total_frames;
-            const int rate = g_audio_rate > 0 ? g_audio_rate : 48'000;
-            guard.unlock();
-            Sleep(static_cast<DWORD>(std::max<uint64_t>(1, uint64_t{skipped} * 1000 / rate)));
-            guard.lock();
-            break;
-        }
-        UINT32 padding = 0;
-        HRESULT status = g_audio_client->GetCurrentPadding(&padding);
-        if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
-            // Unplugged between the notification and this write; move on right away.
-            g_audio_reroute = true;
+    if (!g_audio_open || g_audio_channels == 0 || g_audio_ring.empty()) return 0;
+    size_t at = 0;
+    const size_t total = static_cast<size_t>(sample_count) - static_cast<size_t>(sample_count) % g_audio_channels;
+    while (at < total) {
+        if (!g_audio_open) break;
+        // Stopped, nothing will make room: waiting here would hold the player's thread.
+        if (!g_audio_started) break;
+        const size_t free_values = g_audio_ring.size() - g_audio_ring_count;
+        if (free_values < g_audio_channels) {
+            g_audio_room.wait_for(guard, std::chrono::milliseconds(20));
+            replace_stuck_thread_locked();
             continue;
         }
-        if (FAILED(status)) {
-            set_audio_error(L"Reading WASAPI buffer state", status);
-            break;
+        size_t values = std::min(free_values, total - at);
+        values -= values % g_audio_channels;
+        size_t write = (g_audio_ring_read + g_audio_ring_count) % g_audio_ring.size();
+        for (size_t index = 0; index < values; ++index) {
+            g_audio_ring[write] = std::clamp(samples[at + index] * gain, -1.0f, 1.0f);
+            if (++write == g_audio_ring.size()) write = 0;
         }
-        const UINT32 available = padding < g_audio_buffer_frames ? g_audio_buffer_frames - padding : 0;
-        if (available == 0) {
-            guard.unlock();
-            Sleep(2);
-            guard.lock();
-            continue;
-        }
-        const UINT32 frames = std::min(available, total_frames - frame_at);
-        BYTE* target = nullptr;
-        status = g_audio_render->GetBuffer(frames, &target);
-        if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
-            g_audio_reroute = true;
-            continue;
-        }
-        if (FAILED(status) || target == nullptr) {
-            set_audio_error(L"Acquiring the WASAPI buffer", status);
-            break;
-        }
-        const size_t first = static_cast<size_t>(frame_at) * g_audio_channels;
-        const size_t values = static_cast<size_t>(frames) * g_audio_channels;
-        if (g_audio_float) {
-            auto* output = reinterpret_cast<float*>(target);
-            for (size_t index = 0; index < values; ++index) {
-                output[index] = std::clamp(samples[first + index] * gain, -1.0f, 1.0f);
-            }
-        } else if (g_audio_bytes_per_sample == 2) {
-            auto* output = reinterpret_cast<int16_t*>(target);
-            for (size_t index = 0; index < values; ++index) {
-                const float value = std::clamp(samples[first + index] * gain, -1.0f, 1.0f);
-                output[index] = static_cast<int16_t>(value * 32767.0f);
-            }
-        } else {
-            auto* output = reinterpret_cast<int32_t*>(target);
-            for (size_t index = 0; index < values; ++index) {
-                const double value = std::clamp(static_cast<double>(samples[first + index] * gain), -1.0, 1.0);
-                output[index] = static_cast<int32_t>(value * 2147483647.0);
-            }
-        }
-        status = g_audio_render->ReleaseBuffer(frames, 0);
-        if (FAILED(status)) {
-            set_audio_error(L"Submitting the WASAPI buffer", status);
-            break;
-        }
-        frame_at += frames;
-        g_audio_submitted_frames += frames;
+        g_audio_ring_count += values;
+        at += values;
     }
-    return static_cast<int>(frame_at * g_audio_channels * g_audio_bytes_per_sample);
+    return static_cast<int>(at / g_audio_channels * g_audio_channels * g_audio_bytes_per_sample);
+}
+
+/** Runs [work] on a thread of its own and gives up waiting after [limit_ms]; false if it did. */
+template <typename Work>
+bool run_bounded(Work work, DWORD limit_ms) {
+    struct Job {
+        Work work;
+        std::atomic<int> owners{2};
+    };
+    auto* job = new Job{std::move(work)};
+    HANDLE thread = CreateThread(nullptr, 0, [](LPVOID raw) -> DWORD {
+        auto* job = static_cast<Job*>(raw);
+        {
+            ComScope com;
+            if (com.ready()) job->work();
+        }
+        if (--job->owners == 0) delete job;
+        return 0;
+    }, job, 0, nullptr);
+    if (thread == nullptr) {
+        delete job;
+        return false;
+    }
+    const bool done = WaitForSingleObject(thread, limit_ms) == WAIT_OBJECT_0;
+    CloseHandle(thread);
+    if (--job->owners == 0) delete job;
+    return done;
 }
 
 /**
@@ -766,32 +922,37 @@ int write_audio(const float* samples, int sample_count, float gain) {
  * converter is the only one the audio ever passes through.
  */
 int mix_rate(const std::wstring& wanted) {
-    std::lock_guard<std::mutex> guard(g_audio_mutex);
-    ComScope com;
-    if (!com.ready()) return 0;
-    IMMDevice* device = resolve_device_locked(wanted);
-    if (device == nullptr) return 0;
-    IAudioClient* client = nullptr;
-    int rate = 0;
-    if (SUCCEEDED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
-                                   reinterpret_cast<void**>(&client))) && client != nullptr) {
-        WAVEFORMATEX* mix = nullptr;
-        if (SUCCEEDED(client->GetMixFormat(&mix)) && mix != nullptr) {
-            rate = static_cast<int>(mix->nSamplesPerSec);
-            CoTaskMemFree(mix);
+    auto rate = std::make_shared<std::atomic<int>>(0);
+    run_bounded([wanted, rate] {
+        IMMDeviceEnumerator* enumerator = new_enumerator();
+        IMMDevice* device = resolve_device(enumerator, wanted);
+        if (device != nullptr) {
+            IAudioClient* client = nullptr;
+            if (SUCCEEDED(device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr,
+                                           reinterpret_cast<void**>(&client))) && client != nullptr) {
+                WAVEFORMATEX* mix = nullptr;
+                if (SUCCEEDED(client->GetMixFormat(&mix)) && mix != nullptr) {
+                    *rate = static_cast<int>(mix->nSamplesPerSec);
+                    CoTaskMemFree(mix);
+                }
+                client->Release();
+            }
+            device->Release();
         }
-        client->Release();
-    }
-    device->Release();
-    return rate;
+        if (enumerator != nullptr) enumerator->Release();
+    }, 3'000);
+    return *rate;
 }
 
+std::mutex g_devices_mutex;
+std::vector<std::wstring> g_devices_seen;
+
 jobjectArray list_devices(JNIEnv* env) {
-    std::vector<std::wstring> values;
-    {
-        std::lock_guard<std::mutex> guard(g_audio_mutex);
-        ComScope com;
-        IMMDeviceEnumerator* enumerator = com.ready() ? enumerator_locked() : nullptr;
+    auto found = std::make_shared<std::vector<std::wstring>>();
+    // Asked from the window's thread: a list that will not come leaves the last one in place
+    // rather than the window frozen.
+    const bool listed = run_bounded([found] {
+        IMMDeviceEnumerator* enumerator = new_enumerator();
         IMMDeviceCollection* devices = nullptr;
         if (enumerator != nullptr &&
             SUCCEEDED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices)) &&
@@ -801,12 +962,19 @@ jobjectArray list_devices(JNIEnv* env) {
             for (UINT index = 0; index < count; ++index) {
                 IMMDevice* device = nullptr;
                 if (FAILED(devices->Item(index, &device)) || device == nullptr) continue;
-                values.push_back(endpoint_id(device));
-                values.push_back(property_string(device, PKEY_Device_FriendlyName));
+                found->push_back(endpoint_id(device));
+                found->push_back(property_string(device, PKEY_Device_FriendlyName));
                 device->Release();
             }
             devices->Release();
         }
+        if (enumerator != nullptr) enumerator->Release();
+    }, 2'000);
+    std::vector<std::wstring> values;
+    {
+        std::lock_guard<std::mutex> guard(g_devices_mutex);
+        if (listed) g_devices_seen = *found;
+        values = g_devices_seen;
     }
     jclass string_type = env->FindClass("java/lang/String");
     jobjectArray result = env->NewObjectArray(static_cast<jsize>(values.size()), string_type, nullptr);
@@ -874,12 +1042,7 @@ Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeOpen(
     const jsize length = env->GetStringLength(device);
     std::wstring wanted(reinterpret_cast<const wchar_t*>(chars), static_cast<size_t>(length));
     env->ReleaseStringChars(device, chars);
-    return static_cast<jint>(open_audio(
-        wanted,
-        static_cast<int>(sample_rate),
-        static_cast<int>(channels),
-        static_cast<int>(bytes_per_sample),
-        floating == JNI_TRUE));
+    return static_cast<jint>(open_audio(wanted, sample_rate, channels, bytes_per_sample, floating == JNI_TRUE));
 }
 
 JNIEXPORT jint JNICALL
@@ -915,52 +1078,40 @@ Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeWrite(
 JNIEXPORT jlong JNICALL
 Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeFramesPlayed(JNIEnv*, jclass) {
     std::lock_guard<std::mutex> guard(g_audio_mutex);
-    ComScope com;
-    return static_cast<jlong>(played_frames_locked());
+    return static_cast<jlong>(g_audio_played);
 }
 
 JNIEXPORT void JNICALL
 Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativePause(JNIEnv*, jclass) {
     std::lock_guard<std::mutex> guard(g_audio_mutex);
-    ComScope com;
-    if (!g_audio_started) return;
     g_audio_started = false;
-    if (g_audio_client != nullptr) g_audio_client->Stop();
+    g_audio_room.notify_all();
 }
 
 JNIEXPORT void JNICALL
 Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeResume(JNIEnv*, jclass) {
     std::lock_guard<std::mutex> guard(g_audio_mutex);
-    if (g_audio_started && !g_audio_reroute) return;
-    ComScope com;
-    // A device change while paused is acted on here, before anything is heard on the old one.
-    if (g_audio_reroute) reroute_locked();
-    if (!g_audio_started) {
-        g_audio_started = true;
-        if (g_audio_client != nullptr) g_audio_client->Start();
-    }
+    g_audio_started = true;
 }
 
 JNIEXPORT void JNICALL
 Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeFlush(JNIEnv*, jclass) {
     std::lock_guard<std::mutex> guard(g_audio_mutex);
-    ComScope com;
-    if (g_audio_client == nullptr) return;
-    g_audio_client->Stop();
-    remember_played_and_reset_locked();
-    g_audio_client->Reset();
-    if (g_audio_started) g_audio_client->Start();
+    g_audio_ring_read = 0;
+    g_audio_ring_count = 0;
+    g_audio_flush = true;
+    g_audio_room.notify_all();
 }
 
 JNIEXPORT void JNICALL
 Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeDrain(JNIEnv*, jclass) {
-    while (true) {
+    // Until what was written has been heard; bounded, so a device that stopped cannot hold it.
+    const ULONGLONG until = GetTickCount64() + 2'000;
+    while (GetTickCount64() < until) {
         {
             std::lock_guard<std::mutex> guard(g_audio_mutex);
-            ComScope com;
-            if (g_audio_client == nullptr) return;
-            UINT32 padding = 0;
-            if (FAILED(g_audio_client->GetCurrentPadding(&padding)) || padding == 0) return;
+            if (!g_audio_open || (g_audio_ring_count == 0 && g_audio_padding == 0)) return;
+            replace_stuck_thread_locked();
         }
         Sleep(2);
     }
@@ -969,8 +1120,7 @@ Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeDrain(JNIEnv*, jclass)
 JNIEXPORT void JNICALL
 Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeClose(JNIEnv*, jclass) {
     std::lock_guard<std::mutex> guard(g_audio_mutex);
-    ComScope com;
-    release_audio_locked();
+    close_audio_locked();
 }
 
 JNIEXPORT jstring JNICALL
@@ -979,6 +1129,11 @@ Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeDeviceName(JNIEnv* env
     return env->NewString(
         reinterpret_cast<const jchar*>(g_audio_device_name.c_str()),
         static_cast<jsize>(g_audio_device_name.size()));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeStalls(JNIEnv*, jclass) {
+    return g_audio_stalls.load();
 }
 
 JNIEXPORT jstring JNICALL

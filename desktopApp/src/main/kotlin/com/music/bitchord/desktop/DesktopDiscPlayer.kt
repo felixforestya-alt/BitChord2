@@ -1,6 +1,7 @@
 package com.music.bitchord.desktop
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -853,6 +854,13 @@ internal fun DesktopSungLine(
  */
 private val NO_CLIP = androidx.compose.animation.SizeTransform(clip = false)
 
+/** The same, for a lyric line switched elsewhere — Home's playing card. */
+internal val lyricNoClip get() = NO_CLIP
+
+/** Room round a lyric line for its shadow, given ([lyricRoom]) and taken back ([lyricOverhang]). */
+internal fun Modifier.lyricOverhang(): Modifier = overhang(LYRIC_SHADOW_ROOM)
+internal fun Modifier.lyricRoom(): Modifier = padding(LYRIC_SHADOW_ROOM)
+
 /** Room around a lyric line for its shadow's blur to fade out in, not be cut. */
 private val LYRIC_SHADOW_ROOM = 28.dp
 
@@ -1042,33 +1050,79 @@ private fun ControlDeck(
                 TransportButton(Icons.Rounded.FastForward, DesktopStrings["widget_next", "Next"], size = 44.dp, onClick = onNext)
             }
             Spacer(Modifier.height(6.dp))
-            // The volume, between a speaker that mutes and one that turns it up.
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                DeckIcon(
-                    when {
-                        muted -> Icons.AutoMirrored.Rounded.VolumeOff
-                        else -> Icons.AutoMirrored.Rounded.VolumeDown
-                    },
-                    if (muted) DesktopStrings["d_unmute", "Unmute"] else DesktopStrings["d_mute", "Mute"],
-                    size = 20.dp,
-                    tint = if (muted) Color(0xFFFF6B6B) else Color.White.copy(alpha = 0.7f),
-                    onClick = { onVolumeChange(if (muted) lastAudible else 0f) },
-                )
+            // The volume — or, switched on the drop beneath it, the speed — laid out as the seek bar
+            // above it is: the bar the full width, its two labels under its two ends.
+            val speed by DesktopSpeedControl.speed.collectAsState()
+            var tuningSpeed by remember { mutableStateOf(false) }
+            AnimatedContent(
+                targetState = tuningSpeed,
+                transitionSpec = {
+                    (fadeIn(tween(220, delayMillis = 60)) + slideInVertically(tween(320, easing = EASE_OUT_EXPO)) { it / 3 }) togetherWith
+                        (fadeOut(tween(140)) + slideOutVertically(tween(240)) { -it / 3 })
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = "volumeOrSpeed",
+            ) { speedShown ->
                 DesktopThinSlider(
-                    value = volume,
-                    onValueChange = onVolumeChange,
-                    idleHeight = 6.dp,
+                    value = if (speedShown) DesktopSpeedControl.toSlider(speed) else volume,
+                    onValueChange = {
+                        if (speedShown) DesktopSpeedControl.set(DesktopSpeedControl.fromSlider(it)) else onVolumeChange(it)
+                    },
+                    idleHeight = 7.dp,
                     activeHeight = 11.dp,
                     activeColor = Color.White.copy(alpha = 0.95f),
                     inactiveColor = Color.White.copy(alpha = 0.22f),
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 )
-                DeckIcon(
-                    Icons.AutoMirrored.Rounded.VolumeUp,
-                    DesktopStrings["d_volume", "Volume"],
-                    size = 20.dp,
-                    tint = Color.White.copy(alpha = 0.7f),
-                    onClick = { onVolumeChange((volume + 0.1f).coerceAtMost(1f)) },
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                DesktopDropletSwitch(
+                    count = 2,
+                    selected = if (tuningSpeed) 1 else 0,
+                    pill = Color.White.copy(alpha = 0.92f),
+                    modifier = Modifier
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .padding(2.dp),
+                ) { index, chosen, placed ->
+                    val ink by animateColorAsState(if (chosen) Color.Black else Color.White.copy(alpha = 0.75f), tween(220), label = "volumeOrSpeed")
+                    Box(
+                        placed
+                            .fillMaxHeight()
+                            .width(28.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { tuningSpeed = index == 1 }
+                            .pointerHoverIcon(PointerIcon.Hand),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            when {
+                                index == 1 -> Icons.Rounded.Speed
+                                muted -> Icons.AutoMirrored.Rounded.VolumeOff
+                                else -> Icons.AutoMirrored.Rounded.VolumeUp
+                            },
+                            if (index == 0) DesktopStrings["d_volume", "Volume"] else DesktopStrings["d_playback_speed", "Playback speed"],
+                            tint = ink,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                // The value, as the seek bar's time sits under its end: a click mutes, or puts the
+                // speed back to 1x.
+                Text(
+                    if (tuningSpeed) DesktopSpeedControl.label(speed) else "${(volume * 100).roundToInt()}%",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            if (tuningSpeed) DesktopSpeedControl.set(1f) else onVolumeChange(if (muted) lastAudible else 0f)
+                        }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .padding(horizontal = 2.dp, vertical = 2.dp),
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -1332,28 +1386,42 @@ private fun toggleTint(on: Boolean, accent: Color): Color =
 /** Song | Video, YouTube Music's own toggle between the two versions of a track. */
 @Composable
 private fun VersionSwitch(isVideo: Boolean, switch: DesktopVersionSwitch) {
-    Row(
-        Modifier
+    DesktopDropletSwitch(
+        count = 2,
+        selected = if (isVideo) 1 else 0,
+        modifier = Modifier
             .height(32.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color.White.copy(alpha = 0.10f))
             .padding(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Segment(Icons.Rounded.MusicNote, DesktopStrings["d_version_song", "Song"], selected = !isVideo, enabled = isVideo && switch.alternate != null, onClick = switch.onSwitch)
-        Segment(Icons.Rounded.Videocam, DesktopStrings["d_version_video", "Video"], selected = isVideo, enabled = !isVideo && switch.alternate != null, onClick = switch.onSwitch)
+    ) { index, _, placed ->
+        if (index == 0) {
+            Segment(Icons.Rounded.MusicNote, DesktopStrings["d_version_song", "Song"], selected = !isVideo, enabled = isVideo && switch.alternate != null, onClick = switch.onSwitch, modifier = placed)
+        } else {
+            Segment(Icons.Rounded.Videocam, DesktopStrings["d_version_video", "Video"], selected = isVideo, enabled = !isVideo && switch.alternate != null, onClick = switch.onSwitch, modifier = placed)
+        }
     }
 }
 
 @Composable
-private fun Segment(icon: ImageVector, label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    val fill by animateColorAsState(if (selected) Color.White else Color.Transparent, tween(260), label = "segment")
-    val ink = if (selected) Color.Black else Color.White.copy(alpha = if (enabled) 0.9f else 0.4f)
+private fun Segment(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    // The pill behind it is the switch's own drop (see [DesktopDropletSwitch]); the ink follows it.
+    val ink by animateColorAsState(
+        if (selected) Color.Black else Color.White.copy(alpha = if (enabled) 0.9f else 0.4f),
+        tween(220),
+        label = "segment",
+    )
     Row(
-        Modifier
+        modifier
             .fillMaxHeight()
             .clip(RoundedCornerShape(13.dp))
-            .background(fill)
             .clickable(enabled = enabled && !selected, onClick = onClick)
             .pointerHoverIcon(if (enabled && !selected) PointerIcon.Hand else PointerIcon.Default)
             .padding(horizontal = 10.dp),

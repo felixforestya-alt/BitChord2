@@ -87,22 +87,26 @@ internal object DesktopFramePacing {
         /** A frame's: the refresh (more, when measuring — see [FORCED_DIVISOR]). */
         private var period = 6_250_000L
         private var periodCheckedAt = Long.MIN_VALUE / 2
+        private val late = LateFrames()
 
         override fun onRender(canvas: Canvas, width: Int, height: Int, nanoTime: Long) {
             val start = System.nanoTime()
+            late.frame(start, refresh, window)
             if (start - periodCheckedAt > PERIOD_CHECK_NANOS) {
                 // Off to the side: asked on this thread, a monitor waking up held the UI for 25s.
+                // The handle is the one thing to ask here, where AWT's lock is safe to wait for.
+                val hwnd = runCatching { Native.getWindowPointer(window) }.getOrNull()
                 if (askingRefresh.compareAndSet(false, true)) {
                     Thread({
                         try {
                             refresh = periodNanos(window)
+                            if (hwnd != null) Blanks.follow(hwnd)
                         } finally {
                             askingRefresh.set(false)
                         }
                     }, "bitchord-refresh-rate").apply { isDaemon = true }.start()
                 }
                 periodCheckedAt = start
-                Blanks.follow(window)
             }
             // Every refresh, whatever else runs: held to every other one beside a game, the frames
             // were even but half as many, and the user wants the monitor's full rate.
@@ -149,6 +153,61 @@ internal object DesktopFramePacing {
     }
 
     /**
+     * Writes down when frames came late while music played, what is in front and on which monitor,
+     * so a stutter beside a game on a computer nobody here can touch leaves numbers in its log. A
+     * line a minute at most, and none for a minute with nothing worth saying.
+     */
+    private class LateFrames {
+        private var last = 0L
+        private var windowStart = 0L
+        private var frames = 0
+        private var lateFrames = 0
+        private var worst = 0L
+
+        fun frame(now: Long, refresh: Long, window: Window) {
+            val gap = now - last
+            last = now
+            // A window that has nothing moving asks for no frames, so a gap only counts with the
+            // sound going; past a couple of seconds it was something else, the computer sleeping.
+            if (gap < MAX_GAP_NANOS && DesktopAudioAnalyzer.fedWithin(SOUND_RECENT_NANOS)) {
+                frames++
+                if (gap > refresh * 2) lateFrames++
+                if (gap > worst) worst = gap
+            }
+            if (windowStart == 0L) windowStart = now
+            if (now - windowStart < REPORT_EVERY_NANOS) return
+            if (worst > WORTH_SAYING_NANOS) {
+                DesktopTrackLog.log(
+                    "frames: $frames in ${(now - windowStart) / 1_000_000_000}s at ${1_000_000_000L / refresh.coerceAtLeast(1)} Hz, " +
+                        "$lateFrames late, worst ${worst / 1_000_000}ms; in front: ${whatIsInFront(window)}",
+                )
+            }
+            windowStart = now
+            frames = 0
+            lateFrames = 0
+            worst = 0
+        }
+
+        private fun whatIsInFront(window: Window): String = runCatching {
+            val ours = Native.getWindowPointer(window)
+            val front = Win.foregroundWindow.invokePointer(emptyArray())
+            when {
+                front == null -> "nothing"
+                front == ours -> "this window"
+                Win.monitorOf(front) == Win.monitorOf(ours) -> "another app on this monitor"
+                else -> "another app on another monitor"
+            }
+        }.getOrDefault("unknown")
+
+        private companion object {
+            const val MAX_GAP_NANOS = 2_000_000_000L
+            const val SOUND_RECENT_NANOS = 500_000_000L
+            const val REPORT_EVERY_NANOS = 60_000_000_000L
+            const val WORTH_SAYING_NANOS = 40_000_000L
+        }
+    }
+
+    /**
      * The blanks, followed on a thread of their own: the driver's call has no timeout, and a
      * monitor switched off could hold it indefinitely, where the frame waits only on its timer.
      * The thread follows while frames are coming, and a quarter of a second after the last it
@@ -184,9 +243,8 @@ internal object DesktopFramePacing {
             if (idle) synchronized(lock) { lock.notifyAll() }
         }
 
-        /** Keeps the output the window is on: the blank followed is that monitor's. On the UI thread. */
-        fun follow(window: Window) {
-            val hwnd = runCatching { Native.getWindowPointer(window) }.getOrNull() ?: return
+        /** Keeps the output the window is on: the blank followed is that monitor's. Off the UI thread. */
+        fun follow(hwnd: Pointer) {
             val now = runCatching { Win.monitorFromWindow.invokePointer(arrayOf(hwnd, MONITOR_DEFAULTTONEAREST)) }.getOrNull() ?: return
             if (now == monitor && output != null) return
             monitor = now
@@ -302,6 +360,11 @@ internal object DesktopFramePacing {
         private val gdi32 = NativeLibrary.getInstance("gdi32")
         private val kernel32 = NativeLibrary.getInstance("kernel32")
         val monitorFromWindow = user32.getFunction("MonitorFromWindow")
+        val foregroundWindow = user32.getFunction("GetForegroundWindow")
+
+        fun monitorOf(hwnd: Pointer): Pointer? =
+            monitorFromWindow.invokePointer(arrayOf(hwnd, MONITOR_DEFAULTTONEAREST))
+
         val getMonitorInfo = user32.getFunction("GetMonitorInfoW")
         val createDC = gdi32.getFunction("CreateDCW")
         val deleteDC = gdi32.getFunction("DeleteDC")

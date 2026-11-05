@@ -734,7 +734,7 @@ fun BitChordDesktopApp() {
                 .getOrDefault(DesktopRepeatMode.OFF),
         )
     }
-    var playbackSpeed by remember { mutableStateOf(persistence.string("playback_speed", "1.0").toFloatOrNull() ?: 1.0f) }
+    val playbackSpeed by DesktopSpeedControl.speed.collectAsState()
     var volume by remember { mutableStateOf(persistence.string("volume", "1.0").toFloatOrNull()?.coerceIn(0.0f, 1.0f) ?: 1.0f) }
     var crossfadeSeconds by remember { mutableStateOf(persistence.string("crossfade_seconds", "0").toIntOrNull()?.coerceIn(0, 12) ?: 0) }
     var downloadQuality by remember { mutableStateOf(persistence.string("download_quality", "LOSSLESS")) }
@@ -2065,8 +2065,7 @@ fun BitChordDesktopApp() {
                 persistence.saveString("repeat_mode", repeatMode.name)
             },
             onRateChanged = { value ->
-                playbackSpeed = value.toFloat().coerceIn(0.25f, 3.0f)
-                persistence.saveString("playback_speed", playbackSpeed.toString())
+                DesktopSpeedControl.set(value.toFloat())
             },
             onVolumeChanged = { value ->
                 volume = value.toFloat().coerceIn(0.0f, 1.0f)
@@ -3942,6 +3941,33 @@ fun BitChordDesktopApp() {
                 DesktopTrackLog.log("selftest done")
                 return@LaunchedEffect
             }
+            System.getenv("BITCHORD_SELFTEST_STRESS")?.let { level ->
+                val places = DesktopDestination.entries
+                val controls = DesktopStress.Controls(
+                    start = { startWave() },
+                    skip = { playNext() },
+                    togglePlay = { togglePlayPauseFromUser() },
+                    seekTo = { playbackEngine.seekTo(it) },
+                    goTo = { destination = places[it] },
+                    pages = places.size,
+                    state = { playbackEngine.state.value },
+                )
+                when (level) {
+                    "2" -> DesktopStress.runBrutal(controls)
+                    "3" -> DesktopStress.runNetwork(controls)
+                    "4" -> DesktopStress.runReturn(controls)
+                    else -> DesktopStress.run(controls)
+                }
+                return@LaunchedEffect
+            }
+            // For a look at the player itself: a wave started and the player opened over it.
+            if (System.getenv("BITCHORD_SELFTEST_PLAYER") == "1") {
+                startWave()
+                delay(15_000)
+                overlays.nowPlaying = true
+                DesktopTrackLog.log("selftest player open")
+                return@LaunchedEffect
+            }
             if (System.getenv("BITCHORD_SELFTEST_JAM") == "1") {
                 startWave()
                 DesktopTrackLog.log("selftest jam started")
@@ -5208,10 +5234,7 @@ fun BitChordDesktopApp() {
                                         persistence.saveString("repeat_mode", it.name)
                                     },
                                     playbackSpeed = playbackSpeed,
-                                    onPlaybackSpeedChange = {
-                                        playbackSpeed = it
-                                        persistence.saveString("playback_speed", it.toString())
-                                    },
+                                    onPlaybackSpeedChange = DesktopSpeedControl::set,
                                     crossfadeSeconds = crossfadeSeconds,
                                     onCrossfadeSecondsChange = {
                                         crossfadeSeconds = it
@@ -7721,15 +7744,20 @@ private fun DesktopSettingsScreen(
                                     DesktopStrings["d_playback_speed", "Playback speed"],
                                     "${"%.2f".format(playbackSpeed)}×",
                                 ) {
-                                    val next = when {
-                                        playbackSpeed < 0.76f -> 1.0f
-                                        playbackSpeed < 1.01f -> 1.25f
-                                        playbackSpeed < 1.26f -> 1.5f
-                                        playbackSpeed < 1.51f -> 2.0f
-                                        else -> 0.5f
-                                    }
+                                    val next = PLAYBACK_SPEED_STEPS.firstOrNull { it > playbackSpeed + 0.001f }
+                                        ?: PLAYBACK_SPEED_STEPS.first()
                                     onPlaybackSpeedChange(next)
                                 }
+                                val keepsPitch by DesktopPlayerSettings.speedKeepsPitch.collectAsState()
+                                SettingsToggle(
+                                    DesktopStrings["d_speed_keeps_pitch", "Keep the pitch"],
+                                    DesktopStrings[
+                                        "d_speed_keeps_pitch_subtitle",
+                                        "Off: faster sounds higher and slower lower, like a record, with nothing cut up. On: the pitch stays, as on YouTube",
+                                    ],
+                                    keepsPitch,
+                                    DesktopPlayerSettings::setSpeedKeepsPitch,
+                                )
                                 SettingsRow(
                                     Icons.Rounded.Bedtime,
                                     DesktopStrings["d_sleep_timer", "Sleep timer"],
@@ -10252,6 +10280,9 @@ internal fun DesktopBareSlider(
         modifier = modifier,
     )
 }
+
+/** The speeds the setting steps through, round to 0.5x after the last. */
+private val PLAYBACK_SPEED_STEPS = floatArrayOf(0.5f, 0.75f, 0.8f, 0.85f, 0.9f, 0.95f, 1.0f, 1.05f, 1.1f, 1.15f, 1.2f, 1.25f, 1.5f, 2.0f)
 
 @Composable
 private fun SettingsToggle(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {

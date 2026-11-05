@@ -49,6 +49,8 @@
     <string name="d_output_precision">Точность вывода</string>
     <string name="d_paste_a_cookie_instead">Вставить cookie вместо этого</string>
     <string name="d_paste_the_cookie_header_for_music_youtube_com">Вставьте заголовок Cookie для music.youtube.com.</string>
+    <string name="d_speed_keeps_pitch">Сохранять тон</string>
+    <string name="d_speed_keeps_pitch_subtitle">Выкл.: быстрее — выше, медленнее — ниже, как на пластинке, звук ничем не режется. Вкл.: тон остаётся прежним, как на YouTube</string>
     <string name="d_playback_speed">Скорость воспроизведения</string>
     <string name="d_playlists_on_this_computer">Плейлисты на этом компьютере</string>
     <string name="d_quit_bitchord">Выйти из BitChord</string>
@@ -576,6 +578,8 @@
     <string name="lt_server_ours">BitChord² (наш)</string>
     <string name="lt_server_upstream">BitChord (сервер автора)</string>
     <string name="d_alert_link_renewed">Ссылка YouTube заменена на лету, трек продолжил играть</string>
+    <string name="d_alert_no_network">Нет связи: музыка продолжится сама, когда сеть вернётся</string>
+    <string name="d_alert_network_back">Связь вернулась: продолжаю «%s»</string>
     <string name="d_alert_stream_lost">«%s»: связь оборвалась, открываю заново</string>
     <string name="d_alert_track_failed">Не удалось воспроизвести «%s»</string>
     <string name="d_alert_sound_gap">Звук пропал на %s с: музыка не успела скачаться</string>

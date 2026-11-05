@@ -50,8 +50,15 @@ internal object DesktopAudioAnalyzer {
 
     private class Frame(val dueNanos: Long, val bands: FloatArray, val level: Float)
 
+    @Volatile
+    private var fedAt = 0L
+
+    /** Whether sound has come through in the last [nanos]. */
+    fun fedWithin(nanos: Long): Boolean = fedAt != 0L && System.nanoTime() - fedAt < nanos
+
     /** Called by the output for every block, before it blocks on the device. */
     fun feed(samples: FloatArray, count: Int, channels: Int, sampleRate: Int, latencyNanos: Long) {
+        fedAt = System.nanoTime()
         if (channels <= 0 || sampleRate <= 0 || count <= 0) return
         val frames = count / channels
         for (frame in 0 until frames) {

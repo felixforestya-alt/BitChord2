@@ -16,6 +16,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -177,41 +179,68 @@ private fun DrawScope.aurora(t: Float, energy: Energy, accent: Color) {
  * has a body and a soft edge; [RIBBON_POINTS] + 1 columns along it.
  */
 private fun DrawScope.ribbon(base: Float, amplitude: Float, half: Float, phase: Float, colour: Color, peak: Float) {
-    val columns = RIBBON_POINTS + 1
-    val positions = ArrayList<Offset>(columns * 4)
-    val colours = ArrayList<Color>(columns * 4)
-    val rows = floatArrayOf(-1f, -0.4f, 0.4f, 1f)
-    for (c in 0 until columns) {
+    val rows = Ribbon.ROWS
+    val rowCount = rows.size
+    val rgb = colour.toArgb() and 0xFFFFFF
+    for (c in 0..RIBBON_POINTS) {
         val x = size.width * c / RIBBON_POINTS
         val y = base + sin(x / size.width * 5f + phase) * amplitude
         // Clear at the ends, full in the middle, as the gradient it was stroked with.
         val along = 1f - abs(c * 2f / RIBBON_POINTS - 1f)
-        for (r in rows.indices) {
-            positions += Offset(x, y + rows[r] * half)
-            val edge = if (r == 0 || r == rows.size - 1) 0f else 1f
-            colours += colour.copy(alpha = peak * along * edge)
+        val alpha = (peak * along * 255f + 0.5f).toInt().coerceIn(0, 255)
+        for (r in 0 until rowCount) {
+            val at = c * rowCount + r
+            Ribbon.gridX[at] = x
+            Ribbon.gridY[at] = y + rows[r] * half
+            Ribbon.gridColour[at] = if (r == 0 || r == rowCount - 1) rgb else (alpha shl 24) or rgb
         }
     }
-    val indices = ArrayList<Int>(RIBBON_POINTS * 3 * 6)
+    var out = 0
     for (c in 0 until RIBBON_POINTS) {
-        for (r in 0 until rows.size - 1) {
-            val a = c * rows.size + r
-            val b = a + rows.size
-            indices += a; indices += b; indices += a + 1
-            indices += a + 1; indices += b; indices += b + 1
+        for (r in 0 until rowCount - 1) {
+            val a = c * rowCount + r
+            val b = a + rowCount
+            out = Ribbon.corner(a, out)
+            out = Ribbon.corner(b, out)
+            out = Ribbon.corner(a + 1, out)
+            out = Ribbon.corner(a + 1, out)
+            out = Ribbon.corner(b, out)
+            out = Ribbon.corner(b + 1, out)
         }
     }
-    drawContext.canvas.drawVertices(
-        androidx.compose.ui.graphics.Vertices(
-            androidx.compose.ui.graphics.VertexMode.Triangles,
-            positions,
-            positions,
-            colours,
-            indices,
-        ),
-        BlendMode.Dst,
-        ribbonPaint,
+    // Straight to Skia and with no index list: skiko 0.9.37 never lets go of its native copy of the
+    // indices it is given. Three ribbons a frame through Compose's Vertices held on to 23 MB a
+    // minute while the aurora was on screen, and boxed every point and colour as well.
+    drawContext.canvas.nativeCanvas.drawVertices(
+        org.jetbrains.skia.VertexMode.TRIANGLES,
+        Ribbon.positions,
+        Ribbon.colours,
+        null,
+        null,
+        org.jetbrains.skia.BlendMode.DST,
+        ribbonPaint.asFrameworkPaint(),
     )
+}
+
+/** A ribbon's points and triangles, filled in again for each one drawn, on the UI thread alone. */
+private object Ribbon {
+    val ROWS = floatArrayOf(-1f, -0.4f, 0.4f, 1f)
+    private val CORNERS = (RIBBON_POINTS + 1) * ROWS.size
+    private val VERTICES = RIBBON_POINTS * (ROWS.size - 1) * 6
+
+    val gridX = FloatArray(CORNERS)
+    val gridY = FloatArray(CORNERS)
+    val gridColour = IntArray(CORNERS)
+    val positions = FloatArray(VERTICES * 2)
+    val colours = IntArray(VERTICES)
+
+    /** Puts [corner] of the grid at vertex [vertex]; the next vertex. */
+    fun corner(corner: Int, vertex: Int): Int {
+        positions[vertex * 2] = gridX[corner]
+        positions[vertex * 2 + 1] = gridY[corner]
+        colours[vertex] = gridColour[corner]
+        return vertex + 1
+    }
 }
 
 /** Vertex colours alone, screened over what is beneath. */

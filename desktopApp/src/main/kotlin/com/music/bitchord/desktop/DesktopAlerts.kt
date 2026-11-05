@@ -48,6 +48,15 @@ internal object DesktopAlerts {
     /** What the last stream to fail said about it, for the alert that follows from it. */
     @Volatile
     var lastStreamProblem: String? = null
+        // Stale, it would be given as the reason for a gap it has nothing to do with.
+        get() = field?.takeIf { System.nanoTime() - lastStreamProblemAt < STREAM_PROBLEM_FRESH_NANOS }
+        set(value) {
+            lastStreamProblemAt = System.nanoTime()
+            field = value
+        }
+
+    @Volatile
+    private var lastStreamProblemAt = 0L
 
     /** Records an alert; with [popup], says it on screen too, once in a while for each [kind]. */
     fun raise(kind: String, title: String, detail: String? = null, popup: Boolean = true) {
@@ -76,6 +85,7 @@ internal object DesktopAlerts {
     }
 
     private const val KEPT = 50
+    private const val STREAM_PROBLEM_FRESH_NANOS = 30_000_000_000L
     private const val NOTICE_EVERY_NANOS = 30_000_000_000L
 }
 

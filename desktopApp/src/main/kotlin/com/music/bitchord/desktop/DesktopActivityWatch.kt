@@ -56,6 +56,7 @@ internal object DesktopActivityWatch {
             val hidden = !window.isShowing || minimised || (!ours && DesktopPlatform.isWindows && covered(window))
             // BITCHORD_NEVER_QUIET=1, for measuring: the window always counts as seen.
             val quiet = hidden && System.getenv("BITCHORD_NEVER_QUIET") != "1"
+            DesktopSchedulingBoost.setSeen(!quiet)
             if (AppActivity.quiet != quiet) {
                 AppActivity.quiet = quiet
                 DesktopTrackLog.log("window ${if (quiet) "out of sight: animations held" else "in sight: animations back"}")

@@ -15,9 +15,11 @@ import com.music.bitchord.playback.smart.TransitionTrackInfo
 import com.music.bitchord.playback.smart.echoTailSeconds
 import com.music.bitchord.playback.smart.planTransition
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -259,6 +261,9 @@ class DesktopPlaybackEngine(
             val localUrl = DesktopDownloadManager.savedFile(song)?.toAbsolutePath()?.toString()
             val resolved = localUrl?.let { Result.success(DesktopLiveResolution(DesktopStream(it))) }
                 ?: DesktopMusicSources.resolveLive(song, audioQuality, excludedSourceId)
+            // Skipped meanwhile: the failure a cancelled resolve hands back is no failure of this
+            // track, and its error would land on the state of the one that replaced it.
+            ensureActive()
             resolved.fold(
                 onSuccess = { live ->
                     val opened = openTrack(song, live.stream, startAtMs)
@@ -268,58 +273,64 @@ class DesktopPlaybackEngine(
                             commands += Command.Start(track, playWhenReady)
                             live.pendingSubstitute?.let { watchForUpgrade(song, it) }
                         },
-                        onFailure = { failure -> retryAfterFailure(song, playWhenReady, live.stream, failure) },
+                        onFailure = { failure -> retryAfterFailure(song, playWhenReady, live.stream, failure, startAtMs) },
                     )
                 },
                 onFailure = { failure ->
                     val reported = priorFailure ?: failure
-                    DesktopAlerts.raise(
-                        kind = "track",
-                        title = DesktopStrings["d_alert_track_failed", "Could not play '%s'"].format(song.title),
-                        detail = reported.message,
-                    )
-                    _state.value = DesktopPlaybackState(
-                        song = song,
-                        volume = volume,
-                        error = reported.message ?: "Playback failed",
-                    )
+                    failOrWaitForNetwork(song, playWhenReady, startAtMs, reported, reported.message)
                 },
             )
         }
     }
 
     /** Opens a decoder on [stream], off the audio thread. */
-    private suspend fun openTrack(song: Song, stream: DesktopStream, startAtMs: Long): Result<Track> =
-        withContext(Dispatchers.IO) {
-            val decoder = DesktopAudioDecoder()
-            decoder.open(
-                url = stream.url,
-                headers = stream.headers,
-                // Float throughout: the processors work in it and the sink converts once, at the
-                // end.
-                requested = DesktopPcmFormat(44_100, 2, bytesPerSample = 4, isFloat = true),
-                windowed = stream.windowedReads,
-                transport = stream.transport,
-                renew = stream.renew,
-            ).map {
-                if (startAtMs > 0) decoder.seek(startAtMs * 1_000)
-                // From here the decoder belongs to its own read-ahead thread: the audio thread only
-                // ever takes what has already been decoded, so a slow network read is not a gap.
-                val ahead = DesktopDecodeAhead(
-                    source = decoder,
-                    outputFormat = decoder.outputFormat,
-                    durationUs = decoder.durationUs,
-                    measuredFormat = decoder.measuredFormat,
-                    name = "BitChord-Decode ${song.title.take(24)}",
-                )
-                Track(song, ahead, stream, startAtMs * 1_000)
-            }.onFailure { decoder.close() }
+    private suspend fun openTrack(song: Song, stream: DesktopStream, startAtMs: Long): Result<Track> {
+        var finished: Track? = null
+        return try {
+            withContext(Dispatchers.IO) {
+                val decoder = DesktopAudioDecoder()
+                decoder.open(
+                    url = stream.url,
+                    headers = stream.headers,
+                    // Float throughout: the processors work in it and the sink converts once, at the
+                    // end.
+                    requested = DesktopPcmFormat(44_100, 2, bytesPerSample = 4, isFloat = true),
+                    windowed = stream.windowedReads,
+                    transport = stream.transport,
+                    renew = stream.renew,
+                ).map {
+                    if (startAtMs > 0) decoder.seek(startAtMs * 1_000)
+                    // From here the decoder belongs to its own read-ahead thread: the audio thread only
+                    // ever takes what has already been decoded, so a slow network read is not a gap.
+                    val ahead = DesktopDecodeAhead(
+                        source = decoder,
+                        outputFormat = decoder.outputFormat,
+                        durationUs = decoder.durationUs,
+                        measuredFormat = decoder.measuredFormat,
+                        name = "BitChord-Decode ${song.title.take(24)}",
+                    )
+                    Track(song, ahead, stream, startAtMs * 1_000).also { finished = it }
+                }.onFailure { decoder.close() }
+            }
+        } catch (cancelled: CancellationException) {
+            // A skip while this was opening: withContext drops a finished result on its way back to
+            // a cancelled caller, and nobody else knows about this decoder or its read-ahead thread.
+            finished?.decoder?.close()
+            throw cancelled
         }
+    }
 
     /**
      * A source that cannot actually be decoded is struck off and the track asked for again, once.
      */
-    private fun retryAfterFailure(song: Song, playWhenReady: Boolean, stream: DesktopStream, failure: Throwable) {
+    private suspend fun retryAfterFailure(
+        song: Song,
+        playWhenReady: Boolean,
+        stream: DesktopStream,
+        failure: Throwable,
+        startAtMs: Long,
+    ) {
         if (retryingSongId != song.videoId) {
             retryingSongId = song.videoId
             DesktopTrackLog.log("could not decode '${song.title}' from ${DesktopMusicSources.sourceNameFor(stream)}: ${failure.message}")
@@ -332,23 +343,72 @@ class DesktopPlaybackEngine(
                 // Forgotten rather than reported refused: a real refusal has been reported by the
                 // reader that got it, and a timeout says nothing against the client that minted it.
                 com.music.bitchord.data.innertube.StreamResolver.forget(stream.url)
-                loadInternal(song, playWhenReady, priorFailure = failure)
+                loadInternal(song, playWhenReady, startAtMs = startAtMs, priorFailure = failure)
             } else {
                 stream.sourceId?.let { refusedSources[song.videoId] = it }
-                loadInternal(song, playWhenReady, excludedSourceId = stream.sourceId, priorFailure = failure)
+                loadInternal(song, playWhenReady, excludedSourceId = stream.sourceId, startAtMs = startAtMs, priorFailure = failure)
             }
         } else {
+            val detail = listOfNotNull(failure.message, DesktopAlerts.lastStreamProblem).joinToString(" · ")
+            failOrWaitForNetwork(song, playWhenReady, startAtMs, failure, detail)
+        }
+    }
+
+    /**
+     * The end of the line for a track, unless it is the network that went. Every source fails alike
+     * with no connection, and the player used to sit silent on the error after it came back until
+     * someone pressed something. It waits instead, and carries on from where it stopped; choosing
+     * another track cancels the wait along with the rest of this job.
+     */
+    private suspend fun failOrWaitForNetwork(
+        song: Song,
+        playWhenReady: Boolean,
+        startAtMs: Long,
+        failure: Throwable,
+        detail: String?,
+    ) {
+        if (networkAnswers()) {
             DesktopAlerts.raise(
                 kind = "track",
                 title = DesktopStrings["d_alert_track_failed", "Could not play '%s'"].format(song.title),
-                detail = listOfNotNull(failure.message, DesktopAlerts.lastStreamProblem).joinToString(" · "),
+                detail = detail,
             )
             _state.value = DesktopPlaybackState(
                 song = song,
                 volume = volume,
                 error = "Could not play this track: ${failure.message}",
             )
+            return
         }
+        DesktopAlerts.raise(
+            kind = "network",
+            title = DesktopStrings["d_alert_no_network", "No connection; the music will carry on when it is back"],
+            detail = detail,
+        )
+        val wasPaused = paused
+        _state.value = DesktopPlaybackState(song = song, volume = volume, isLoading = true)
+        while (!networkAnswers()) delay(NETWORK_POLL_MS)
+        DesktopAlerts.raise(
+            kind = "network",
+            title = DesktopStrings["d_alert_network_back", "Connection is back; carrying on with '%s'"].format(song.title),
+            popup = false,
+        )
+        retryingSongId = null
+        loadInternal(song, playWhenReady && (wasPaused || !paused), startAtMs = startAtMs)
+    }
+
+    /** Whether anything answers at all, through whatever proxy or VPN the app's requests go through. */
+    private suspend fun networkAnswers(): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            val request = okhttp3.Request.Builder().url(NETWORK_PROBE_URL).get().build()
+            networkProbe.newCall(request).execute().use { it.code in 200..399 }
+        }.getOrDefault(false)
+    }
+
+    private val networkProbe by lazy {
+        com.music.bitchord.data.Http.client.newBuilder()
+            .callTimeout(NETWORK_PROBE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+            .build()
     }
 
     /**
@@ -593,6 +653,8 @@ class DesktopPlaybackEngine(
                 race -> DesktopMusicSources.resolveLive(song, audioQuality)
                 else -> DesktopMusicSources.resolve(song, audioQuality).map { DesktopLiveResolution(it) }
             }
+            // Asked for another track meanwhile: that is no failure of this one.
+            ensureActive()
             resolved.fold(
                 onSuccess = { live ->
                     openTrack(song, live.stream, startAtMs = 0).fold(
@@ -731,6 +793,7 @@ class DesktopPlaybackEngine(
     private var current: Track? = null
     private var upcoming: Track? = null
     private var speedProcessor: DesktopAudioSpeed? = null
+    private var varispeed: DesktopVarispeed? = null
     /** One widener per side of a mix, because widening is a property of a track. */
     private var spatial: DesktopSpatialAudio? = null
     private var spatialIncoming: DesktopSpatialAudio? = null
@@ -817,6 +880,7 @@ class DesktopPlaybackEngine(
     private var activePlan: TransitionPlan? = null
 
     private fun pump() {
+        DesktopSchedulingBoost.boostAudioThread()
         while (running.get()) {
             runCatching { step() }.onFailure { failure ->
                 if (failure is InterruptedException) return
@@ -1134,6 +1198,14 @@ class DesktopPlaybackEngine(
     }
 
     private fun stretch(samples: FloatArray, count: Int): Pair<FloatArray, Int> {
+        if (!DesktopPlayerSettings.speedKeepsPitch.value) {
+            val turntable = varispeed ?: return samples to count
+            speedProcessor?.let { if (it.speed != 1f) { it.speed = 1f; it.reset() } }
+            turntable.speed = playbackSpeed
+            val out = turntable.process(samples, count)
+            return out to turntable.outputCount
+        }
+        varispeed?.let { if (it.speed != 1f) { it.speed = 1f; it.reset() } }
         val processor = speedProcessor ?: return samples to count
         processor.speed = playbackSpeed
         val out = processor.process(samples, count)
@@ -1227,6 +1299,7 @@ class DesktopPlaybackEngine(
         nextSong = null
         fadeRemaining = 0
         speedProcessor?.reset()
+        varispeed?.reset()
         // Where the incoming track really is, not where it starts. Published as
         // its start left the scrubber and the lyrics a whole fade behind the
         // audio, which only a manual seek could put right.
@@ -1479,6 +1552,7 @@ class DesktopPlaybackEngine(
         sink.gain = volume
         framesWritten = sink.framesPlayed()
         speedProcessor = DesktopAudioSpeed(sink.format.channels, sink.format.sampleRate)
+        varispeed = DesktopVarispeed(sink.format.channels)
         spatial = DesktopSpatialAudio(sink.format.channels, sink.format.sampleRate)
         spatialIncoming = DesktopSpatialAudio(sink.format.channels, sink.format.sampleRate)
         equalizer.configure(sink.format.channels, sink.format.sampleRate)
@@ -1536,6 +1610,7 @@ class DesktopPlaybackEngine(
 
     private fun buildChain() {
         speedProcessor = DesktopAudioSpeed(sink.format.channels, sink.format.sampleRate)
+        varispeed = DesktopVarispeed(sink.format.channels)
         spatial = DesktopSpatialAudio(sink.format.channels, sink.format.sampleRate)
         spatialIncoming = DesktopSpatialAudio(sink.format.channels, sink.format.sampleRate)
         equalizer.configure(sink.format.channels, sink.format.sampleRate)
@@ -1582,6 +1657,7 @@ class DesktopPlaybackEngine(
         sink.flush()
         framesWritten = sink.framesPlayed()
         speedProcessor?.reset()
+        varispeed?.reset()
         spatial?.reset()
         spatialIncoming?.reset()
         // A seek is not a continuous signal, so the filters are cleared rather than left ringing
@@ -1995,6 +2071,11 @@ class DesktopPlaybackEngine(
     }
 
     companion object {
+        /** YouTube's own empty answer: what the streams need reachable, for next to nothing. */
+        private const val NETWORK_PROBE_URL = "https://www.youtube.com/generate_204"
+        private const val NETWORK_PROBE_TIMEOUT_MS = 5_000L
+        private const val NETWORK_POLL_MS = 2_000L
+
         /** So close to the end that a failed connection costs nothing worth reopening for. */
         private const val EARLY_END_MARGIN_MS = 2_000L
 

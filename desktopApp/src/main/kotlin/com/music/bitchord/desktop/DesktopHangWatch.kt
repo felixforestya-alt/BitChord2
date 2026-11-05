@@ -17,8 +17,19 @@ internal object DesktopHangWatch {
 
     @Volatile private var answeredAt = System.nanoTime()
 
+    /**
+     * Writes an error nothing caught to the log. Compose only shows these in a dialog and closes
+     * the window, and a thread's own just goes to a console nobody has: neither left a trace.
+     */
+    fun logUncaught(where: String, failure: Throwable) {
+        DesktopTrackLog.log("error in $where: $failure")
+        failure.stackTrace.take(UNCAUGHT_STACK_LINES).forEach { DesktopTrackLog.log("error:     at $it") }
+        failure.cause?.let { DesktopTrackLog.log("error:   caused by $it") }
+    }
+
     fun start() {
         adoptCrashReports()
+        Thread.setDefaultUncaughtExceptionHandler { thread, failure -> logUncaught("thread '${thread.name}'", failure) }
         Thread({
             var reported = false
             var stalledSince = 0L
@@ -120,6 +131,7 @@ internal object DesktopHangWatch {
             }
     }
 
+    private const val UNCAUGHT_STACK_LINES = 25
     private const val PING_MS = 1_000L
     private const val STALL_MS = 5_000L
     private const val MISSED_TICKS = 3

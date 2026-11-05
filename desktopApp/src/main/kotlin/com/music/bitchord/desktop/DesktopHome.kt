@@ -696,14 +696,18 @@ private fun HeroStage(
                 targetState = indexState.value,
                 transitionSpec = {
                     // Swapped outright while the window is in the background: nobody to see it.
-                    if (com.music.bitchord.ui.AppActivity.quiet) {
+                    val change = if (com.music.bitchord.ui.AppActivity.quiet) {
                         androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
                     } else {
                         (fadeIn(tween(380)) + scaleIn(tween(520, easing = EASE_OUT_EXPO), initialScale = 1.3f)) togetherWith
                             (fadeOut(tween(160)) + scaleOut(tween(220), targetScale = 0.85f))
                     }
+                    change using lyricNoClip
                 },
                 label = "heroLyric",
+                // Its own room: the words' soft shadow reaches past their box, and clipped to it
+                // ended in a straight line under the line — the stripe of light over the card.
+                modifier = Modifier.lyricOverhang(),
             ) { shown ->
                 // Out of focus as it arrives, sharpening as it settles — with room around it for
                 // the blur to spread into instead of being cut at the words' own edges.
@@ -715,6 +719,7 @@ private fun HeroStage(
                             val b = (1f - focus.value) * 12f
                             renderEffect = if (b > 0.5f) BlurEffect(b, b, TileMode.Decal) else null
                         }
+                        .lyricRoom()
                         .padding(horizontal = 24.dp, vertical = 12.dp),
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {

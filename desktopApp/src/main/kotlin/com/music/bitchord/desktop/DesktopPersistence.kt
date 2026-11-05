@@ -20,12 +20,14 @@ class DesktopPersistence {
 
     fun likedIds(): Set<String> = readLines(KEY_LIKED_IDS).toSet()
 
-    fun saveLikedIds(ids: Set<String>) = writeLines(KEY_LIKED_IDS, ids.toList())
+    /** Written off the calling thread — see [DesktopPreferenceWriter]: every heart clicked saves it. */
+    fun saveLikedIds(ids: Set<String>) = writeLinesSoon(KEY_LIKED_IDS, ids.toList())
 
     /** Thumbed-down tracks. */
     fun dislikedIds(): Set<String> = readLines(KEY_DISLIKED_IDS).toSet()
 
-    fun saveDislikedIds(ids: Set<String>) = writeLines(KEY_DISLIKED_IDS, ids.toList())
+    /** Written off the calling thread, with the likes it is saved beside. */
+    fun saveDislikedIds(ids: Set<String>) = writeLinesSoon(KEY_DISLIKED_IDS, ids.toList())
 
     /** Every lyric database, in the order they are asked. */
     fun lyricsSourceOrder(): List<String> =
@@ -91,11 +93,19 @@ class DesktopPersistence {
 
     fun downloads(): List<Song> = readSongs(KEY_DOWNLOADS)
 
-    fun saveDownloads(songs: List<Song>) = writeSongs(KEY_DOWNLOADS, songs)
+    /** Written off the calling thread — see [DesktopPreferenceWriter]. */
+    fun saveDownloads(songs: List<Song>) = writeSongsSoon(KEY_DOWNLOADS, songs.toList())
 
     fun playlists(): List<DesktopPlaylist> = readLines(KEY_PLAYLISTS).mapNotNull(::decodePlaylist)
 
-    fun savePlaylists(playlists: List<DesktopPlaylist>) = writeLines(KEY_PLAYLISTS, playlists.map(DesktopPlaylist::toPreferenceLine))
+    /**
+     * Written off the calling thread — see [DesktopPreferenceWriter]: every track added to a
+     * playlist saved every playlist, encoded and flushed, before the dialog could close.
+     */
+    fun savePlaylists(playlists: List<DesktopPlaylist>) {
+        val saved = playlists.toList()
+        DesktopPreferenceWriter.save(preferences, KEY_PLAYLISTS) { saved.joinToString("\n", transform = DesktopPlaylist::toPreferenceLine) }
+    }
 
     fun boolean(key: String, default: Boolean): Boolean = preferences.getBoolean(key, default)
 
@@ -240,8 +250,9 @@ class DesktopPersistence {
 
     private fun readSongs(key: String): List<Song> = readLines(key).mapNotNull(::decodeSong)
 
-    private fun writeSongs(key: String, songs: List<Song>) =
-        writeLines(key, songs.map(::encodeSong))
+    /** As [writeLines], off the calling thread; [lines] is a copy no one else holds. */
+    private fun writeLinesSoon(key: String, lines: List<String>) =
+        DesktopPreferenceWriter.save(preferences, key) { lines.joinToString("\n") }
 
     /** Encoded on the writing thread too: [songs] is a copy, and a [Song] does not change. */
     private fun writeSongsSoon(key: String, songs: List<Song>) =

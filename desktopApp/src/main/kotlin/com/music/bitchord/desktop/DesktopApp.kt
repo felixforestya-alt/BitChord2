@@ -668,8 +668,12 @@ fun BitChordDesktopApp() {
     val overlays = remember { DesktopOverlays() }
     var downloads by remember { mutableStateOf(persistence.downloads()) }
     var localSongs by remember { mutableStateOf<List<Song>>(emptyList()) }
-    val downloadQueue by DesktopDownloadQueue.active.collectAsState()
-    val downloadInProgress = downloadQueue.keys
+    // Which tracks are downloading, not how far along they are: the progress moves on with every
+    // 8 KB that arrives, and read here it recomposed the whole window on every frame for as long as
+    // a download ran. The downloads page reads the progress itself, where it is drawn.
+    val downloadInProgress by remember {
+        DesktopDownloadQueue.active.map { it.keys }.distinctUntilChanged()
+    }.collectAsState(DesktopDownloadQueue.active.value.keys)
     var playlists by remember { mutableStateOf(persistence.playlists()) }
     var statsRevision by remember { mutableStateOf(0L) }
     var replayPeriod by remember { mutableStateOf(DesktopReplayPeriod.ALL_TIME) }
@@ -6360,11 +6364,14 @@ private fun DesktopSidebar(
                     onHide = { DesktopSidebarVisibility.hide(HISTORY_KEY, "History") },
                 )
             }
-            val queued by DesktopDownloadQueue.active.collectAsState()
+            // How many, not how far: the sidebar redrew with every 8 KB a download took in.
+            val queued by remember {
+                DesktopDownloadQueue.active.map { it.size }.distinctUntilChanged()
+            }.collectAsState(DesktopDownloadQueue.active.value.size)
             if (DOWNLOADS_KEY !in hiddenSidebar) {
                 DesktopSidebarItem(
                     BitChordIcons.Download,
-                    if (queued.isEmpty()) DesktopStrings["downloads", "Downloads"] else DesktopStrings["downloads", "Downloads"] + " · ${queued.size}",
+                    if (queued == 0) DesktopStrings["downloads", "Downloads"] else DesktopStrings["downloads", "Downloads"] + " · $queued",
                     destination == DesktopDestination.DOWNLOADS,
                     onClick = { onDestinationSelected(DesktopDestination.DOWNLOADS) },
                     onHide = { DesktopSidebarVisibility.hide(DOWNLOADS_KEY, "Downloads") },

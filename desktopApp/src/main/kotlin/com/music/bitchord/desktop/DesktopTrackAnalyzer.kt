@@ -47,6 +47,33 @@ internal class DesktopTrackAnalyzer(
     private val store = AnalysisStore { DesktopAnalysisRuntime.analysisHome() }
 
     private val results = ConcurrentHashMap<String, TrackAnalysis>()
+
+    /**
+     * The order [results] were held in, oldest first. A track's analysis is thousands of
+     * energy-curve points, and a long session held every track it ever played. Only the ones on
+     * disk are let go — a usable analysis is stored before it is held, and comes back from there
+     * on the next ask — so the unusable ones, which say "tried, got nothing", are always kept.
+     */
+    private val heldOrder = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
+    private fun hold(trackId: String, analysis: TrackAnalysis) {
+        if (results.put(trackId, analysis) == null) heldOrder.add(trackId)
+        if (results.size <= MAX_HELD) return
+        val oldestFirst = heldOrder.iterator()
+        while (results.size > MAX_HELD && oldestFirst.hasNext()) {
+            val oldest = oldestFirst.next()
+            val held = results[oldest]
+            if (held == null) {
+                oldestFirst.remove()
+                continue
+            }
+            // The one just held, one being measured again, and the unusable ones stay.
+            if (oldest == trackId || oldest in running || !held.isUsable) continue
+            results.remove(oldest)
+            oldestFirst.remove()
+        }
+    }
+
     private val running = ConcurrentHashMap.newKeySet<String>()
 
     /** Tracks the analyser could not measure. */
@@ -97,7 +124,7 @@ internal class DesktopTrackAnalyzer(
 
     /** A stored analysis, promoted into memory on first ask. */
     private fun restored(trackId: String): TrackAnalysis? =
-        store.load(trackId)?.also { results[trackId] = it }
+        store.load(trackId)?.also { hold(trackId, it) }
 
     fun isAnalysed(trackId: String): Boolean =
         results.containsKey(trackId) || restored(trackId) != null
@@ -178,7 +205,7 @@ internal class DesktopTrackAnalyzer(
                 if (analysis != null) {
                     failedAt.remove(trackId)
                     store.save(trackId, analysis)
-                    results[trackId] = analysis
+                    hold(trackId, analysis)
                     DesktopTrackLog.log(
                         "analysed '${song.title}': ${"%.1f".format(analysis.bpm)} bpm" +
                             ", ${analysis.downbeats.size} downbeats" +
@@ -295,6 +322,7 @@ internal class DesktopTrackAnalyzer(
     fun release() {
         worker.shutdownNow()
         results.clear()
+        heldOrder.clear()
         running.clear()
         failed.clear()
         failedAt.clear()
@@ -304,6 +332,9 @@ internal class DesktopTrackAnalyzer(
 
         /** How long a track that failed to be measured waits before it is tried again. */
         const val RETRY_AFTER_MS = 60_000L
+
+        /** Analyses held in memory at most; the rest wait on disk. A queue is rarely longer. */
+        const val MAX_HELD = 48
 
         /**
          * A ceiling of about twenty minutes at the analyser's rate, so a mis-tagged eight-hour

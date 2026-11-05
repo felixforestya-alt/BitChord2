@@ -38,6 +38,40 @@ internal object DesktopAudioAnalyzer {
     private val re = DoubleArray(FFT_SIZE)
     private val im = DoubleArray(FFT_SIZE)
     private val window = DoubleArray(FFT_SIZE) { 0.5 - 0.5 * cos(2.0 * PI * it / (FFT_SIZE - 1)) }
+
+    /**
+     * Each stage's twiddle factors, stage after stage — the values the transform used to step
+     * through with a complex multiply inside every butterfly. Every block of a stage restarts the
+     * same sequence, so it is worked out here once, by the same recurrence, to the same values.
+     */
+    private val twiddleRe = DoubleArray(FFT_SIZE - 1)
+    private val twiddleIm = DoubleArray(FFT_SIZE - 1)
+
+    /** Where each band's bins start and end, for [bandsForRate]: they move only with the rate. */
+    private val bandLow = IntArray(BAND_COUNT)
+    private val bandHigh = IntArray(BAND_COUNT)
+    private var bandsForRate = 0
+
+    init {
+        var at = 0
+        var length = 2
+        while (length <= FFT_SIZE) {
+            val angle = -2.0 * PI / length
+            val wRe = cos(angle)
+            val wIm = sin(angle)
+            var curRe = 1.0
+            var curIm = 0.0
+            for (k in 0 until length / 2) {
+                twiddleRe[at] = curRe
+                twiddleIm[at] = curIm
+                at++
+                val next = curRe * wRe - curIm * wIm
+                curIm = curRe * wIm + curIm * wRe
+                curRe = next
+            }
+            length = length shl 1
+        }
+    }
     private val smoothed = FloatArray(BAND_COUNT)
     private var lastAnalysis = 0L
 
@@ -66,7 +100,7 @@ internal object DesktopAudioAnalyzer {
             val base = frame * channels
             for (channel in 0 until channels) mono += samples[base + channel]
             ring[ringAt] = mono / channels
-            ringAt = (ringAt + 1) % FFT_SIZE
+            ringAt = (ringAt + 1) and (FFT_SIZE - 1)
         }
         filled = (filled + frames).coerceAtMost(FFT_SIZE)
         val now = System.nanoTime()
@@ -110,22 +144,20 @@ internal object DesktopAudioAnalyzer {
     private fun analyse(sampleRate: Int): Pair<FloatArray, Float> {
         var energy = 0.0
         for (i in 0 until FFT_SIZE) {
-            val sample = ring[(ringAt + i) % FFT_SIZE].toDouble()
+            val sample = ring[(ringAt + i) and (FFT_SIZE - 1)].toDouble()
             energy += sample * sample
             re[i] = sample * window[i]
             im[i] = 0.0
         }
         fft(re, im)
         val bands = FloatArray(BAND_COUNT)
-        val binHz = sampleRate.toDouble() / FFT_SIZE
-        val ratio = ln(MAX_HZ / MIN_HZ)
+        if (sampleRate != bandsForRate) placeBands(sampleRate)
         for (band in 0 until BAND_COUNT) {
-            val lowHz = MIN_HZ * exp(ratio * band / BAND_COUNT)
-            val highHz = MIN_HZ * exp(ratio * (band + 1) / BAND_COUNT)
-            val low = (lowHz / binHz).toInt().coerceIn(1, FFT_SIZE / 2 - 1)
-            val high = (highHz / binHz).toInt().coerceIn(low + 1, FFT_SIZE / 2)
-            var peak = 0.0
-            for (bin in low until high) peak = max(peak, sqrt(re[bin] * re[bin] + im[bin] * im[bin]))
+            // The loudest bin's power, and one square root of it: a root never changes which of
+            // two powers is the larger, so this is the same peak as the largest of the roots.
+            var power = 0.0
+            for (bin in bandLow[band] until bandHigh[band]) power = max(power, re[bin] * re[bin] + im[bin] * im[bin])
+            val peak = sqrt(power)
             // Normalised to the window's gain, then into a perceptual 0..1.
             val db = 20.0 * log10(peak / (FFT_SIZE / 4.0) + 1e-9)
             // A gentle tilt so the treble — always quieter in music — still moves.
@@ -142,6 +174,19 @@ internal object DesktopAudioAnalyzer {
         val rms = sqrt(energy / FFT_SIZE)
         val level = ((20.0 * log10(rms + 1e-9) + 48.0) / 42.0).coerceIn(0.0, 1.0).toFloat()
         return bands to level
+    }
+
+    private fun placeBands(sampleRate: Int) {
+        val binHz = sampleRate.toDouble() / FFT_SIZE
+        val ratio = ln(MAX_HZ / MIN_HZ)
+        for (band in 0 until BAND_COUNT) {
+            val lowHz = MIN_HZ * exp(ratio * band / BAND_COUNT)
+            val highHz = MIN_HZ * exp(ratio * (band + 1) / BAND_COUNT)
+            val low = (lowHz / binHz).toInt().coerceIn(1, FFT_SIZE / 2 - 1)
+            bandLow[band] = low
+            bandHigh[band] = (highHz / binHz).toInt().coerceIn(low + 1, FFT_SIZE / 2)
+        }
+        bandsForRate = sampleRate
     }
 
     /** In-place iterative radix-2 FFT. */
@@ -161,29 +206,27 @@ internal object DesktopAudioAnalyzer {
             }
         }
         var length = 2
+        // Where this stage's twiddles start in [twiddleRe] and [twiddleIm].
+        var stage = 0
         while (length <= n) {
-            val angle = -2.0 * PI / length
-            val wRe = cos(angle)
-            val wIm = sin(angle)
+            val half = length / 2
             var start = 0
             while (start < n) {
-                var curRe = 1.0
-                var curIm = 0.0
-                for (k in 0 until length / 2) {
+                for (k in 0 until half) {
+                    val curRe = twiddleRe[stage + k]
+                    val curIm = twiddleIm[stage + k]
                     val a = start + k
-                    val b = a + length / 2
+                    val b = a + half
                     val tRe = real[b] * curRe - imag[b] * curIm
                     val tIm = real[b] * curIm + imag[b] * curRe
                     real[b] = real[a] - tRe
                     imag[b] = imag[a] - tIm
                     real[a] += tRe
                     imag[a] += tIm
-                    val next = curRe * wRe - curIm * wIm
-                    curIm = curRe * wIm + curIm * wRe
-                    curRe = next
                 }
                 start += length
             }
+            stage += half
             length = length shl 1
         }
     }

@@ -18,10 +18,22 @@ internal object DesktopTrackMatcher {
     fun best(candidates: List<Song>, target: Song): Song? = ranked(candidates, target).firstOrNull()
 
     /** Every candidate that is the same recording, most confident first. */
-    fun ranked(candidates: List<Song>, target: Song): List<Song> = candidates
-        .mapNotNull { candidate -> score(candidate, target)?.let { candidate to it } }
-        .sortedByDescending { it.second }
-        .map { it.first }
+    fun ranked(candidates: List<Song>, target: Song): List<Song> {
+        // What is asked for is the same against every candidate: taken apart once, rather than
+        // once for each of the twenty or so a catalogue answers with.
+        val wanted = Wanted(target)
+        return candidates
+            .mapNotNull { candidate -> score(candidate, wanted)?.let { candidate to it } }
+            .sortedByDescending { it.second }
+            .map { it.first }
+    }
+
+    /** The target of a match, taken apart for [score]. */
+    private class Wanted(target: Song) {
+        val title = parseTitle(target.title, target.artist)
+        val artists = artistNames(target.artist)
+        val durationMs = target.durationMillis().takeIf { it > 0L }
+    }
 
     /** Whether two rows agree on runtime to within [seconds]. */
     fun withinSeconds(candidate: Song, target: Song, seconds: Int): Boolean {
@@ -46,8 +58,8 @@ internal object DesktopTrackMatcher {
     internal fun primaryArtist(artist: String): String =
         artist.lowercase(Locale.ROOT).split(ARTIST_SEPARATOR).firstOrNull()?.trim().orEmpty()
 
-    private fun score(candidate: Song, target: Song): Int? {
-        val wanted = parseTitle(target.title, target.artist)
+    private fun score(candidate: Song, target: Wanted): Int? {
+        val wanted = target.title
         val got = parseTitle(candidate.title, candidate.artist)
         if (wanted.core.isEmpty() || got.core.isEmpty()) return null
         if (wanted.core != got.core) return null
@@ -55,13 +67,13 @@ internal object DesktopTrackMatcher {
         // take, and asking for the live take must not land on the album cut.
         if (wanted.versions != got.versions) return null
 
-        val targetArtists = artistNames(target.artist)
+        val targetArtists = target.artists
         val candidateArtists = artistNames(candidate.artist)
         if (targetArtists.isNotEmpty() && candidateArtists.isNotEmpty() &&
             targetArtists.none { wanted -> candidateArtists.any { got -> sameArtist(wanted, got) } }
         ) return null
 
-        val wantedDuration = target.durationMillis().takeIf { it > 0L }
+        val wantedDuration = target.durationMs
         val candidateDuration = candidate.durationMillis().takeIf { it > 0L }
         if (wantedDuration != null && candidateDuration != null &&
             abs(wantedDuration - candidateDuration) > DURATION_TOLERANCE_MS

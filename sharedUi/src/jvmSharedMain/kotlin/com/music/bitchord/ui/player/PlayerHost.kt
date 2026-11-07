@@ -58,6 +58,12 @@ interface PlayerHost {
     /** The system output level the player's volume bar drives, if it drives one. */
     val volume: SystemVolume
 
+    /**
+     * The listener's playback speed, for the volume bar switched over to speed — null where the
+     * platform has no speed to offer, and the bar stays a volume bar.
+     */
+    val playbackSpeed: PlaybackSpeedControl? get() = null
+
     /** The outputs the output drawer lists, the active one marked. */
     @Composable
     fun rememberAudioOutputs(): List<AudioOutputDevice>

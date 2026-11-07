@@ -62,6 +62,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.VolumeDown
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -71,6 +72,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -514,6 +516,11 @@ internal fun VolumeRow(
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
 ) {
+    val speedControl = PlayerPlatform.host.playbackSpeed
+    if (speedControl != null) {
+        VolumeOrSpeedRow(value, onValueChange, onValueChangeFinished, speedControl)
+        return
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -540,6 +547,112 @@ internal fun VolumeRow(
             tint = LocalPlayerTint.current.copy(alpha = 0.5f),
             modifier = Modifier.size(20.dp),
         )
+    }
+}
+
+/**
+ * The volume bar, or — switched on the drop at its start, as the desktop's player has it — the
+ * playback speed: like a record by default, see the platform's speed setting. Kept to the volume
+ * bar's own height, so nothing around it moves: the switch takes the quiet speaker's place, and
+ * the value the loud one's. A tap on the speed puts it back to 1x.
+ */
+@Composable
+private fun VolumeOrSpeedRow(
+    value: () -> Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    speedControl: PlaybackSpeedControl,
+) {
+    val tint = LocalPlayerTint.current
+    val speed by speedControl.speed.collectAsStateWithLifecycle()
+    var tuningSpeed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth().height(VOLUME_ROW_HEIGHT),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DropletSwitch(
+            count = 2,
+            selected = if (tuningSpeed) 1 else 0,
+            pill = tint.copy(alpha = 0.9f),
+            modifier = Modifier
+                .height(26.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(tint.copy(alpha = 0.10f))
+                .padding(2.dp),
+        ) { index, chosen, placed ->
+            val ink by androidx.compose.animation.animateColorAsState(
+                if (chosen) Color.Black else tint.copy(alpha = 0.6f),
+                tween(220),
+                label = "volumeOrSpeedInk",
+            )
+            Box(
+                placed
+                    .fillMaxHeight()
+                    .width(30.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .clickable { tuningSpeed = index == 1 },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    if (index == 1) Icons.Rounded.Speed else Icons.AutoMirrored.Rounded.VolumeUp,
+                    contentDescription = null,
+                    tint = ink,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        AnimatedContent(
+            targetState = tuningSpeed,
+            transitionSpec = {
+                (fadeIn(tween(220, delayMillis = 60)) + androidx.compose.animation.slideInVertically(tween(320)) { it / 3 }) togetherWith
+                    (fadeOut(tween(140)) + androidx.compose.animation.slideOutVertically(tween(240)) { -it / 3 })
+            },
+            modifier = Modifier.weight(1f),
+            label = "volumeOrSpeed",
+        ) { speedShown ->
+            if (speedShown) {
+                ThinSlider(
+                    value = PlaybackSpeedScale.toSlider(speed),
+                    onValueChange = { speedControl.set(PlaybackSpeedScale.fromSlider(it)) },
+                    idleHeight = 6.dp,
+                    activeHeight = 10.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                ThinSlider(
+                    value = value(),
+                    onValueChange = onValueChange,
+                    onValueChangeFinished = onValueChangeFinished,
+                    idleHeight = 6.dp,
+                    activeHeight = 10.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Box(Modifier.width(44.dp), contentAlignment = Alignment.CenterEnd) {
+            if (tuningSpeed) {
+                Text(
+                    PlaybackSpeedScale.label(speed),
+                    color = tint.copy(alpha = 0.7f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { speedControl.set(1f) }
+                        .padding(horizontal = 2.dp, vertical = 2.dp),
+                )
+            } else {
+                Icon(
+                    Icons.AutoMirrored.Rounded.VolumeUp,
+                    contentDescription = null,
+                    tint = tint.copy(alpha = 0.5f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
     }
 }
 

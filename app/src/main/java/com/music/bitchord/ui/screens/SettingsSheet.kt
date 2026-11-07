@@ -79,6 +79,7 @@ import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.SurroundSound
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.WebAssetOff
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Waves
@@ -249,6 +250,7 @@ fun SettingsScreen(
     val exportDownloads by AppSettings.exportDownloads.collectAsStateWithLifecycle()
     val stopOnTaskRemoved by AppSettings.stopOnTaskRemoved.collectAsStateWithLifecycle()
     val hideVolumeBar by AppSettings.hideVolumeBar.collectAsStateWithLifecycle()
+    val speedKeepsPitch by AppSettings.speedKeepsPitch.collectAsStateWithLifecycle()
     val hideStatusBarInPlayer by AppSettings.hideStatusBarInPlayer.collectAsStateWithLifecycle()
     val hideSongStatus by AppSettings.hideSongStatus.collectAsStateWithLifecycle()
     val showQueueHistory by AppSettings.showQueueHistory.collectAsStateWithLifecycle()
@@ -1473,6 +1475,25 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setHideVolumeBar(!hideVolumeBar) },
+                )
+            }
+            val keepPitchTitle = stringResource(R.string.speed_keeps_pitch)
+            row(keepPitchTitle, "speed", "pitch", "tempo", "player") {
+                SettingsRow(
+                    icon = Icons.Rounded.Speed,
+                    title = keepPitchTitle,
+                    subtitle = stringResource(R.string.speed_keeps_pitch_subtitle),
+                    trailing = {
+                        Switch(
+                            checked = speedKeepsPitch,
+                            onCheckedChange = AppSettings::setSpeedKeepsPitch,
+                            colors = SwitchDefaults.colors(
+                                checkedTrackColor = MaterialTheme.colorScheme.primary,
+                                checkedBorderColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        )
+                    },
+                    onClick = { AppSettings.setSpeedKeepsPitch(!speedKeepsPitch) },
                 )
             }
             val hideStatusBarTitle = stringResource(R.string.hide_status_bar_in_player)

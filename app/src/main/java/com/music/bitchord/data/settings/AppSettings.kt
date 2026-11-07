@@ -351,6 +351,12 @@ object AppSettings {
     val equalizerPreset = MutableStateFlow(EqualizerPreset.FLAT)
 
     val playbackSpeed = MutableStateFlow(1.0f)
+
+    /**
+     * Whether another speed keeps the pitch (stretched in time) or moves it with the tempo, like a
+     * record — the second by default, as on the desktop.
+     */
+    val speedKeepsPitch = MutableStateFlow(false)
     val themeMode = MutableStateFlow(ThemeMode.DARK)
 
     /** Keep playing similar music once the queue runs out. */
@@ -872,6 +878,7 @@ object AppSettings {
         equalizerBands.value = readEqualizerBands()
         equalizerPreset.value = EqualizerPreset.matching(equalizerBands.value)
         playbackSpeed.value = prefs.getFloat(KEY_SPEED, 1.0f)
+        speedKeepsPitch.value = prefs.getBoolean(KEY_SPEED_KEEPS_PITCH, false)
         themeMode.value = runCatching {
             ThemeMode.valueOf(prefs.getString(KEY_THEME, null) ?: "DARK")
         }.getOrDefault(ThemeMode.DARK)
@@ -1231,6 +1238,11 @@ object AppSettings {
     fun setPlaybackSpeed(value: Float) {
         playbackSpeed.value = value
         prefs.edit().putFloat(KEY_SPEED, value).apply()
+    }
+
+    fun setSpeedKeepsPitch(value: Boolean) {
+        speedKeepsPitch.value = value
+        prefs.edit().putBoolean(KEY_SPEED_KEEPS_PITCH, value).apply()
     }
 
     fun setShowNerdStats(value: Boolean) {
@@ -2077,6 +2089,7 @@ object AppSettings {
     private const val KEY_EQ_BALANCE = "equalizer_balance"
     private const val KEY_EQ_BANDS = "equalizer_bands"
     private const val KEY_SPEED = "playback_speed"
+    private const val KEY_SPEED_KEEPS_PITCH = "speed_keeps_pitch"
     private const val KEY_THEME = "theme_mode"
     private const val KEY_AUTOPLAY = "autoplay"
     private const val KEY_SHUFFLE_ENABLED = "shuffle_enabled"

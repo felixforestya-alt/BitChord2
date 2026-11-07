@@ -123,6 +123,15 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
     // none of these objects should be woken for a launch that never opens it.
     override val volume: SystemVolume by lazy { CastAwareVolume(MusicStreamVolume(app), scope) }
 
+    override val playbackSpeed: com.music.bitchord.ui.player.PlaybackSpeedControl =
+        object : com.music.bitchord.ui.player.PlaybackSpeedControl {
+            override val speed = com.music.bitchord.data.settings.AppSettings.playbackSpeed
+            override fun set(speed: Float) {
+                val clamped = speed.coerceIn(0.25f, 3f)
+                if (clamped != this.speed.value) com.music.bitchord.data.settings.AppSettings.setPlaybackSpeed(clamped)
+            }
+        }
+
     @Composable
     override fun rememberAudioOutputs(): List<AudioOutputDevice> {
         val outputs = rememberAndroidAudioOutputs()

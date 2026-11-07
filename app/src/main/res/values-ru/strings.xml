@@ -114,6 +114,12 @@
     <string name="dolby_atmos_open_failed">Не удалось открыть настройки Dolby Atmos</string>
     <string name="update_available">Доступно обновление: v%1$s</string>
     <string name="software_update">Обновление ПО</string>
+    <string name="update_check">Проверить обновления</string>
+    <string name="update_status_installed">Установлена версия %1$s — нажмите, чтобы проверить</string>
+    <string name="update_status_checking">Проверяю…</string>
+    <string name="update_status_current">Версия %1$s — последняя</string>
+    <string name="update_status_failed">Не удалось проверить. Установлена %1$s</string>
+    <string name="update_status_available">Вышла версия %1$s — нажмите, чтобы обновить</string>
     <string name="update_available_body">bitchord %1$s доступен для загрузки.</string>
     <string name="update_downloading_body">Загрузка bitchord %1$s…</string>
     <string name="update_ready_body">bitchord %1$s готов к установке.</string>

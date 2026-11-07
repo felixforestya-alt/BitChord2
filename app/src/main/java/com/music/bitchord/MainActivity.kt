@@ -756,6 +756,11 @@ private fun BitChordApp(
             showUpdateDialog = true
         }
     }
+    // Settings' Updates row asks for the sheet too.
+    val updateSheetRequests by AppUpdateChecker.sheetRequests.collectAsStateWithLifecycle()
+    LaunchedEffect(updateSheetRequests) {
+        if (updateSheetRequests > 0 && updateNotice != null) showUpdateDialog = true
+    }
     val query by viewModel.query.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()

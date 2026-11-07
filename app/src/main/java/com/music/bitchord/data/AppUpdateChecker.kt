@@ -50,6 +50,20 @@ object AppUpdateChecker {
     private val _available = MutableStateFlow<UpdateInfo?>(null)
     val available = _available.asStateFlow()
 
+    /** How the last look at GitHub went, for the Updates row in Settings. */
+    enum class CheckState { IDLE, CHECKING, UP_TO_DATE, FAILED }
+
+    private val _checkState = MutableStateFlow(CheckState.IDLE)
+    val checkState = _checkState.asStateFlow()
+
+    /** Bumped when Settings asks for the update sheet; the activity opens it. */
+    private val _sheetRequests = MutableStateFlow(0)
+    val sheetRequests = _sheetRequests.asStateFlow()
+
+    fun requestSheet() {
+        _sheetRequests.value++
+    }
+
     /** Where this update's APK download currently stands, for the dialog's progress row. */
     sealed interface DownloadState {
         data object Idle : DownloadState
@@ -66,20 +80,27 @@ object AppUpdateChecker {
     private var downloadCancelled = false
 
     suspend fun check() = withContext(Dispatchers.IO) {
-        runCatching {
+        _checkState.value = CheckState.CHECKING
+        val done = runCatching {
             val request = Request.Builder().url(LATEST_RELEASE_URL).build()
             val body = Http.client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) null else response.body?.string()
-            } ?: return@runCatching
-            val release = json.parseToJsonElement(body) as? JsonObject ?: return@runCatching
-            val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
-            val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: return@runCatching
+            } ?: return@runCatching false
+            val release = json.parseToJsonElement(body) as? JsonObject ?: return@runCatching false
+            val tag = release["tag_name"]?.jsonPrimitive?.contentOrNull ?: return@runCatching false
+            val url = release["html_url"]?.jsonPrimitive?.contentOrNull ?: return@runCatching false
             val apkUrl = apkAssetUrl(release)
             val notes = release["body"]?.jsonPrimitive?.contentOrNull
             val latest = tag.removePrefix("v")
             if (isNewer(latest, BuildConfig.VERSION_NAME)) {
                 _available.value = UpdateInfo(latest, url, apkUrl, notes)
             }
+            true
+        }.getOrDefault(false)
+        _checkState.value = when {
+            !done -> CheckState.FAILED
+            _available.value == null -> CheckState.UP_TO_DATE
+            else -> CheckState.IDLE
         }
     }
 

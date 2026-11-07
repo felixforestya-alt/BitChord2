@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.screens
 
+import com.music.bitchord.data.AppUpdateChecker
+import androidx.compose.material.icons.rounded.SystemUpdate
 import com.music.bitchord.wear.WatchInstaller
 import android.content.Context
 import android.content.Intent
@@ -1551,6 +1553,35 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setHideSongStatus(!hideSongStatus) },
+                )
+            }
+        }
+
+        SearchableSettingsGroup(search, header = stringResource(R.string.software_update)) {
+            val updatesTitle = stringResource(R.string.update_check)
+            row(updatesTitle, "update", "version", "release", "apk", "github") {
+                val updateScope = rememberCoroutineScope()
+                val update by AppUpdateChecker.available.collectAsStateWithLifecycle()
+                val checkState by AppUpdateChecker.checkState.collectAsStateWithLifecycle()
+                val installed = version.orEmpty()
+                val waiting = update
+                SettingsRow(
+                    icon = Icons.Rounded.SystemUpdate,
+                    title = updatesTitle,
+                    subtitle = when {
+                        waiting != null -> stringResource(R.string.update_status_available, waiting.version)
+                        checkState == AppUpdateChecker.CheckState.CHECKING -> stringResource(R.string.update_status_checking)
+                        checkState == AppUpdateChecker.CheckState.FAILED -> stringResource(R.string.update_status_failed, installed)
+                        checkState == AppUpdateChecker.CheckState.UP_TO_DATE -> stringResource(R.string.update_status_current, installed)
+                        else -> stringResource(R.string.update_status_installed, installed)
+                    },
+                    onClick = {
+                        if (waiting != null) {
+                            AppUpdateChecker.requestSheet()
+                        } else if (checkState != AppUpdateChecker.CheckState.CHECKING) {
+                            updateScope.launch { AppUpdateChecker.check() }
+                        }
+                    },
                 )
             }
         }

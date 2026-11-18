@@ -91,6 +91,11 @@ kotlin {
         jvmTest.dependencies {
             implementation(kotlin("test"))
             implementation("junit:junit:4.13.2")
+            // Skia's native half, for the tests that draw (AuroraCostTest): the desktop app
+            // brings its own, this module's tests had none. The version Windows resolves here.
+            if (System.getProperty("os.name").contains("Windows", ignoreCase = true)) {
+                runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:0.9.37.4")
+            }
         }
         androidMain.dependencies {
             // The phone's own versions, so nothing here moves them.

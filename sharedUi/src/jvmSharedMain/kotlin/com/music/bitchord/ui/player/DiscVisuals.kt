@@ -514,6 +514,7 @@ internal fun DiscVisualizer(
 ) {
     if (style == DiscVisualizerStyle.NONE) return
     val particles = remember { ParticleField(140) }
+    val auroraParts = remember { AuroraParts() }
     // Drawn at half the screen's resolution and stretched: every style here is soft light, and
     // a quarter of the pixels is what lets a phone's GPU keep it up at the display's rate.
     BoxWithConstraints(modifier) {
@@ -531,7 +532,7 @@ internal fun DiscVisualizer(
         val bands = AudioSpectrum.bandsAt(System.nanoTime())
         val energy = energyOf(bands)
         when (style) {
-            DiscVisualizerStyle.AURORA -> aurora(t, energy, accent)
+            DiscVisualizerStyle.AURORA -> aurora(t, energy, accent, auroraParts)
             DiscVisualizerStyle.RING -> ring(t, bands, energy, accent, disc().let { (c, r) -> c / VIS_SCALE to r / VIS_SCALE })
             DiscVisualizerStyle.WAVES -> waves(t, energy, accent)
             DiscVisualizerStyle.PARTICLES -> particles.step(this, t, energy, accent, disc().let { (c, r) -> c / VIS_SCALE to r / VIS_SCALE })
@@ -566,7 +567,7 @@ private fun scanlineBrush(height: Int): ShaderBrush {
 }
 
 /** How loud the lows, the mids and the highs are, 0..1 each. */
-private class Energy(val bass: Float, val mid: Float, val high: Float) {
+internal class Energy(val bass: Float, val mid: Float, val high: Float) {
     val overall: Float get() = (bass * 0.5f + mid * 0.35f + high * 0.15f)
 }
 
@@ -581,7 +582,7 @@ private fun energyOf(bands: FloatArray): Energy {
 }
 
 /** The colour [degrees] round the hue wheel from [base], at its own saturation and brightness. */
-private fun Color.discHueShifted(degrees: Float, value: Float? = null): Color {
+internal fun Color.discHueShifted(degrees: Float, value: Float? = null): Color {
     val hsv = FloatArray(3)
     rgbToHsvInto(red, green, blue, hsv)
     val hue = ((hsv[0] + degrees) % 360f + 360f) % 360f
@@ -605,15 +606,40 @@ private fun rgbToHsvInto(r: Float, g: Float, b: Float, out: FloatArray) {
 
 // ---- Aurora: soft lights drifting in the artwork's colours, swelling with the music ----------
 
-private fun DrawScope.aurora(t: Float, energy: Energy, accent: Color) {
-    val lights = listOf(
-        accent.discHueShifted(0f, 0.95f) to energy.bass,
-        accent.discHueShifted(38f, 0.9f) to energy.mid,
-        accent.discHueShifted(-46f, 0.85f) to energy.high,
-        accent.discHueShifted(180f, 0.75f) to energy.mid * 0.7f,
-        Color.White to energy.high * 0.6f,
-    )
-    lights.forEachIndexed { i, (colour, level) ->
+/**
+ * What the aurora draws with that only changes with the cover: its eight shifted colours, worked
+ * out again only when the accent moves, and its three ribbon paths, rewound rather than made anew.
+ * On every frame of the display they were eight colour conversions, a list of pairs and three new
+ * native paths, on the UI thread. Internal for its benchmark, as is [aurora].
+ */
+internal class AuroraParts {
+    private var forAccent: Color = Color.Unspecified
+    val lights = Array(4) { Color.Unspecified }
+    val ribbons = Array(3) { Color.Unspecified }
+    val paths = Array(3) { Path() }
+
+    fun update(accent: Color) {
+        if (accent == forAccent) return
+        forAccent = accent
+        lights[0] = accent.discHueShifted(0f, 0.95f)
+        lights[1] = accent.discHueShifted(38f, 0.9f)
+        lights[2] = accent.discHueShifted(-46f, 0.85f)
+        lights[3] = accent.discHueShifted(180f, 0.75f)
+        for (k in 0 until 3) ribbons[k] = accent.discHueShifted(k * 30f - 30f, 1f)
+    }
+}
+
+internal fun DrawScope.aurora(t: Float, energy: Energy, accent: Color, parts: AuroraParts) {
+    parts.update(accent)
+    for (i in 0 until 5) {
+        val colour = if (i < 4) parts.lights[i] else Color.White
+        val level = when (i) {
+            0 -> energy.bass
+            1 -> energy.mid
+            2 -> energy.high
+            3 -> energy.mid * 0.7f
+            else -> energy.high * 0.6f
+        }
         val cx = size.width * (0.58f + 0.30f * sin(t * (0.07f + i * 0.013f) + i * 1.7f))
         val cy = size.height * (0.46f + 0.30f * cos(t * (0.06f + i * 0.011f) + i * 2.3f))
         val radius = size.minDimension * (0.34f + 0.20f * level + 0.04f * sin(t * 0.8f + i))
@@ -633,7 +659,7 @@ private fun DrawScope.aurora(t: Float, energy: Energy, accent: Color) {
     }
     // Ribbons of light: the curtains an aurora is named for.
     for (k in 0 until 3) {
-        val path = Path()
+        val path = parts.paths[k].apply { rewind() }
         val base = size.height * (0.28f + k * 0.14f)
         var x = 0f
         path.moveTo(0f, base)
@@ -645,7 +671,7 @@ private fun DrawScope.aurora(t: Float, energy: Energy, accent: Color) {
         drawPath(
             path,
             brush = Brush.horizontalGradient(
-                listOf(Color.Transparent, accent.discHueShifted(k * 30f - 30f, 1f).copy(alpha = 0.22f + energy.high * 0.3f), Color.Transparent),
+                listOf(Color.Transparent, parts.ribbons[k].copy(alpha = 0.22f + energy.high * 0.3f), Color.Transparent),
             ),
             style = Stroke(width = size.height * (0.03f + energy.bass * 0.03f), cap = StrokeCap.Round),
             blendMode = BlendMode.Screen,

@@ -553,6 +553,10 @@ internal fun MiniPlayerPreviousGlyph(tint: Color) {
  */
 internal fun Modifier.miniProgress(progress: () -> Float, color: Color): Modifier = drawWithContent {
     drawContent()
+    // Under the open player nobody sees this line. Not read then, the position — reported twice a
+    // second — no longer redraws the hidden window under the player; read again the moment the
+    // player goes, it is drawn where the song is by then.
+    if (com.music.bitchord.ui.components.PageCover.covered) return@drawWithContent
     val stroke = 2.dp.toPx()
     val top = size.height - stroke
     val pill = androidx.compose.ui.graphics.Path().apply {

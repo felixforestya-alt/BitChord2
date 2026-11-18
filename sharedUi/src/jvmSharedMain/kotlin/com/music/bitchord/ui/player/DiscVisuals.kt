@@ -58,6 +58,7 @@ import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.ui.graphics.forPixelAccess
 import com.music.bitchord.ui.graphics.toImageBitmap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
 import kotlin.math.abs
@@ -546,6 +547,9 @@ internal fun DiscVisualizer(
 /** How much smaller than the screen the visualiser is drawn — see [DiscVisualizer]. */
 private const val VIS_SCALE = 2f
 
+/** How often the backdrop looks to see whether the player over it has gone. */
+private const val COVERED_CHECK_MS = 250L
+
 /** The marquee's text, drawn once at half size into a bitmap. */
 private fun marqueeStrip(layout: TextLayoutResult, color: Color): ImageBitmap {
     val width = (layout.size.width / 2).coerceAtLeast(1)
@@ -876,9 +880,23 @@ fun LivingBackdrop(coverUrl: String?, covered: () -> Boolean, modifier: Modifier
     )
     val shown by animateFloatAsState(if (coverUrl != null) 1f else 0f, tween(350), label = "livingShown")
     val time = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    // Asleep with no track, and with the app out of sight — the screen off, another app in front:
+    // it woke twenty times a second for as long as Home existed, drawn or not.
+    val foreground = com.music.bitchord.ui.rememberIsForeground()
+    val running by androidx.compose.runtime.rememberUpdatedState(coverUrl != null && foreground)
     androidx.compose.runtime.LaunchedEffect(Unit) {
         var last = System.nanoTime()
         while (true) {
+            if (!running) {
+                androidx.compose.runtime.snapshotFlow { running }.first { it }
+                last = System.nanoTime()
+            }
+            // Under the player it stands still, and is only looked in on now and then.
+            if (covered()) {
+                kotlinx.coroutines.delay(COVERED_CHECK_MS)
+                last = System.nanoTime()
+                continue
+            }
             kotlinx.coroutines.delay(50)
             val now = System.nanoTime()
             if (!covered()) time.floatValue += (now - last) / 1_000_000_000f

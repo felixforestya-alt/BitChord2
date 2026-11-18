@@ -88,6 +88,9 @@ object LastPlayed {
         prefs.edit()
             .putString(KEY_QUEUE, encoded)
             .putInt(KEY_INDEX, safeIndex - bounds.first)
+            // Beside the queue too, rewritten anyway: what a restart falls back on if it finds
+            // this queue on disk but not the progress written after it.
+            .putLong(KEY_POSITION, lastPositionMs)
             .putLong(KEY_STAMP, stamped)
             .apply()
         writeProgress(stamped, safeIndex - bounds.first, lastPositionMs).apply()

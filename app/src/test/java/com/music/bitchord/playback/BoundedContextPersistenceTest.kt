@@ -1,6 +1,5 @@
 package com.music.bitchord.playback
 
-import android.content.SharedPreferences
 import com.music.bitchord.data.model.ArtistRef
 import com.music.bitchord.data.model.PlaybackSourceType
 import com.music.bitchord.data.model.QueueTier

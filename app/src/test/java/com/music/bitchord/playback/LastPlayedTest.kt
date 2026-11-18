@@ -70,6 +70,28 @@ class LastPlayedTest {
     }
 
     @Test
+    fun `a queue saved without its progress falls back on the newest position, not an old one`() {
+        LastPlayed.saveQueueImmediately(songs(10), 0, 7_000L)
+        LastPlayed.savePlaybackState(0, 3_600_000L)
+        val olderProgress = progressFile.getAll()
+        // A track change: the queue saved again, and the process gone before its progress landed.
+        LastPlayed.saveQueue(songs(10), 1)
+        progressFile.edit().clear().apply()
+        val edit = progressFile.edit()
+        olderProgress.forEach { (key, value) ->
+            when (value) {
+                is Int -> edit.putInt(key, value)
+                is Long -> edit.putLong(key, value)
+            }
+        }
+        edit.apply()
+        restart()
+        val back = requireNotNull(LastPlayed.load())
+        assertEquals(1, back.index)
+        assertEquals(3_600_000L, back.positionMs)
+    }
+
+    @Test
     fun `a queue stored before the progress file keeps the positions saved after the update`() {
         // As an older version left it: index and position beside the queue, no stamp.
         LastPlayed.saveQueueImmediately(songs(10), 2, 9_000L)

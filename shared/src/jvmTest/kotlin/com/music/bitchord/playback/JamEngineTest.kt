@@ -222,4 +222,45 @@ class JamEngineTest {
         println("BENCH jam batch of 10: %.2f ms, %d KB".format(perBatchMs, perBatchKb))
         assertTrue(perBatchMs < 20, "a batch took $perBatchMs ms")
     }
+
+    @Test
+    fun theEarLearnsATracksEnergyAndItsArtists() {
+        val store = MemoryStore()
+        var loud = 0.8f
+        val ear = JamEnergy(store, level = { loud }, isJam = { it.radioName == "My Jam" })
+        val track = song("x", "Loud Band").copy(radioName = "My Jam")
+        ear.nowPlaying(track)
+        repeat(JamEnergy.MIN_SAMPLES) { ear.sample(); loud = if (loud == 0.8f) 0.7f else 0.8f }
+        ear.nowPlaying(null)
+        val heard = ear.of(track)!!
+        assertTrue(heard in 0.5f..0.9f, "heard $heard")
+        // A track of theirs never played is placed by the artist; another artist's is not known.
+        assertEquals(heard, JamEnergy(store, { null }, { true }).of(song("y", "Loud Band")))
+        assertEquals(null, ear.of(song("z", "Someone Else")))
+        // Not a jam track, or not heard long enough: nothing kept.
+        val short = song("s", "Quiet").copy(radioName = "My Jam")
+        ear.nowPlaying(short)
+        repeat(5) { ear.sample() }
+        ear.nowPlaying(null)
+        assertEquals(null, ear.of(short))
+    }
+
+    @Test
+    fun theLevelMeterCostsNextToNothing() {
+        val block = FloatArray(2048) { kotlin.math.sin(it * 0.05).toFloat() * 0.5f }
+        repeat(20_000) { LevelMeter.feed(block, block.size) }
+        LevelMeter.take()
+        val threads = java.lang.management.ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
+        val bytes0 = threads.currentThreadAllocatedBytes
+        val t0 = System.nanoTime()
+        val blocks = 100_000
+        repeat(blocks) { LevelMeter.feed(block, block.size) }
+        val perBlockUs = (System.nanoTime() - t0) / blocks / 1e3
+        val allocated = threads.currentThreadAllocatedBytes - bytes0
+        val level = LevelMeter.take()!!
+        // A 1024-frame stereo block is 21 ms of sound at 48 kHz.
+        println("BENCH level meter: %.2f us per 1024-frame stereo block (%.4f%% of one core), %d bytes allocated, level %.2f".format(perBlockUs, perBlockUs / 21_333.0 * 100, allocated, level))
+        assertTrue(level in 0.5f..1f)
+        assertTrue(perBlockUs < 50)
+    }
 }

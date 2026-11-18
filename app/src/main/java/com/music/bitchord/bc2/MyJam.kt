@@ -7,6 +7,8 @@ import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.playback.JamCore
 import com.music.bitchord.playback.JamDiscovery
+import com.music.bitchord.playback.JamEnergy
+import com.music.bitchord.playback.LevelMeter
 import com.music.bitchord.playback.JamStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -98,15 +100,30 @@ internal object MyJam {
         Bc2Prefs.putBoolean(KEY_SHOWN, value)
     }
 
+    private val store = object : JamStore {
+        override fun get(key: String) = Bc2Prefs.string("jam_$key")
+        override fun put(key: String, value: String) = Bc2Prefs.putString("jam_$key", value)
+    }
+
+    /**
+     * How energetic each jam track sounds, heard as it plays from the playback chain's own level
+     * meter — a sum of squares per block, see [LevelMeter] — so a batch can be ordered without
+     * sudden jumps.
+     */
+    private val energy = JamEnergy(
+        store = store,
+        level = LevelMeter::take,
+        isJam = { isJam(it.radioName) },
+        log = { Log.d(TAG, it) },
+    )
+
     private val core = JamCore(
-        store = object : JamStore {
-            override fun get(key: String) = Bc2Prefs.string("jam_$key")
-            override fun put(key: String, value: String) = Bc2Prefs.putString("jam_$key", value)
-        },
+        store = store,
         stationOf = ::stationFor,
         radioName = { radioName },
         reason = { seed -> bc2("Мой джем · похоже на «${seed.title}»", "My Jam · like “${seed.title}”") },
         log = { Log.d(TAG, it) },
+        energyOf = energy::of,
     )
 
     /**
@@ -186,6 +203,7 @@ internal object MyJam {
             }
         }
         core.current = next?.takeIf { isJam(it.radioName) }
+        energy.nowPlaying(next)
     }
 
     /** A heart or thumbs-down given to the track [videoId]: counted when it is the jam's, playing now. */

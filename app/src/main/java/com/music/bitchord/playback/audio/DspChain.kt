@@ -85,6 +85,8 @@ class DspChain(
         // see; the loudness stage's limiter is what catches whatever survives.
         loudness.holdLimiter = equalizer.isShaping
         loudness.process(block)
+        // How loud, for My Jam's ear: a sum of squares, nothing more — see LevelMeter.
+        com.music.bitchord.playback.LevelMeter.feed(block.samples, block.sampleCount)
         // What is about to be heard, for the disc player's visualiser — only while it is up.
         if (AudioSpectrum.wanted) {
             AudioSpectrum.feed(block.samples, block.sampleCount, block.channelCount, currentSampleRate, OUTPUT_LATENCY_NANOS)

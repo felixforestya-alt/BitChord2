@@ -18,11 +18,50 @@ object LastPlayed {
     class Snapshot(val songs: List<Song>, val index: Int, val positionMs: Long)
 
     private lateinit var prefs: SharedPreferences
+
+    /**
+     * The index and position, kept apart from the queue. Android rewrites a whole preferences
+     * file on every change to it, and beside the queue's JSON — up to 76 tracks — a position saved
+     * every five seconds rewrote all of that every five seconds. Stamped with the queue they
+     * belong to, so a position saved for an older queue is never read against a newer one.
+     */
+    private lateinit var progress: SharedPreferences
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** The stamp of the queue stored now. */
+    @Volatile private var stamp = 0L
+
+    /**
+     * The last position saved. A queue saved without one carries it over, as it did when both sat
+     * in one file: the playing track is usually still the playing track after a queue edit.
+     */
+    @Volatile private var lastPositionMs = 0L
+
     fun init(context: Context) {
-        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        attach(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
+            context.getSharedPreferences(PROGRESS_PREFS_NAME, Context.MODE_PRIVATE),
+        )
     }
+
+    /** Test-only dependency injection; production uses [init]. */
+    internal fun initForTesting(testPrefs: SharedPreferences, testProgress: SharedPreferences) =
+        attach(testPrefs, testProgress)
+
+    private fun attach(queuePrefs: SharedPreferences, progressPrefs: SharedPreferences) {
+        prefs = queuePrefs
+        progress = progressPrefs
+        stamp = prefs.getLong(KEY_STAMP, 0L)
+        // A queue stored before the stamps: given one now, or every position saved against it
+        // would be passed over until the queue next changed.
+        if (stamp == 0L && prefs.contains(KEY_QUEUE)) prefs.edit().putLong(KEY_STAMP, newStamp()).apply()
+        lastPositionMs = when {
+            progress.contains(KEY_POSITION) -> progress.getLong(KEY_POSITION, 0L)
+            else -> prefs.getLong(KEY_POSITION, 0L)
+        }
+    }
+
+    private fun newStamp(): Long = (System.nanoTime() xor stamp).let { if (it == 0L) 1L else it }.also { stamp = it }
 
     internal fun window(size: Int, index: Int): IntRange {
         if (size <= 0) return IntRange.EMPTY
@@ -45,10 +84,13 @@ object LastPlayed {
         val encoded = runCatching {
             json.encodeToString(StoredQueue.serializer(), stored)
         }.getOrNull() ?: return
+        val stamped = newStamp()
         prefs.edit()
             .putString(KEY_QUEUE, encoded)
             .putInt(KEY_INDEX, safeIndex - bounds.first)
+            .putLong(KEY_STAMP, stamped)
             .apply()
+        writeProgress(stamped, safeIndex - bounds.first, lastPositionMs).apply()
     }
 
     /**
@@ -69,20 +111,28 @@ object LastPlayed {
         val encoded = runCatching {
             json.encodeToString(StoredQueue.serializer(), stored)
         }.getOrNull() ?: return
+        val stamped = newStamp()
         prefs.edit()
             .putString(KEY_QUEUE, encoded)
             .putInt(KEY_INDEX, safeIndex - bounds.first)
             .putLong(KEY_POSITION, positionMs.coerceAtLeast(0L))
+            .putLong(KEY_STAMP, stamped)
             .commit()
+        writeProgress(stamped, safeIndex - bounds.first, positionMs).commit()
     }
 
     /** Update only cheap scalar state; this performs no queue conversion or JSON work. */
     fun savePlaybackState(index: Int, positionMs: Long) {
         if (!prefs.contains(KEY_QUEUE)) return
-        prefs.edit()
+        writeProgress(stamp, index, positionMs).apply()
+    }
+
+    private fun writeProgress(stamped: Long, index: Int, positionMs: Long): SharedPreferences.Editor {
+        lastPositionMs = positionMs.coerceAtLeast(0L)
+        return progress.edit()
+            .putLong(KEY_STAMP, stamped)
             .putInt(KEY_INDEX, index.coerceAtLeast(0))
-            .putLong(KEY_POSITION, positionMs.coerceAtLeast(0L))
-            .apply()
+            .putLong(KEY_POSITION, lastPositionMs)
     }
 
     fun load(): Snapshot? {
@@ -91,6 +141,15 @@ object LastPlayed {
             ?: return null
         if (stored.tracks.isEmpty()) return null
         val songs = stored.tracks.map(StoredTrack::toSong)
+        // The progress kept apart, when it is this queue's: the newest there is.
+        val kept = progress.takeIf { it.getLong(KEY_STAMP, 0L).let { s -> s != 0L && s == prefs.getLong(KEY_STAMP, -1L) } }
+        if (kept != null && kept.contains(KEY_INDEX)) {
+            return Snapshot(
+                songs = songs,
+                index = kept.getInt(KEY_INDEX, 0).coerceIn(songs.indices),
+                positionMs = kept.getLong(KEY_POSITION, 0L).coerceAtLeast(0L),
+            )
+        }
         val index = if (prefs.contains(KEY_INDEX)) {
             prefs.getInt(KEY_INDEX, 0)
         } else {
@@ -109,12 +168,16 @@ object LastPlayed {
     }
 
     fun clear() {
+        lastPositionMs = 0L
         prefs.edit().clear().apply()
+        progress.edit().clear().apply()
     }
 
     /** Remove a stale queue before another one is installed. */
     fun clearImmediately() {
+        lastPositionMs = 0L
         prefs.edit().clear().commit()
+        progress.edit().clear().commit()
     }
 
     @Serializable
@@ -206,4 +269,6 @@ object LastPlayed {
     private const val KEY_QUEUE = "queue"
     private const val KEY_INDEX = "index"
     private const val KEY_POSITION = "position"
+    private const val PROGRESS_PREFS_NAME = "bitchord_last_played_progress"
+    private const val KEY_STAMP = "stamp"
 }

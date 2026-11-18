@@ -40,6 +40,14 @@ object BoundedContextPersistence {
     )
 
     private lateinit var prefs: SharedPreferences
+
+    /**
+     * Where the playing entry's position is kept, apart from the snapshot. Android rewrites a whole
+     * preferences file on every change to it, and the snapshot is the whole playlist as JSON — up
+     * to megabytes for a long one — so a position written beside it every five seconds rewrote all
+     * of that every five seconds, and a notification tap that met a pending write waited for it.
+     */
+    private lateinit var progress: SharedPreferences
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -49,12 +57,14 @@ object BoundedContextPersistence {
     @Synchronized
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        progress = context.getSharedPreferences(PROGRESS_PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     /** Test-only dependency injection; production uses [init]. */
     @Synchronized
-    internal fun initForTesting(testPrefs: SharedPreferences) {
+    internal fun initForTesting(testPrefs: SharedPreferences, testProgress: SharedPreferences = testPrefs) {
         prefs = testPrefs
+        progress = testProgress
         writer = Executor { it.run() }
     }
 
@@ -92,6 +102,7 @@ object BoundedContextPersistence {
         synchronized(this) {
             if (startedAt != generation) return
             write(state, encoded).apply()
+            writeProgress(state).apply()
         }
     }
 
@@ -101,7 +112,10 @@ object BoundedContextPersistence {
             pending = null
         }
         val encoded = encode(state) ?: return
-        synchronized(this) { write(state, encoded).commit() }
+        synchronized(this) {
+            write(state, encoded).commit()
+            writeProgress(state).commit()
+        }
     }
 
     private fun write(state: State, encoded: String): SharedPreferences.Editor =
@@ -109,6 +123,12 @@ object BoundedContextPersistence {
             .putString(KEY_STATE, encoded)
             .putString(KEY_CURRENT_ENTRY_ID, state.entries.getOrNull(state.currentIndex)?.song?.queueEntryId)
             .putLong(KEY_POSITION, state.positionMs.coerceAtLeast(0L))
+
+    /** The position beside the snapshot just written, so the two never disagree. */
+    private fun writeProgress(state: State): SharedPreferences.Editor =
+        progress.edit()
+            .putString(KEY_PROGRESS_ENTRY_ID, state.entries.getOrNull(state.currentIndex)?.song?.queueEntryId)
+            .putLong(KEY_PROGRESS_POSITION, state.positionMs.coerceAtLeast(0L))
 
     /**
      * Update only the cheap progress scalars for the entry that was persisted.
@@ -122,8 +142,9 @@ object BoundedContextPersistence {
     fun savePlaybackState(currentEntryId: String?, positionMs: Long) {
         if (currentEntryId.isNullOrBlank() || !prefs.contains(KEY_STATE)) return
         if (runCatching { prefs.getString(KEY_CURRENT_ENTRY_ID, null) }.getOrNull() != currentEntryId) return
-        prefs.edit()
-            .putLong(KEY_POSITION, positionMs.coerceAtLeast(0L))
+        progress.edit()
+            .putString(KEY_PROGRESS_ENTRY_ID, currentEntryId)
+            .putLong(KEY_PROGRESS_POSITION, positionMs.coerceAtLeast(0L))
             .apply()
     }
 
@@ -133,6 +154,13 @@ object BoundedContextPersistence {
         val raw = runCatching { prefs.getString(KEY_STATE, null) }.getOrNull() ?: return null
         val state = decode(raw) ?: return null
         val currentEntryId = state.entries[state.currentIndex].song.queueEntryId
+        // The position kept apart, when it is this entry's — the newest there is.
+        val progressEntryId = runCatching { progress.getString(KEY_PROGRESS_ENTRY_ID, null) }.getOrNull()
+        if (progressEntryId != null && progressEntryId == currentEntryId) {
+            val kept = runCatching { progress.getLong(KEY_PROGRESS_POSITION, state.positionMs) }.getOrNull()
+            if (kept != null) return state.copy(positionMs = kept.coerceAtLeast(0L))
+        }
+        // From before the position was kept apart.
         val scalarEntryId = runCatching { prefs.getString(KEY_CURRENT_ENTRY_ID, null) }.getOrNull()
         if (currentEntryId != scalarEntryId) return state
         val positionMs = runCatching { prefs.getLong(KEY_POSITION, state.positionMs) }.getOrNull()
@@ -145,6 +173,7 @@ object BoundedContextPersistence {
         generation += 1
         pending = null
         prefs.edit().clear().apply()
+        progress.edit().clear().apply()
     }
 
     @Synchronized
@@ -152,6 +181,7 @@ object BoundedContextPersistence {
         generation += 1
         pending = null
         prefs.edit().clear().commit()
+        progress.edit().clear().commit()
     }
 
     /** Visible to JVM tests; the Android wrapper above remains the only writer. */
@@ -643,4 +673,7 @@ object BoundedContextPersistence {
     private const val KEY_STATE = "state"
     private const val KEY_CURRENT_ENTRY_ID = "current_entry_id"
     private const val KEY_POSITION = "position"
+    private const val PROGRESS_PREFS_NAME = "bitchord_bounded_context_progress"
+    private const val KEY_PROGRESS_ENTRY_ID = "progress_entry_id"
+    private const val KEY_PROGRESS_POSITION = "progress_position"
 }

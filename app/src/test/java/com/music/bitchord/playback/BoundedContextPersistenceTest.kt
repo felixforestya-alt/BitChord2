@@ -298,6 +298,67 @@ class BoundedContextPersistenceTest {
     }
 
     @Test
+    fun `a progress save rewrites the small progress file, not the snapshot`() {
+        listOf(100, 1_000).forEach { size ->
+            val snapshotFile = FakeSharedPreferences()
+            val progressFile = FakeSharedPreferences()
+            BoundedContextPersistence.initForTesting(snapshotFile, progressFile)
+            val source = QueueSource("Large", PlaybackSourceType.BROWSE, "large")
+            val canonical = List(size) { song("track-$it") }
+            val window = QueueWindow(size).startAt(0)
+            val state = state(
+                canonical,
+                source,
+                window.snapshot(),
+                entries = listOf(entry("current", QueueTier.CONTEXT, 0, 0L)),
+                currentIndex = 0,
+                positionMs = 1_000L,
+                sourceSnapshot = context(canonical, source),
+            )
+            BoundedContextPersistence.saveImmediately(state)
+            val snapshotWrites = snapshotFile.writes
+            val progressBefore = progressFile.rewrittenBytes
+            // A minute of playback, saved every five seconds.
+            repeat(12) { BoundedContextPersistence.savePlaybackState("current", 5_000L * (it + 1)) }
+            assertEquals(snapshotWrites, snapshotFile.writes)
+            assertEquals(60_000L, requireNotNull(BoundedContextPersistence.load()).positionMs)
+            val perSave = (progressFile.rewrittenBytes - progressBefore) / 12
+            println(
+                "BENCH bounded context, $size tracks: a progress save rewrote ${snapshotFile.sizeBytes()} B " +
+                    "before (the snapshot's file), $perSave B now (the progress file)",
+            )
+            assertTrue(perSave < 100)
+        }
+    }
+
+    @Test
+    fun `a snapshot from before the progress file keeps its position`() {
+        val snapshotFile = FakeSharedPreferences()
+        val progressFile = FakeSharedPreferences()
+        BoundedContextPersistence.initForTesting(snapshotFile, progressFile)
+        val source = QueueSource("Release", PlaybackSourceType.BROWSE, "release-1")
+        val canonical = List(2) { song("track-$it") }
+        val state = state(
+            canonical,
+            source,
+            QueueWindow(2).startAt(0).snapshot(),
+            entries = listOf(entry("current", QueueTier.CONTEXT, 0, 0L)),
+            currentIndex = 0,
+            positionMs = 4_000L,
+            sourceSnapshot = context(canonical, source),
+        )
+        BoundedContextPersistence.saveImmediately(state)
+        // As an older version left it: the position beside the snapshot only.
+        progressFile.edit().clear().commit()
+        assertEquals(4_000L, requireNotNull(BoundedContextPersistence.load()).positionMs)
+        BoundedContextPersistence.savePlaybackState("current", 30_000L)
+        assertEquals(30_000L, requireNotNull(BoundedContextPersistence.load()).positionMs)
+        BoundedContextPersistence.clearImmediately()
+        assertTrue(snapshotFile.getAll().isEmpty())
+        assertTrue(progressFile.getAll().isEmpty())
+    }
+
+    @Test
     fun `projection remains bounded for large canonical contexts`() {
         listOf(100, 1_000, 10_000).forEach { size ->
             val source = QueueSource("Large", PlaybackSourceType.BROWSE, "large")
@@ -382,50 +443,4 @@ class BoundedContextPersistenceTest {
         thumbnailUrl = "https://img/$id",
         durationText = "3:21",
     )
-
-    private class FakeSharedPreferences : SharedPreferences {
-        private val data = mutableMapOf<String, Any?>()
-
-        override fun getAll(): Map<String, *> = HashMap(data)
-        override fun getString(key: String?, defValue: String?): String? = data[key] as? String ?: defValue
-        @Suppress("UNCHECKED_CAST")
-        override fun getStringSet(key: String?, defValues: Set<String>?): Set<String>? = data[key] as? Set<String> ?: defValues
-        override fun getInt(key: String?, defValue: Int): Int = (data[key] as? Number)?.toInt() ?: defValue
-        override fun getLong(key: String?, defValue: Long): Long = (data[key] as? Number)?.toLong() ?: defValue
-        override fun getFloat(key: String?, defValue: Float): Float = (data[key] as? Number)?.toFloat() ?: defValue
-        override fun getBoolean(key: String?, defValue: Boolean): Boolean = data[key] as? Boolean ?: defValue
-        override fun contains(key: String?): Boolean = data.containsKey(key)
-        override fun edit(): SharedPreferences.Editor = Editor(this)
-        override fun registerOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
-        override fun unregisterOnSharedPreferenceChangeListener(listener: SharedPreferences.OnSharedPreferenceChangeListener?) {}
-
-        private class Editor(private val prefs: FakeSharedPreferences) : SharedPreferences.Editor {
-            private val pending = mutableMapOf<String, Any?>()
-            private val removed = mutableSetOf<String>()
-            private var clearAll = false
-
-            override fun putString(key: String?, value: String?): SharedPreferences.Editor {
-                if (key != null) pending[key] = value
-                return this
-            }
-            override fun putStringSet(key: String?, values: Set<String>?): SharedPreferences.Editor {
-                if (key != null) pending[key] = values
-                return this
-            }
-            override fun putInt(key: String?, value: Int): SharedPreferences.Editor { if (key != null) pending[key] = value; return this }
-            override fun putLong(key: String?, value: Long): SharedPreferences.Editor { if (key != null) pending[key] = value; return this }
-            override fun putFloat(key: String?, value: Float): SharedPreferences.Editor { if (key != null) pending[key] = value; return this }
-            override fun putBoolean(key: String?, value: Boolean): SharedPreferences.Editor { if (key != null) pending[key] = value; return this }
-            override fun remove(key: String?): SharedPreferences.Editor { if (key != null) removed += key; return this }
-            override fun clear(): SharedPreferences.Editor { clearAll = true; return this }
-            override fun commit(): Boolean { apply(); return true }
-            override fun apply() {
-                if (clearAll) prefs.data.clear()
-                removed.forEach(prefs.data::remove)
-                pending.forEach { (key, value) ->
-                    if (value == null) prefs.data.remove(key) else prefs.data[key] = value
-                }
-            }
-        }
-    }
 }

@@ -107,9 +107,9 @@ class AuroraCostTest {
         for (f in listOf(0, 37, 600, 4_321)) {
             val before = frames(1, f) { t, e -> auroraBefore(t, e, accent) }.toPixelMap()
             val after = frames(1, f) { t, e -> aurora(t, e, accent, parts) }.toPixelMap()
-            for (y in 0 until height step 3) for (x in 0 until width step 3) {
-                assertTrue(before[x, y] == after[x, y], "pixel $x,$y of frame $f")
-            }
+            var differ = 0
+            for (y in 0 until height) for (x in 0 until width) if (before[x, y] != after[x, y]) differ++
+            assertTrue(differ == 0, "$differ pixels differ in frame $f")
         }
     }
 

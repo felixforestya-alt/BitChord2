@@ -34,17 +34,23 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
  * precisely so that it goes on running when this does not.
  */
 @Composable
-fun rememberIsForeground(): Boolean {
+fun rememberIsForeground(
+    /**
+     * RESUMED by default: in front and taking input. STARTED for what only has to be visible —
+     * a share sheet over the app pauses it without hiding it.
+     */
+    atLeast: Lifecycle.State = Lifecycle.State.RESUMED,
+): Boolean {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var foreground by remember(lifecycle) {
-        mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    var foreground by remember(lifecycle, atLeast) {
+        mutableStateOf(lifecycle.currentState.isAtLeast(atLeast))
     }
-    DisposableEffect(lifecycle) {
+    DisposableEffect(lifecycle, atLeast) {
         // Every event rather than ON_RESUME/ON_PAUSE alone: the state is read
         // back off the lifecycle instead of inferred from which event arrived,
         // so there is no transition this can be left out of step by.
         val observer = LifecycleEventObserver { owner, _ ->
-            foreground = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            foreground = owner.lifecycle.currentState.isAtLeast(atLeast)
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }

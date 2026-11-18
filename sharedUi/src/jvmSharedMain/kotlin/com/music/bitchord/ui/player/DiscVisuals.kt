@@ -882,7 +882,7 @@ fun LivingBackdrop(coverUrl: String?, covered: () -> Boolean, modifier: Modifier
     val time = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     // Asleep with no track, and with the app out of sight — the screen off, another app in front:
     // it woke twenty times a second for as long as Home existed, drawn or not.
-    val foreground = com.music.bitchord.ui.rememberIsForeground()
+    val foreground = com.music.bitchord.ui.rememberIsForeground(androidx.lifecycle.Lifecycle.State.STARTED)
     val running by androidx.compose.runtime.rememberUpdatedState(coverUrl != null && foreground)
     androidx.compose.runtime.LaunchedEffect(Unit) {
         var last = System.nanoTime()

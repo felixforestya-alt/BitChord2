@@ -810,8 +810,10 @@ fun NowPlayingScreen(
     // player shows: the Canvas clip, the artwork mesh and the blurred artwork. The disc player
     // takes none of them, and each track looked the clip up across four services, decoded the
     // artwork into a mesh and blurred it, for a player that was never drawn.
-    val discPlayerOn by PlayerSettings.discPlayer.collectAsStateWithLifecycle()
-    val discOnly = discPlayerOn &&
+    // BitChord²'s disc player — see [DiscPortraitPlayer]. Read once, here, for this and for the
+    // choice of player further down.
+    val discPlayerEnabled by PlayerSettings.discPlayer.collectAsStateWithLifecycle()
+    val discOnly = discPlayerEnabled &&
         (landscapePlayerAvailable(windowWidth, windowHeight) || !tabletSizedPlayer(windowWidth))
     val canvas = if (discOnly) null else rememberCanvasArtwork(song)
     var canvasAspect by remember(canvas) { mutableFloatStateOf(0f) }
@@ -843,8 +845,6 @@ fun NowPlayingScreen(
     val canvasCover = remember(canvas?.url) { mutableFloatStateOf(0f) }
     // v1.5's backdrop, kept behind a switch — see [PlayerSettings.legacyMeshGradient].
     val legacyMesh by PlayerSettings.legacyMeshGradient.collectAsStateWithLifecycle()
-    // BitChord²'s disc player, on a phone held upright — see [DiscPortraitPlayer].
-    val discPlayerEnabled by PlayerSettings.discPlayer.collectAsStateWithLifecycle()
     // The backdrop's colours, taken off the artwork's own arrangement rather
     // than quantised out of it — see [ArtworkMesh].
     //

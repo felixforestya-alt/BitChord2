@@ -2151,6 +2151,8 @@ fun BitChordDesktopApp() {
     }
     // Topped up on every track change, the way Android does it, rather than only once the queue has
     // run dry.
+    // How energetic each jam track sounds, heard as it plays — see [DesktopJamEnergy].
+    LaunchedEffect(selectedSong?.videoId) { DesktopJamEnergy.nowPlaying(selectedSong) }
     LaunchedEffect(selectedSong?.videoId, autoplay, repeatMode) {
         loadAutoplaySongs()
     }

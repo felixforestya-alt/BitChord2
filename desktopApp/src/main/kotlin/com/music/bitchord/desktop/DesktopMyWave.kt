@@ -107,6 +107,8 @@ internal object DesktopMyWave {
             radioName = { radioName },
             reason = { seed -> DesktopStrings["wave_like_seed", "My Jam · like “%s”"].format(seed.title) },
             log = DesktopTrackLog::log,
+            // Heard while the jam played, from the visualiser's own figures — see [DesktopJamEnergy].
+            energyOf = DesktopJamEnergy::of,
         )
     }
 

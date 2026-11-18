@@ -184,4 +184,42 @@ class JamEngineTest {
         val next = jam.more(batch, 10)
         assertTrue(next.any { it.videoId.startsWith("loved-") }, "nothing from the liked track: ${next.map { it.videoId }}")
     }
+
+    @Test
+    fun aBatchIsOrderedWithoutSuddenJumpsInEnergy() = runBlocking {
+        val energy = mapOf("a" to 0.1f, "b" to 0.9f, "c" to 0.2f, "d" to 0.8f, "e" to 0.5f)
+        val jam = JamCore(
+            store = MemoryStore(),
+            stationOf = stations(),
+            radioName = { "My Jam" },
+            reason = { "" },
+            energyOf = { energy[it.videoId] },
+        )
+        val seed = song("seed", "x")
+        val picks = listOf("a", "b", "unknown", "c", "d", "e").map { JamPick(song(it, it), seed) }
+        val ordered = jam.smooth(picks, from = 0.12f).map { it.song.videoId }
+        // Up from where the track playing now is, without leaps; the unheard one keeps its place.
+        assertEquals(listOf("a", "c", "unknown", "e", "d", "b"), ordered)
+        // Nothing known: left as picked.
+        assertEquals(picks, JamCore(MemoryStore(), stations(), { "" }, { "" }).smooth(picks, 0.5f))
+    }
+
+    @Test
+    fun aBatchCostsLittle() = runBlocking {
+        // Every station already fetched, as for a jam that has been playing a while: what is left
+        // is the engine's own work, which must be next to nothing beside a network request.
+        val seeds = List(40) { song("s$it", "seed$it") }
+        val jam = JamCore(MemoryStore(), stations(), { "My Jam" }, { "x" }, energyOf = { it.videoId.hashCode() % 100 / 100f })
+        val queue = ArrayList<Song>()
+        queue += jam.start(seeds, seeds.mapTo(HashSet()) { it.videoId }, JamDiscovery.BALANCED, 10)
+        repeat(20) { queue += jam.more(queue, 10) }
+        val threads = java.lang.management.ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
+        val bytes0 = threads.currentThreadAllocatedBytes
+        val t0 = System.nanoTime()
+        repeat(20) { queue += jam.more(queue.takeLast(200), 10) }
+        val perBatchMs = (System.nanoTime() - t0) / 20 / 1e6
+        val perBatchKb = (threads.currentThreadAllocatedBytes - bytes0) / 20 / 1024
+        println("BENCH jam batch of 10: %.2f ms, %d KB".format(perBatchMs, perBatchKb))
+        assertTrue(perBatchMs < 20, "a batch took $perBatchMs ms")
+    }
 }

@@ -51,6 +51,11 @@ class JamCore(
     private val reason: (seed: Song) -> String,
     private val log: (String) -> Unit = {},
     private val now: () -> Long = System::currentTimeMillis,
+    /**
+     * How energetic a track sounds, 0..1, where the platform has heard it or its artist — null
+     * where it has not. Used only to put a batch in an order with no sudden jumps; see [smooth].
+     */
+    private val energyOf: (Song) -> Float? = { null },
 ) {
     private val engine = JamEngine(stationOf)
 
@@ -159,12 +164,37 @@ class JamCore(
             preference = { candidate -> JamEngine.artistKeys(candidate).maxOfOrNull { artistTaste[it] ?: 0f } ?: 0f },
             artistCap = { artist -> if ((artistTaste[artist] ?: 0f) >= FAVOURITE) 2 else 1 },
         )
-        remember(picks.map { it.song.videoId })
+        val ordered = smooth(picks, existing.lastOrNull()?.let(energyOf))
+        remember(ordered.map { it.song.videoId })
         saveState()
-        log("jam: ${picks.size} more in ${engine.sounds} sounds: ${picks.joinToString { "${it.song.artist} (from ${it.seed.title})" }}")
-        return picks.map { (song, seed) ->
+        log("jam: ${ordered.size} more in ${engine.sounds} sounds: ${ordered.joinToString { "${it.song.artist} (from ${it.seed.title})" }}")
+        return ordered.map { (song, seed) ->
             song.copy(queueTier = QueueTier.AUTOPLAY, radioName = radioName(), playbackSource = reason(seed))
         }
+    }
+
+    /**
+     * The batch in an order without sudden jumps in energy: each track whose energy is known goes
+     * where the one before it leaves off — starting from [from], the track playing now — nearest
+     * first. Tracks not yet heard keep their places, between them. Nothing is added or dropped:
+     * this only orders what the jam picked.
+     */
+    internal fun smooth(picks: List<JamPick>, from: Float?): List<JamPick> {
+        val known = picks.withIndex().mapNotNull { (i, pick) -> energyOf(pick.song)?.let { Triple(i, pick, it) } }
+        if (known.size < 2) return picks
+        val left = known.toMutableList()
+        var at = from ?: left.first().third
+        val path = ArrayList<JamPick>(left.size)
+        while (left.isNotEmpty()) {
+            val next = left.minBy { kotlin.math.abs(it.third - at) }
+            left.remove(next)
+            path += next.second
+            at = next.third
+        }
+        val slots = known.map { it.first }
+        val out = picks.toMutableList()
+        slots.forEachIndexed { k, slot -> out[slot] = path[k] }
+        return out
     }
 
     private fun remember(ids: List<String>) {

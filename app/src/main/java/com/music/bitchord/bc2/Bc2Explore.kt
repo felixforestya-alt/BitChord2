@@ -1,11 +1,5 @@
 package com.music.bitchord.bc2
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -190,10 +185,15 @@ private fun exploreKey(item: MoodGenre) = "${item.browseId}|${item.params.orEmpt
 
 private const val KEY_COVERS = "explore_covers"
 
+/** One pass of the heading's light. */
+private const val SWEEP_MS = 7_000f
+
 @Composable
 private fun ExploreHeading() {
-    val shimmer = rememberInfiniteTransition(label = "exploreHeading")
-    val sweep by shimmer.animateFloat(0f, 1f, infiniteRepeatable(tween(7_000, easing = LinearEasing), RepeatMode.Restart), label = "exploreSweep")
+    // On the page's own clock, which stands still while the player covers the page: an infinite
+    // transition kept the hidden page recomposing and redrawing on every frame of the display.
+    val clock = com.music.bitchord.ui.components.rememberPageClockMillis()
+    val sweep = (clock.value % SWEEP_MS) / SWEEP_MS
     Column(Modifier.padding(start = 4.dp, bottom = 4.dp)) {
         Text(
             bc2("Обзор", "Explore"),
@@ -273,16 +273,24 @@ private fun ExploreCard(item: MoodGenre, cover: String?, index: Int, onClick: ()
 /** A card waiting for its cover: its own colour, softly moving, rather than a grey shimmer. */
 @Composable
 private fun ExploreGlow(tone: Color, index: Int, modifier: Modifier) {
-    val drift = rememberInfiniteTransition(label = "exploreGlow")
-    val t by drift.animateFloat(0f, 1f, infiniteRepeatable(tween(3_200 + index % 5 * 300, easing = LinearEasing), RepeatMode.Reverse), label = "glowT")
+    // On the page's clock, still under the player, and read while drawing: an infinite transition
+    // per card recomposed every placeholder on every frame, page covered or not.
+    val clock = com.music.bitchord.ui.components.rememberPageClockMillis()
+    val period = (3_200 + index % 5 * 300).toFloat()
+    val colours = remember(tone) { listOf(lerp(tone, Color.White, 0.25f), tone, lerp(tone, Color.Black, 0.6f)) }
     Box(
-        modifier.background(
-            Brush.radialGradient(
-                listOf(lerp(tone, Color.White, 0.25f), tone, lerp(tone, Color.Black, 0.6f)),
-                center = Offset(150f + t * 250f, 50f + t * 100f),
-                radius = 420f,
-            ),
-        ),
+        modifier.drawBehind {
+            // There and back, as the transition's reverse repeat ran.
+            val f = (clock.value % (period * 2f)) / period
+            val t = if (f <= 1f) f else 2f - f
+            drawRect(
+                Brush.radialGradient(
+                    colours,
+                    center = Offset(150f + t * 250f, 50f + t * 100f),
+                    radius = 420f,
+                ),
+            )
+        },
     )
 }
 

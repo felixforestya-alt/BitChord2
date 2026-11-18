@@ -129,7 +129,7 @@ internal fun JamCard(
         }
     }
     val tuning by MyJam.tuning.collectAsStateWithLifecycle()
-    val onlyNew by MyJam.onlyNew.collectAsStateWithLifecycle()
+    val discovery by MyJam.discovery.collectAsStateWithLifecycle()
     Box(
         modifier
             .fillMaxWidth()
@@ -206,7 +206,7 @@ internal fun JamCard(
                     } else {
                         listOfNotNull(
                             tuning.label().takeIf { tuning != JamTuning.ALL },
-                            bc2("Только новое", "Only new").takeIf { onlyNew },
+                            discovery.label().takeIf { discovery != com.music.bitchord.playback.JamDiscovery.BALANCED },
                         ).ifEmpty { listOf(bc2("Бесконечная музыка для тебя", "Endless music picked for you")) }.joinToString(" · ")
                     },
                     color = Color.White.copy(alpha = 0.85f),
@@ -261,6 +261,18 @@ private fun JamTuning.label(): String = when (this) {
     JamTuning.PARTY -> bc2("Вечеринка", "Party")
 }
 
+private fun com.music.bitchord.playback.JamDiscovery.label(): String = when (this) {
+    com.music.bitchord.playback.JamDiscovery.FAVOURITES -> bc2("Любимое", "Favourites")
+    com.music.bitchord.playback.JamDiscovery.BALANCED -> bc2("Баланс", "Balanced")
+    com.music.bitchord.playback.JamDiscovery.NEW -> bc2("Только новое", "Only new")
+}
+
+private fun com.music.bitchord.playback.JamDiscovery.hint(): String = when (this) {
+    com.music.bitchord.playback.JamDiscovery.FAVOURITES -> bc2("Две трети — ваше любимое и недавнее, остальное новое", "Two thirds what you like and played, the rest new")
+    com.music.bitchord.playback.JamDiscovery.BALANCED -> bc2("Треть — ваше, две трети — новое", "A third yours, two thirds new")
+    com.music.bitchord.playback.JamDiscovery.NEW -> bc2("Ничего из лайков и недавнего", "Nothing you have liked or played lately")
+}
+
 private fun JamSeeds.label(): String = when (this) {
     JamSeeds.LIKED_AND_HISTORY -> bc2("Лайки и история", "Likes and history")
     JamSeeds.LIKED -> bc2("Лайки", "Likes")
@@ -280,7 +292,7 @@ internal fun JamSettingsSheet(
     val tuning by MyJam.tuning.collectAsStateWithLifecycle()
     val seeds by MyJam.seeds.collectAsStateWithLifecycle()
     val playlist by MyJam.playlist.collectAsStateWithLifecycle()
-    val onlyNew by MyJam.onlyNew.collectAsStateWithLifecycle()
+    val discovery by MyJam.discovery.collectAsStateWithLifecycle()
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
             Modifier
@@ -336,8 +348,16 @@ internal fun JamSettingsSheet(
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            ToggleLine(bc2("Только новое", "Only new"), bc2("Без того, что уже лайкнуто или недавно играло", "Leave out what you have liked or played lately"), onlyNew, MyJam::setOnlyNew)
+            Section(bc2("Знакомое и новое", "Familiar and new"))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.music.bitchord.playback.JamDiscovery.entries.forEach { option -> Choice(option.label(), option == discovery) { MyJam.setDiscovery(option) } }
+            }
+            Text(
+                discovery.hint(),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 8.dp),
+            )
             Spacer(Modifier.height(18.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextAction(bc2("Закрыть", "Close"), filled = false, onClick = onDismiss)

@@ -1669,7 +1669,8 @@ private fun BitChordApp(
                     return@launch
                 }
                 val station = batch.mapIndexed { i, song ->
-                    if (i == 0) song.copy(queueTier = QueueTier.CONTEXT, radioName = MyJam.radioName, playbackSource = MyJam.radioName) else song
+                    // Its "playing from" kept: which of the listener's tracks it grew from.
+                    if (i == 0) song.copy(queueTier = QueueTier.CONTEXT, radioName = MyJam.radioName, playbackSource = song.playbackSource ?: MyJam.radioName) else song
                 }
                 activeController.beginRadioQueue()
                 activeRadioSeed = null

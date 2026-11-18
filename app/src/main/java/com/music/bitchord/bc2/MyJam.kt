@@ -3,9 +3,11 @@ package com.music.bitchord.bc2
 import android.util.Log
 import com.music.bitchord.data.YtMusicRepository
 import com.music.bitchord.data.innertube.RadioTuning
-import com.music.bitchord.data.model.QueueTier
+import com.music.bitchord.data.model.LikeStatus
 import com.music.bitchord.data.model.Song
-import com.music.bitchord.playback.JamEngine
+import com.music.bitchord.playback.JamCore
+import com.music.bitchord.playback.JamDiscovery
+import com.music.bitchord.playback.JamStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -28,13 +30,8 @@ internal enum class JamSeeds { LIKED_AND_HISTORY, LIKED, HISTORY, PLAYLIST }
 
 /**
  * My Jam: one button that plays the listener's own endless station, as Yandex Music's My Wave —
- * BitChord²'s, carried over from the desktop.
- *
- * YouTube Music has the parts — a station around any track, and a tuner on it ("Popular", "Deep
- * cuts", "Party") — but no single station of the listener's own. So the jam takes tracks they like
- * or played lately as seeds, plays a tuned station from one, and when it runs low moves on to the
- * next seed: the queue never ends and never sits on one artist for long. With "only new" it leaves
- * out what is already liked or was played lately.
+ * BitChord²'s, the same as the desktop's: [JamCore] picks and learns, this keeps its settings and
+ * tells it what the listener does.
  *
  * Every jam track carries [radioName] in the queue; that is how AutoPlay knows to come here for
  * more rather than to the plain station of the last track — see `loadAutoplayTracks`.
@@ -53,7 +50,11 @@ internal object MyJam {
     private val _seeds = MutableStateFlow(
         runCatching { JamSeeds.valueOf(Bc2Prefs.string(KEY_SEEDS, JamSeeds.LIKED_AND_HISTORY.name)) }.getOrDefault(JamSeeds.LIKED_AND_HISTORY),
     )
-    private val _onlyNew = MutableStateFlow(Bc2Prefs.boolean(KEY_ONLY_NEW, false))
+    private val _discovery = MutableStateFlow(
+        runCatching { JamDiscovery.valueOf(Bc2Prefs.string(KEY_DISCOVERY, "")) }.getOrNull()
+            // From before the three settings: "only new" was the one choice there was.
+            ?: if (Bc2Prefs.boolean(KEY_ONLY_NEW, false)) JamDiscovery.NEW else JamDiscovery.BALANCED,
+    )
     private val _playlist = MutableStateFlow(
         Bc2Prefs.string(KEY_PLAYLIST).split('\n').takeIf { it.size == 2 && it[0].isNotBlank() }?.let { it[0] to it[1] },
     )
@@ -61,7 +62,9 @@ internal object MyJam {
 
     val tuning: StateFlow<JamTuning> = _tuning
     val seeds: StateFlow<JamSeeds> = _seeds
-    val onlyNew: StateFlow<Boolean> = _onlyNew
+
+    /** How much of the jam is what the listener knows, against what is new. */
+    val discovery: StateFlow<JamDiscovery> = _discovery
 
     /** The playlist the jam grows from when [seeds] says so: its browse id and title. */
     val playlist: StateFlow<Pair<String, String>?> = _playlist
@@ -79,9 +82,10 @@ internal object MyJam {
         Bc2Prefs.putString(KEY_SEEDS, value.name)
     }
 
-    fun setOnlyNew(value: Boolean) {
-        _onlyNew.value = value
-        Bc2Prefs.putBoolean(KEY_ONLY_NEW, value)
+    fun setDiscovery(value: JamDiscovery) {
+        _discovery.value = value
+        Bc2Prefs.putString(KEY_DISCOVERY, value.name)
+        core.setDiscovery(value)
     }
 
     fun setPlaylist(id: String, title: String) {
@@ -94,8 +98,16 @@ internal object MyJam {
         Bc2Prefs.putBoolean(KEY_SHOWN, value)
     }
 
-    /** What the jam grows from and picks — shared with the desktop, see [JamEngine]. */
-    private val engine = JamEngine(::stationFor)
+    private val core = JamCore(
+        store = object : JamStore {
+            override fun get(key: String) = Bc2Prefs.string("jam_$key")
+            override fun put(key: String, value: String) = Bc2Prefs.putString("jam_$key", value)
+        },
+        stationOf = ::stationFor,
+        radioName = { radioName },
+        reason = { seed -> bc2("Мой джем · похоже на «${seed.title}»", "My Jam · like “${seed.title}”") },
+        log = { Log.d(TAG, it) },
+    )
 
     /**
      * Starts a jam from [liked] and [history] (most recent first) and returns its first tracks, or
@@ -109,13 +121,8 @@ internal object MyJam {
             // Interleaved, so neither side crowds the other out.
             JamSeeds.LIKED_AND_HISTORY -> interleave(history.take(SEED_POOL / 2), likedSeeds(liked, SEED_POOL / 2))
         }.distinctBy { it.videoId }.ifEmpty { (liked + history).distinctBy { it.videoId }.take(SEED_POOL) }
-        Log.d(TAG, "jam from ${pool.size} seeds (${_seeds.value}, ${liked.size} liked, ${history.size} played, only new ${_onlyNew.value})")
-        if (pool.isEmpty()) return emptyList()
-        engine.start(pool, (liked + history + fromPlaylist).mapTo(HashSet(), Song::videoId), _onlyNew.value)
-        // Kept, so a jam still playing after Android has restarted the app carries on as itself
-        // rather than as the plain station of whatever track was on.
-        Bc2Prefs.putString(KEY_STATE, engine.save())
-        return more(emptyList(), limit)
+        Log.d(TAG, "jam from ${pool.size} seeds (${_seeds.value}, ${liked.size} liked, ${history.size} played, ${_discovery.value})")
+        return core.start(pool, (liked + history + fromPlaylist).mapTo(HashSet(), Song::videoId), _discovery.value, limit)
     }
 
     /**
@@ -138,8 +145,7 @@ internal object MyJam {
         val all = allLiked ?: loadAllLiked().also { allLiked = it }
         if (all.size <= RECENT_LIKES) return
         val count = if (_seeds.value == JamSeeds.LIKED) SEED_POOL else SEED_POOL / 2
-        engine.addSeeds(all.drop(RECENT_LIKES).shuffled().take(count), all.mapTo(HashSet(), Song::videoId))
-        Bc2Prefs.putString(KEY_STATE, engine.save())
+        core.addSeeds(all.drop(RECENT_LIKES).shuffled().take(count), all.mapTo(HashSet(), Song::videoId))
         Log.d(TAG, "jam widened with likes from ${all.size} in all")
     }
 
@@ -163,14 +169,33 @@ internal object MyJam {
      * The next tracks after [existing]; empty when there is no jam, in this process or saved from
      * an earlier one — AutoPlay then carries on with the plain station.
      */
-    suspend fun more(existing: List<Song>, limit: Int): List<Song> {
-        if (!engine.active && !engine.restore(Bc2Prefs.string(KEY_STATE))) return emptyList()
-        val out = engine.more(existing, limit)
-        // Where it has got to, for a later process to carry on from.
-        Bc2Prefs.putString(KEY_STATE, engine.save())
-        Log.d(TAG, "${out.size} more for the jam: ${out.joinToString { it.artist }}")
-        return out.map { it.copy(queueTier = QueueTier.AUTOPLAY, radioName = radioName) }
+    suspend fun more(existing: List<Song>, limit: Int): List<Song> = core.more(existing, limit)
+
+    // ---- What the listener does while the jam plays — see [JamCore] ----------------------------
+
+    /**
+     * The player moved on from [previous] to [next]: whether [previous] was heard through, or
+     * skipped (the listener moved on, not the queue being replaced) within its first seconds,
+     * steers what the jam brings.
+     */
+    fun onTrackChanged(previous: Song?, playedMs: Long, finished: Boolean, skipped: Boolean, next: Song?) {
+        if (previous != null && isJam(previous.radioName)) {
+            when {
+                finished -> core.onFinished(previous)
+                skipped && playedMs in 0 until EARLY_SKIP_MS -> core.onSkipped(previous)
+            }
+        }
+        core.current = next?.takeIf { isJam(it.radioName) }
     }
+
+    /** A heart or thumbs-down given to the track [videoId]: counted when it is the jam's, playing now. */
+    fun onRated(videoId: String, status: LikeStatus) = core.onRated(videoId, status)
+
+    val blockedArtists: StateFlow<Set<String>> get() = core.blockedArtists
+
+    fun unblockAll() = core.unblockAll()
+
+    fun clearSkipped() = core.clearSkipped()
 
     private suspend fun stationFor(seed: Song): List<Song> {
         val wanted = _tuning.value
@@ -194,14 +219,16 @@ internal object MyJam {
 
     private const val TAG = "MyJam"
     private const val FIRST_BATCH = 15
-    private const val SEED_POOL = 40
-    private const val KEY_TUNING = "jam_tuning"
-    private const val KEY_SEEDS = "jam_seeds"
-    private const val KEY_ONLY_NEW = "jam_only_new"
-    private const val KEY_SHOWN = "jam_shown"
-    private const val KEY_PLAYLIST = "jam_playlist"
-    private const val KEY_STATE = "jam_state"
+    private const val SEED_POOL = JamCore.SEED_POOL
     /** Likes counted as the listener's latest. */
     private const val RECENT_LIKES = 60
     private const val MAX_LIKED_PAGES = 30
+    /** A jam track left within this long counts as skipped. */
+    private const val EARLY_SKIP_MS = 30_000L
+    private const val KEY_TUNING = "jam_tuning"
+    private const val KEY_SEEDS = "jam_seeds"
+    private const val KEY_ONLY_NEW = "jam_only_new"
+    private const val KEY_DISCOVERY = "jam_discovery"
+    private const val KEY_SHOWN = "jam_shown"
+    private const val KEY_PLAYLIST = "jam_playlist"
 }

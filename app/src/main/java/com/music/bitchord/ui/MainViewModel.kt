@@ -687,6 +687,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val previous = likeStatusOf(videoId)
         if (previous == status) return
         LikeState.set(videoId, status)
+        // In a jam the rating steers it too, straight away — see MyJam.
+        if (status != LikeStatus.INDIFFERENT || previous == LikeStatus.LIKE) com.music.bitchord.bc2.MyJam.onRated(videoId, status)
         viewModelScope.launch {
             YtMusicRepository.rate(videoId, status).fold(
                 onSuccess = {

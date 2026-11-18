@@ -1224,7 +1224,8 @@ fun BitChordDesktopApp() {
                 }
                 if (partyTrackChangeBlocked()) return@launch
                 val station = batch.mapIndexed { i, song ->
-                    if (i == 0) canonicalSong(song).asQueueEntry(QueueTier.CONTEXT).copy(radioName = DesktopMyWave.radioName) else song
+                    // Its "playing from" kept: which of the listener's tracks it grew from.
+                    if (i == 0) canonicalSong(song).asQueueEntry(QueueTier.CONTEXT).copy(radioName = DesktopMyWave.radioName, playbackSource = song.playbackSource ?: DesktopMyWave.radioName) else song
                 }
                 liveQueue = DesktopQueue(station, 0)
                 preShuffleOrder = emptyList()

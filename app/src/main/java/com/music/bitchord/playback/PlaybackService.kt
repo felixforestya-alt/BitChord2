@@ -3332,6 +3332,10 @@ class PlaybackService : MediaLibraryService() {
      * @param alreadyAudible whether the track was already sounding when it
      *   became current, which is only true of a crossfade handoff.
      */
+    /** The track last made current, and when — for My Jam's word on how it was taken. */
+    private var jamLastSong: Song? = null
+    private var jamLastStartedAt = 0L
+
     private fun onTrackBecameCurrent(
         mediaItem: MediaItem?,
         previousEnded: Boolean,
@@ -3339,6 +3343,22 @@ class PlaybackService : MediaLibraryService() {
         alreadyAudible: Boolean = false,
     ) {
         val exoPlayer = player ?: return
+        // My Jam learns from how the last track was taken: heard to its end, or skipped past in its
+        // first seconds. A swap of the same track (a better copy, the video) is neither.
+        val next = mediaItem?.toSong()
+        val previous = jamLastSong
+        if (previous == null || next == null || previous.videoId != next.videoId) {
+            val now = SystemClock.elapsedRealtime()
+            com.music.bitchord.bc2.MyJam.onTrackChanged(
+                previous = previous,
+                playedMs = if (jamLastStartedAt > 0L) now - jamLastStartedAt else -1L,
+                finished = previousEnded,
+                skipped = reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK,
+                next = next,
+            )
+            jamLastSong = next
+            jamLastStartedAt = now
+        }
         syncBoundedContextCursor(exoPlayer, mediaItem)
         if (boundedContextWindow != null && !ListenTogether.state.value.inParty) {
             saveBoundedContextSnapshot(exoPlayer)

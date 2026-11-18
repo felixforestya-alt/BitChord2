@@ -240,7 +240,7 @@ internal fun DesktopJamRow(
     modifier: Modifier,
 ) {
     val tuning by DesktopMyWave.tuning.collectAsState()
-    val onlyNew by DesktopMyWave.onlyNew.collectAsState()
+    val discovery by DesktopMyWave.discovery.collectAsState()
     val moving = playing && !paused
     Row(modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -281,7 +281,7 @@ internal fun DesktopJamRow(
                 } else {
                     listOfNotNull(
                         tuning.label().takeIf { tuning != DesktopWaveTuning.ALL },
-                        DesktopStrings["wave_only_new", "Only new"].takeIf { onlyNew },
+                        discovery.label().takeIf { discovery != com.music.bitchord.playback.JamDiscovery.BALANCED },
                     ).ifEmpty { listOf(DesktopStrings["wave_subtitle", "Endless music picked for you"]) }.joinToString(" · ")
                 },
                 color = Color.White.copy(alpha = 0.85f),
@@ -358,7 +358,7 @@ internal fun DesktopWaveSettingsDialog(
     val tuning by DesktopMyWave.tuning.collectAsState()
     val seeds by DesktopMyWave.seeds.collectAsState()
     val playlist by DesktopMyWave.playlist.collectAsState()
-    val onlyNew by DesktopMyWave.onlyNew.collectAsState()
+    val discovery by DesktopMyWave.discovery.collectAsState()
     val blocked by DesktopMyWave.blockedArtists.collectAsState()
     val skipped by DesktopMyWave.skippedTracks.collectAsState()
     DesktopDialogPanel(onDismiss = onDismiss, maxWidth = 460, popup = true) {
@@ -414,13 +414,13 @@ internal fun DesktopWaveSettingsDialog(
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
-            ToggleLine(
-                DesktopStrings["wave_only_new", "Only new"],
-                DesktopStrings["wave_only_new_hint", "Leave out what you have liked or played lately"],
-                onlyNew,
-                DesktopMyWave::setOnlyNew,
-            )
+            Section(DesktopStrings["wave_discovery", "Familiar and new"])
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.music.bitchord.playback.JamDiscovery.entries.forEach { option ->
+                    Choice(option.label(), option == discovery) { DesktopMyWave.setDiscovery(option) }
+                }
+            }
+            Text(discovery.hint(), color = DesktopSecondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             // Who a thumbs-down took out of the jam, each to be let back in.
             if (blocked.isNotEmpty()) {
                 Section(DesktopStrings["wave_blocked", "Not suggested (disliked)"])
@@ -781,4 +781,16 @@ internal fun DesktopCustomizePill(label: String, onClick: () -> Unit, modifier: 
         Spacer(Modifier.width(8.dp))
         Text(label, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+private fun com.music.bitchord.playback.JamDiscovery.label(): String = when (this) {
+    com.music.bitchord.playback.JamDiscovery.FAVOURITES -> DesktopStrings["wave_discovery_favourites", "Favourites"]
+    com.music.bitchord.playback.JamDiscovery.BALANCED -> DesktopStrings["wave_discovery_balanced", "Balanced"]
+    com.music.bitchord.playback.JamDiscovery.NEW -> DesktopStrings["wave_only_new", "Only new"]
+}
+
+private fun com.music.bitchord.playback.JamDiscovery.hint(): String = when (this) {
+    com.music.bitchord.playback.JamDiscovery.FAVOURITES -> DesktopStrings["wave_discovery_favourites_hint", "Two thirds what you like and played, the rest new"]
+    com.music.bitchord.playback.JamDiscovery.BALANCED -> DesktopStrings["wave_discovery_balanced_hint", "A third yours, two thirds new"]
+    com.music.bitchord.playback.JamDiscovery.NEW -> DesktopStrings["wave_only_new_hint", "Leave out what you have liked or played lately"]
 }

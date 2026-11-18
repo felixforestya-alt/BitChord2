@@ -806,7 +806,14 @@ fun NowPlayingScreen(
     // track" check lives.
     val spotifyCanvasAutoHide by PlayerSettings.spotifyCanvasAutoHide.collectAsStateWithLifecycle()
     val mixing by PlayerSettings.smartMixInProgress.collectAsStateWithLifecycle()
-    val canvas = rememberCanvasArtwork(song)
+    // Whether this is the disc player — worked out here as it is below, for what only the classic
+    // player shows: the Canvas clip, the artwork mesh and the blurred artwork. The disc player
+    // takes none of them, and each track looked the clip up across four services, decoded the
+    // artwork into a mesh and blurred it, for a player that was never drawn.
+    val discPlayerOn by PlayerSettings.discPlayer.collectAsStateWithLifecycle()
+    val discOnly = discPlayerOn &&
+        (landscapePlayerAvailable(windowWidth, windowHeight) || !tabletSizedPlayer(windowWidth))
+    val canvas = if (discOnly) null else rememberCanvasArtwork(song)
     var canvasAspect by remember(canvas) { mutableFloatStateOf(0f) }
     // Whether the clip actually has a frame on screen right now, and one of
     // them — used to blow the sleeve out to the full-bleed hero treatment and
@@ -1337,7 +1344,7 @@ fun NowPlayingScreen(
     }
     // Portrait clips always use the existing artwork mesh, even if the user
     // selected the legacy backdrop for ordinary artwork.
-    val artMesh = if (legacyMesh && !canvasFirstPortrait) null else
+    val artMesh = if ((legacyMesh && !canvasFirstPortrait) || discOnly) null else
         key(song.videoId) { rememberArtworkMesh(remoteArt, canvasFrame, ART_PX) }
     // Whether the banner is the presentation at all: full-bleed is on, and there
     // is something to blow out. The collapse is deliberately *not* part of this:
@@ -1604,8 +1611,10 @@ fun NowPlayingScreen(
     val fullArtworkBlurImage = rememberFullArtworkBlurImage(
         imageUrl = remoteArt,
         artPx = ART_PX,
-        prepare = landscape || tabletArtworkBackdrop || lyricsOpen || queueOpen ||
-            playerPrewarmStage >= 1,
+        prepare = !discPortrait && (
+            landscape || tabletArtworkBackdrop || lyricsOpen || queueOpen ||
+                playerPrewarmStage >= 1
+            ),
     )
     // One movable Image node, not two backdrop call sites. Compose carries it
     // between the portrait and landscape players; only the cached bitmap

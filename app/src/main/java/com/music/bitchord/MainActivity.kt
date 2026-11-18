@@ -1675,6 +1675,8 @@ private fun BitChordApp(
                 activeRadioSeed = null
                 activeController.playSongs(station, 0)
                 activeController.commitRadioQueue()
+                // The rest of the likes, past the first page the app holds, to grow from as well.
+                scope.launch { MyJam.widenWithAllLikes() }
             } finally {
                 jamStarting = false
             }

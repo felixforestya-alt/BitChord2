@@ -89,10 +89,8 @@ internal object DesktopMyWave {
         persistence.saveBoolean(KEY_SHOWN, value)
     }
 
-    // The wave in play: what it grows from, and what it should not bring back.
-    @Volatile private var seedPool: List<Song> = emptyList()
-    @Volatile private var nextSeed = 0
-    @Volatile private var known: Set<String> = emptySet()
+    /** What the jam grows from and picks — shared with the phone, see [com.music.bitchord.playback.JamEngine]. */
+    private val engine = com.music.bitchord.playback.JamEngine(::stationFor)
 
     // ---- What the jam learns while it plays ----------------------------------------------------
     // A heart, a thumbs-down, a skip in the first seconds, a track heard to the end: each moves
@@ -112,11 +110,7 @@ internal object DesktopMyWave {
     private val promoted = java.util.concurrent.ConcurrentLinkedDeque<Song>()
 
     /** The names a track is credited to, as the jam keys its taste. */
-    fun artistKeys(song: Song): List<String> =
-        song.artists.map { it.name }.ifEmpty { song.artist.split(ARTIST_SPLIT) }
-            .map { it.trim().lowercase() }
-            .filter { it.isNotEmpty() }
-            .distinct()
+    fun artistKeys(song: Song): List<String> = com.music.bitchord.playback.JamEngine.artistKeys(song)
 
     /** Whether the jam is to leave [song] out: an artist disliked, or skipped past again and again. */
     fun unwanted(song: Song): Boolean {
@@ -217,23 +211,31 @@ internal object DesktopMyWave {
      */
     suspend fun start(liked: List<Song>, history: List<Song>, fromPlaylist: List<Song> = emptyList(), limit: Int = FIRST_BATCH): List<Song> {
         val pool = when (_seeds.value) {
-            DesktopWaveSeeds.PLAYLIST -> fromPlaylist.take(SEED_POOL * 2)
-            DesktopWaveSeeds.LIKED -> liked.take(SEED_POOL)
+            DesktopWaveSeeds.PLAYLIST -> fromPlaylist.shuffled().take(SEED_POOL * 2)
+            DesktopWaveSeeds.LIKED -> likedSeeds(liked, SEED_POOL)
             DesktopWaveSeeds.HISTORY -> history.take(SEED_POOL)
             // Interleaved, so neither side crowds the other out.
-            DesktopWaveSeeds.LIKED_AND_HISTORY -> interleave(history.take(SEED_POOL), liked.take(SEED_POOL))
+            DesktopWaveSeeds.LIKED_AND_HISTORY -> interleave(history.take(SEED_POOL / 2), likedSeeds(liked, SEED_POOL / 2))
         }.distinctBy { it.videoId }.ifEmpty { (liked + history).distinctBy { it.videoId }.take(SEED_POOL) }
         if (pool.isEmpty()) return emptyList()
-        // A different start each time, as the wave is meant to feel — and none of what was
-        // disliked to grow it from.
-        seedPool = pool.filterNot(::unwanted).ifEmpty { pool }.shuffled()
-        nextSeed = 0
+        // None of what was disliked to grow it from.
+        engine.start(pool.filterNot(::unwanted).ifEmpty { pool }, (liked + history + fromPlaylist).mapTo(HashSet(), Song::videoId), _onlyNew.value)
         promoted.clear()
         heard.clear()
         anchor = null
         batches = 0
-        known = if (_onlyNew.value) (liked + history + fromPlaylist).mapTo(HashSet(), Song::videoId) else emptySet()
+        DesktopTrackLog.log("jam: from ${pool.size} seeds (${_seeds.value}, ${liked.size} liked, ${history.size} played, only new ${_onlyNew.value})")
         return more(emptyList(), limit)
+    }
+
+    /**
+     * Liked tracks to seed from: half the newest, half from all the rest — the newest alone made a
+     * jam "from likes" go round what was liked lately, not what the listener likes.
+     */
+    private fun likedSeeds(liked: List<Song>, count: Int): List<Song> {
+        val newest = liked.take(RECENT_LIKES).shuffled().take(count / 2)
+        val rest = (liked - newest.toSet()).shuffled().take(count - newest.size)
+        return interleave(newest, rest)
     }
 
     /**
@@ -243,61 +245,37 @@ internal object DesktopMyWave {
      */
     suspend fun startFrom(song: Song, liked: List<Song>, history: List<Song>, limit: Int = FIRST_BATCH): List<Song> {
         val around = stationFor(song).filter { it.videoId != song.videoId }
-        val pool = (around.take(SEED_POOL) + liked.take(TRACK_JAM_TASTE)).distinctBy { it.videoId }
+        val pool = (around.take(SEED_POOL) + liked.shuffled().take(TRACK_JAM_TASTE)).distinctBy { it.videoId }
         if (pool.isEmpty()) return emptyList()
-        seedPool = pool.filterNot(::unwanted).ifEmpty { pool }.shuffled()
-        nextSeed = 0
+        engine.start(pool.filterNot(::unwanted).ifEmpty { pool }, (liked + history).mapTo(HashSet(), Song::videoId) - song.videoId, _onlyNew.value)
         promoted.clear()
         heard.clear()
         anchor = song
         batches = 0
-        known = if (_onlyNew.value) (liked + history).mapTo(HashSet(), Song::videoId) - song.videoId else emptySet()
         return more(listOf(song), limit)
     }
 
-    /** The next tracks after [existing]: from the next seed's tuned station. */
+    /**
+     * The next tracks after [existing]: a track just liked, the jam's own track every few batches
+     * and one heard through come first; then the jam's seeds in turn — see
+     * [com.music.bitchord.playback.JamEngine.more].
+     */
     suspend fun more(existing: List<Song>, limit: Int): List<Song> {
-        val pool = seedPool
-        if (pool.isEmpty()) return emptyList()
-        val have = existing.mapTo(HashSet(), Song::videoId)
-        val out = ArrayList<Song>(limit)
-        // How many of each artist this batch has, counting the last few already queued: no artist
-        // twice in a row, and none more than [perArtistCap] a batch.
-        val count = HashMap<String, Int>()
-        existing.takeLast(RECENT_WINDOW).forEach { song -> artistKeys(song).forEach { count.merge(it, 1, Int::plus) } }
-        fun fits(song: Song): Boolean = artistKeys(song).all { (count[it] ?: 0) < perArtistCap(it) }
-        // Whose station comes first: a track just liked; then, every few batches, the track the
-        // jam was started from; then one heard through; then the pool, in its turn.
+        if (!engine.active) return emptyList()
         val liked = promoted.pollFirst()
         val anchored = anchor?.takeIf { batches % ANCHOR_EVERY == 0 && liked == null }
         val listened = heard.pollFirst()
         batches++
-        val extra = listOfNotNull(liked, anchored, listened)
-        val seeds = extra + List(minOf(pool.size, SEED_TRIES)) { pool[(nextSeed + it) % pool.size] }
-        // A seed's station can come back all known or all queued already: move on, a few times.
-        for (seed in seeds) {
-            if (out.size >= limit) break
-            if (extra.none { it === seed }) nextSeed++
-            if (unwanted(seed)) continue
-            val station = stationFor(seed)
-            DesktopTrackLog.log("wave: ${station.size} tracks around '${seed.title}' (${_tuning.value})")
-            station.asSequence()
-                .filter { it.videoId != seed.videoId || existing.isEmpty() }
-                .filter { it.videoId !in have && it.videoId !in known }
-                .filterNot(::unwanted)
-                // The station's own best picks, then within them the artists the listener has
-                // taken to first — a stable sort, so YouTube's order decides among equals.
-                .take(PER_SEED * 2)
-                .sortedByDescending { candidate -> artistKeys(candidate).maxOfOrNull { artistTaste[it] ?: 0f } ?: 0f }
-                // A few from each seed, so the wave keeps moving across what the listener likes.
-                .take(PER_SEED)
-                .forEach {
-                    if (out.size < limit && fits(it) && have.add(it.videoId)) {
-                        out += it
-                        artistKeys(it).forEach { artist -> count.merge(artist, 1, Int::plus) }
-                    }
-                }
-        }
+        val out = engine.more(
+            existing = existing,
+            limit = limit,
+            first = listOfNotNull(liked, anchored, listened),
+            unwanted = ::unwanted,
+            // Within a station's picks, the artists the listener has taken to first.
+            preference = { candidate -> artistKeys(candidate).maxOfOrNull { artistTaste[it] ?: 0f } ?: 0f },
+            artistCap = ::perArtistCap,
+        )
+        DesktopTrackLog.log("jam: ${out.size} more: ${out.joinToString { it.artist }}")
         return out.map { it.copy(queueTier = QueueTier.AUTOPLAY, radioName = radioName) }
     }
 
@@ -325,7 +303,6 @@ internal object DesktopMyWave {
     }
 
     private const val FIRST_BATCH = 15
-    private val ARTIST_SPLIT = Regex("""\s*(?:,|&|\bfeat\.|\bft\.)\s*""", RegexOption.IGNORE_CASE)
     private const val LIKE_WEIGHT = 1f
     private const val SKIP_WEIGHT = 0.75f
     private const val LISTEN_WEIGHT = 0.25f
@@ -335,8 +312,6 @@ internal object DesktopMyWave {
     private const val SKIPPED_OUT = -2.2f
     private const val MAX_PROMOTED = 3
     private const val MAX_BLOCKED = 300
-    /** How far back in the queue "in a row" looks. */
-    private const val RECENT_WINDOW = 4
     private const val KEY_BLOCKED = "wave_blocked_artists"
     private const val KEY_SKIPPED = "wave_skipped_tracks"
     private const val MAX_HEARD = 8
@@ -348,8 +323,8 @@ internal object DesktopMyWave {
     /** How far skips alone can bring an artist down: out of favour, never out of the jam. */
     private const val SKIP_FLOOR = -1f
     private const val SEED_POOL = 40
-    private const val PER_SEED = 6
-    private const val SEED_TRIES = 6
+    /** Likes counted as the listener's latest. */
+    private const val RECENT_LIKES = 60
     private const val KEY_TUNING = "wave_tuning"
     private const val KEY_SEEDS = "wave_seeds"
     private const val KEY_ONLY_NEW = "wave_only_new"

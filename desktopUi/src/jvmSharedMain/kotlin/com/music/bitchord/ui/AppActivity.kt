@@ -53,6 +53,9 @@ private var lastAmbientFrame = Long.MIN_VALUE
  */
 val ambientTick = androidx.compose.runtime.mutableIntStateOf(0)
 
+/** The looping fractions running now, by period — for measuring what keeps the window drawing. */
+val runningLoops = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
 /** Frames something stepped on its own in, so far — for measuring. */
 @Volatile
 var ambientBeats = 0L
@@ -64,18 +67,27 @@ var ambientBeats = 0L
  * In place of an infinite transition, which keeps asking for frames whatever happens.
  */
 @Composable
-fun rememberLoopingFraction(periodMillis: Int, running: Boolean = true): State<Float> {
+fun rememberLoopingFraction(
+    periodMillis: Int,
+    running: Boolean = true,
+): State<Float> {
     val fraction = remember { mutableFloatStateOf(0f) }
     val period by rememberUpdatedState(periodMillis.coerceAtLeast(1))
     val quiet = AppActivity.quiet
     LaunchedEffect(running, quiet) {
         if (!running || quiet) return@LaunchedEffect
-        var last = withFrameNanos { it }
-        while (true) {
-            awaitAmbientFrame { now ->
-                fraction.floatValue = (fraction.floatValue + (now - last) / 1_000_000f / period) % 1f
-                last = now
+        val key = "loop ${periodMillis}ms"
+        runningLoops.merge(key, 1, Int::plus)
+        try {
+            var last = withFrameNanos { it }
+            while (true) {
+                awaitAmbientFrame { now ->
+                    fraction.floatValue = (fraction.floatValue + (now - last) / 1_000_000f / period) % 1f
+                    last = now
+                }
             }
+        } finally {
+            runningLoops.merge(key, -1) { a, b -> (a + b).takeIf { it > 0 } }
         }
     }
     return fraction

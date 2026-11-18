@@ -234,12 +234,14 @@ internal object DesktopFrameProfiler {
     suspend fun sampleThreads(label: String, millis: Long) {
         if (!sampling) return
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val wanted = listOf("AWT-EventQueue", "skiko-dispatcher-to-block-on")
-            class Tally { var taken = 0; var busy = 0; val leaf = HashMap<String, Int>(); val ours = HashMap<String, Int>(); val path = HashMap<String, Int>() }
+            val wanted = listOf("AWT-EventQueue", "skiko-dispatcher-to-block-on", "DefaultDispatcher-worker")
+            class Tally { var taken = 0; var busy = 0; val leaf = HashMap<String, Int>(); val ours = HashMap<String, Int>(); val path = HashMap<String, Int>(); val stacks = HashMap<String, Int>() }
             val tallies = wanted.associateWith { Tally() }
             val until = System.nanoTime() + millis * 1_000_000L
             while (System.nanoTime() < until) {
                 for ((thread, stack) in Thread.getAllStackTraces()) {
+                    // Not the worker doing this sampling.
+                    if (thread === Thread.currentThread()) continue
                     val name = wanted.firstOrNull { thread.name.startsWith(it) } ?: continue
                     val tally = tallies.getValue(name)
                     tally.taken++
@@ -255,6 +257,8 @@ internal object DesktopFrameProfiler {
                     // The way down from Compose's frame to the leaf, thinned to its landmarks.
                     val marks = stack.reversed().map(::short).filter { m -> LANDMARKS.any { it in m } }.distinct().takeLast(4)
                     tally.path.merge(marks.joinToString(" > "), 1, Int::plus)
+                    // And the top of the stack whole, for what the landmarks leave out.
+                    tally.stacks.merge(stack.take(STACK_FRAMES).joinToString(" < ") { "${short(it)}:${it.lineNumber}" }, 1, Int::plus)
                 }
                 Thread.sleep(2)
             }
@@ -265,10 +269,14 @@ internal object DesktopFrameProfiler {
                 DesktopTrackLog.log("sample $label $name leaf: ${top(tally.leaf, 14)}")
                 DesktopTrackLog.log("sample $label $name ours: ${top(tally.ours, 14)}")
                 DesktopTrackLog.log("sample $label $name path: ${top(tally.path, 10)}")
+                tally.stacks.entries.sortedByDescending { it.value }.take(6).forEach { (stack, count) ->
+                    DesktopTrackLog.log("sample $label $name stack ${count * 100 / tally.busy.coerceAtLeast(1)}%: $stack")
+                }
             }
         }
     }
 
+    private const val STACK_FRAMES = 22
     private val IDLE_METHODS = setOf("park", "wait", "wait0", "sleep", "sleep0", "getNextEvent", "waitForSingleObject", "invokeInt", "poll")
     private val LANDMARKS = listOf(
         "onRender", "ComposeScene", "Recomposer", "performRecompose", "measureAndLayout", "draw", "Draw", "record", "Record",
@@ -293,6 +301,7 @@ internal object DesktopFrameProfiler {
         kotlinx.coroutines.delay(millis)
         handle.dispose()
         DesktopTrackLog.log("profile %-14s idle frames=%d (drawn %d) in %dms".format(label, drawTimes.size, DesktopPrefetch.framesDrawn - framesBefore, millis))
+        DesktopTrackLog.log("profile   looping now: " + com.music.bitchord.ui.runningLoops.entries.joinToString { "${it.key} x${it.value}" })
         changes.entries.sortedByDescending { it.value }.take(8).forEach { (name, count) ->
             DesktopTrackLog.log("profile   changed x$count  $name")
         }

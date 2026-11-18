@@ -4006,6 +4006,7 @@ fun BitChordDesktopApp() {
             }
             kotlinx.coroutines.delay(8_000)
             DesktopFrameProfiler.countIdleFrames("start-home", 3_000)
+            DesktopFrameProfiler.sampleThreads("start-home", 6_000)
             // A track to show, picked and left paused: the player only opens with one.
             if (selectedSong == null) {
                 // BITCHORD_PROFILE_SONG="videoId|title|artist": the same track every run, so two
@@ -4082,6 +4083,9 @@ fun BitChordDesktopApp() {
                 // BITCHORD_PROFILE_LOAD_HOME=1: Home alone, as the player alone above.
                 if (System.getenv("BITCHORD_PROFILE_LOAD_HOME") == "1") {
                     DesktopFrameProfiler.measure("home-even", hz) { kotlinx.coroutines.delay(10_000) }
+                    // And Home with the track paused: what stays moving with nothing playing.
+                    togglePlayPauseFromUser()
+                    phase("home-paused")
                     DesktopTrackLog.log("profile done")
                     return@LaunchedEffect
                 }

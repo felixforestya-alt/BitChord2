@@ -120,7 +120,11 @@ internal fun DiscPortraitPlayer(
     val ink by animateColorAsState(palette.ink, tween(1_400), label = "discInk")
 
     // The bars only run while this is on screen: the audio thread skips the analysis otherwise.
-    DisposableEffect(Unit) {
+    // On screen, not merely composed: a player left open when the phone was locked kept the
+    // audio thread analysing sixty times a second for as long as the music played.
+    val foreground = com.music.bitchord.ui.rememberIsForeground()
+    DisposableEffect(foreground) {
+        if (!foreground) return@DisposableEffect onDispose {}
         val stop = AudioSpectrum.watch()
         onDispose { stop() }
     }

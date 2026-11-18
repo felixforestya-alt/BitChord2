@@ -1237,8 +1237,16 @@ object AppSettings {
 
     fun setPlaybackSpeed(value: Float) {
         playbackSpeed.value = value
-        prefs.edit().putFloat(KEY_SPEED, value).apply()
+        // Saved once the value rests, not on every step of a drag: this file also holds the
+        // downloads' records and the search history, and Android writes all of it out again for
+        // each change — a drag of the player's speed bar rewrote it ten times a second.
+        speedSave.removeCallbacks(saveSpeed)
+        speedSave.postDelayed(saveSpeed, SPEED_SAVE_DELAY_MS)
     }
+
+    private val speedSave by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+    private val saveSpeed = Runnable { prefs.edit().putFloat(KEY_SPEED, playbackSpeed.value).apply() }
+    private const val SPEED_SAVE_DELAY_MS = 400L
 
     fun setSpeedKeepsPitch(value: Boolean) {
         speedKeepsPitch.value = value

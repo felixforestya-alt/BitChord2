@@ -138,6 +138,12 @@ internal fun Modifier.desktopLiquidGlass(
      */
     cornerOf: (() -> Dp)? = null,
     lensOf: (() -> Float)? = null,
+    /**
+     * Read while drawing: true while what this pane holds is opaque over the whole of it, so not
+     * a pixel of the glass would show. Then none of it is drawn, and the pane stops redrawing with
+     * the page under it.
+     */
+    coveredOf: (() -> Boolean)? = null,
     fallback: @Composable Modifier.() -> Modifier,
 ): Modifier {
     val enabled by DesktopStyleSettings.liquidGlass.collectAsState()
@@ -153,6 +159,12 @@ internal fun Modifier.desktopLiquidGlass(
     return this
         .onGloballyPositioned { position = it.positionInWindow() }
         .drawWithContent {
+            // Under an opaque cover: the blur, the lens and the rim were all painted over, on
+            // every frame the page beneath moved.
+            if (coveredOf?.invoke() == true) {
+                drawContent()
+                return@drawWithContent
+            }
             // Read so the pane redraws when the page under it does.
             @Suppress("UNUSED_VARIABLE")
             val revision = backdrop.revision

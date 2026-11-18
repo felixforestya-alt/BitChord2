@@ -352,6 +352,9 @@ internal fun DesktopMorphingPlayer(
                     // it changes shape, the way a drop of water does, and calms as it settles.
                     cornerOf = { with(density) { morph.cornerPx(density.density).toDp() } },
                     lensOf = { sin(morph.e * Math.PI.toFloat()) },
+                    // At rest as the card, its own opaque colour covers the glass whole: below
+                    // this the glass would add less than half a step of any colour channel.
+                    coveredOf = { morph.e < CARD_COVERS_GLASS },
                 ) {
                     desktopBarGlass(RoundedCornerShape(26.dp))
                 }
@@ -1084,6 +1087,9 @@ internal fun DesktopScrollLinkedBar(
 }
 
 private const val BAR_GLIDE_SECONDS = 0.06f
+
+/** How far into the morph the card's colour still hides the glass under it to the last pixel. */
+private const val CARD_COVERS_GLASS = 1f / 512f
 
 /** The card's height on the home feed. */
 internal val HERO_HEIGHT = 252.dp

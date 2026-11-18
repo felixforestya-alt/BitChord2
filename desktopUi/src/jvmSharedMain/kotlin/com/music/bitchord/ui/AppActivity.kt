@@ -70,9 +70,15 @@ var ambientBeats = 0L
 fun rememberLoopingFraction(
     periodMillis: Int,
     running: Boolean = true,
+    /**
+     * At least this long between steps, for something that moves so slowly that a step every
+     * frame of the display moves it by a fraction of a pixel; 0 for every frame.
+     */
+    stepMillis: Long = 0L,
 ): State<Float> {
     val fraction = remember { mutableFloatStateOf(0f) }
     val period by rememberUpdatedState(periodMillis.coerceAtLeast(1))
+    val step by rememberUpdatedState(stepMillis)
     val quiet = AppActivity.quiet
     LaunchedEffect(running, quiet) {
         if (!running || quiet) return@LaunchedEffect
@@ -85,6 +91,7 @@ fun rememberLoopingFraction(
                     fraction.floatValue = (fraction.floatValue + (now - last) / 1_000_000f / period) % 1f
                     last = now
                 }
+                if (step > 0L) kotlinx.coroutines.delay(step)
             }
         } finally {
             runningLoops.merge(key, -1) { a, b -> (a + b).takeIf { it > 0 } }

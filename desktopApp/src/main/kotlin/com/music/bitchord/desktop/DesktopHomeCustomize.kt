@@ -180,7 +180,20 @@ internal fun DesktopWaveCard(
     val deep by androidx.compose.animation.animateColorAsState(palette.deep, tween(700), label = "jamDeep")
     val moving = playing && !paused
     // Read only while drawing, so the wave moves by redrawing alone and nothing recomposes for it.
-    val phase = com.music.bitchord.ui.rememberLoopingFraction(if (moving) 2_600 else 9_000)
+    // At rest the wave only drifts — a turn in nine seconds — and stepped on every frame of the
+    // display it moved about a tenth of a pixel at a time: the whole window drawn 160 times a second
+    // with nothing playing. Stepped once it has moved a quarter of a pixel instead, worked out
+    // from the card's size on this screen, which antialiasing does not show.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val driftStep = androidx.compose.runtime.remember(density) {
+        val amplitude = with(density) { JAM_CARD_HEIGHT.toPx() } * (IDLE_AMPLITUDE + 2 * AMPLITUDE_STEP)
+        val pixelsPerMilli = amplitude * 2f * PI.toFloat() / IDLE_PERIOD_MS
+        (QUARTER_PIXEL / pixelsPerMilli).toLong().coerceIn(0L, MAX_DRIFT_STEP_MS)
+    }
+    val phase = com.music.bitchord.ui.rememberLoopingFraction(
+        if (moving) 2_600 else IDLE_PERIOD_MS,
+        stepMillis = if (moving) 0L else driftStep,
+    )
     val wave = androidx.compose.runtime.remember { Path() }
     Box(
         Modifier
@@ -198,14 +211,14 @@ internal fun DesktopWaveCard(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(112.dp)
+                .height(JAM_CARD_HEIGHT)
                 .clip(RoundedCornerShape(26.dp))
                 .background(Brush.horizontalGradient(listOf(deep.copy(alpha = 0.95f), light.copy(alpha = 0.55f), deep.copy(alpha = 0.85f))))
                 .drawBehind {
                     // The wave: lines drifting across, in the light of the cover.
                     for (k in 0 until 3) {
                         val path = wave.apply { rewind() }
-                        val amp = size.height * ((if (moving) 0.13f else 0.07f) + k * 0.035f)
+                        val amp = size.height * ((if (moving) 0.13f else IDLE_AMPLITUDE) + k * AMPLITUDE_STEP)
                         val mid = size.height * (0.52f + k * 0.09f)
                         val shift = (phase.value + k * 0.23f) * 2f * PI.toFloat()
                         var x = 0f
@@ -794,3 +807,11 @@ private fun com.music.bitchord.playback.JamDiscovery.hint(): String = when (this
     com.music.bitchord.playback.JamDiscovery.BALANCED -> DesktopStrings["wave_discovery_balanced_hint", "A third yours, two thirds new"]
     com.music.bitchord.playback.JamDiscovery.NEW -> DesktopStrings["wave_only_new_hint", "Leave out what you have liked or played lately"]
 }
+
+private val JAM_CARD_HEIGHT = 112.dp
+private const val IDLE_PERIOD_MS = 9_000
+private const val IDLE_AMPLITUDE = 0.07f
+private const val AMPLITUDE_STEP = 0.035f
+private const val QUARTER_PIXEL = 0.25f
+/** Never fewer than about thirty steps a second, whatever the screen. */
+private const val MAX_DRIFT_STEP_MS = 33L

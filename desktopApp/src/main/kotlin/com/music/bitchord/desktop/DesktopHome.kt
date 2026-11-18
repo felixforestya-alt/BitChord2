@@ -305,6 +305,10 @@ internal fun DesktopMorphingPlayer(
         }
     }
 
+    // The card's contents fade out over the first half of the morph and are gone after it: from
+    // there its visualiser asks for no more frames. Changes only as the line is crossed.
+    val cardSeen by remember { androidx.compose.runtime.derivedStateOf { morph.e < 0.5f } }
+
     // The card and the bar each keep their own size the whole way: only the pane around them
     // changes, so neither is measured again on any frame of the morph.
     val cardWidth = with(density) { anchor.width.toDp() }
@@ -383,6 +387,7 @@ internal fun DesktopMorphingPlayer(
             HeroContent(
                 song = song,
                 isPlaying = isPlaying,
+                seen = cardSeen,
                 onOpenPlayer = onOpenPlayer,
                 transport = transport,
                 extras = extras,
@@ -536,6 +541,8 @@ private fun HeroContent(
     extras: DesktopHeroExtras,
     accent: Color,
     modifier: Modifier,
+    /** False while the card is out of sight — become the bar — and nothing on it need move. */
+    seen: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
@@ -600,6 +607,7 @@ private fun HeroContent(
                     lyricLines = extras.lyricLines.takeIf { showLyrics },
                     position = extras.position,
                     isPlaying = isPlaying,
+                    seen = seen,
                     accent = accent,
                     modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 4.dp),
                 )
@@ -655,11 +663,14 @@ private fun HeroStage(
     lyricLines: List<LyricLine>?,
     position: PlaybackPosition,
     isPlaying: Boolean,
+    seen: Boolean,
     accent: Color,
     modifier: Modifier,
 ) {
-    // Redraws the visualiser on every frame of the display while something plays.
-    val tick = rememberFrameClock(isPlaying)
+    // Redraws the visualiser on every frame of the display while something plays — and while the
+    // card can be seen: scrolled into the bar, it went on asking for every frame of the display,
+    // faded to nothing and moved out of the window, and the window drew them all.
+    val tick = rememberFrameClock(isPlaying && seen)
     var area by remember { mutableStateOf(IntSize.Zero) }
     val timed = remember(lyricLines) { lyricLines?.takeIf { list -> list.any { it.timeMs > 0 } }.orEmpty() }
     val indexState = if (timed.isEmpty()) null else rememberLyricIndex(timed, position, isPlaying)
@@ -690,8 +701,9 @@ private fun HeroStage(
             AnimatedContent(
                 targetState = indexState.value,
                 transitionSpec = {
-                    // Swapped outright while the window is in the background: nobody to see it.
-                    val change = if (com.music.bitchord.ui.AppActivity.quiet) {
+                    // Swapped outright while the window is in the background, or the card has
+                    // become the bar: nobody to see it.
+                    val change = if (com.music.bitchord.ui.AppActivity.quiet || !seen) {
                         androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
                     } else {
                         (fadeIn(tween(380)) + scaleIn(tween(520, easing = EASE_OUT_EXPO), initialScale = 1.3f)) togetherWith
@@ -706,7 +718,7 @@ private fun HeroStage(
             ) { shown ->
                 // Out of focus as it arrives, sharpening as it settles — with room around it for
                 // the blur to spread into instead of being cut at the words' own edges.
-                val focus = remember { Animatable(if (com.music.bitchord.ui.AppActivity.quiet) 1f else 0f) }
+                val focus = remember { Animatable(if (com.music.bitchord.ui.AppActivity.quiet || !seen) 1f else 0f) }
                 LaunchedEffect(Unit) { focus.animateTo(1f, tween(480, easing = EASE_OUT_EXPO)) }
                 Box(
                     Modifier
@@ -723,7 +735,9 @@ private fun HeroStage(
                             index = shown,
                             intro = intro,
                             position = position,
-                            isPlaying = isPlaying,
+                            // Its sweep runs on every frame of the display; held while unseen,
+                            // and taken up from the playhead when the card comes back.
+                            isPlaying = isPlaying && seen,
                             style = TextStyle(
                                 color = Color.White,
                                 fontSize = 32.sp,

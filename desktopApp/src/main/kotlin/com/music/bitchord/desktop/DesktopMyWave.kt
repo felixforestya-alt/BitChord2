@@ -224,6 +224,7 @@ internal object DesktopMyWave {
         heard.clear()
         anchor = null
         batches = 0
+        saveState()
         DesktopTrackLog.log("jam: from ${pool.size} seeds (${_seeds.value}, ${liked.size} liked, ${history.size} played, only new ${_onlyNew.value})")
         return more(emptyList(), limit)
     }
@@ -252,6 +253,7 @@ internal object DesktopMyWave {
         heard.clear()
         anchor = song
         batches = 0
+        saveState()
         return more(listOf(song), limit)
     }
 
@@ -261,7 +263,9 @@ internal object DesktopMyWave {
      * [com.music.bitchord.playback.JamEngine.more].
      */
     suspend fun more(existing: List<Song>, limit: Int): List<Song> {
-        if (!engine.active) return emptyList()
+        // A queue brought back from the last run carries on as the same jam: without this it went
+        // on as the plain station of whatever track it had reached, and stayed on that one sound.
+        if (!engine.active && !engine.restore(persistence.string(KEY_STATE))) return emptyList()
         val liked = promoted.pollFirst()
         val anchored = anchor?.takeIf { batches % ANCHOR_EVERY == 0 && liked == null }
         val listened = heard.pollFirst()
@@ -275,9 +279,13 @@ internal object DesktopMyWave {
             preference = { candidate -> artistKeys(candidate).maxOfOrNull { artistTaste[it] ?: 0f } ?: 0f },
             artistCap = ::perArtistCap,
         )
+        saveState()
         DesktopTrackLog.log("jam: ${out.size} more: ${out.joinToString { it.artist }}")
         return out.map { it.copy(queueTier = QueueTier.AUTOPLAY, radioName = radioName) }
     }
+
+    /** Where the jam is, for the next run — off the calling thread, see [DesktopPreferenceWriter]. */
+    private fun saveState() = persistence.saveStringSoon(KEY_STATE, engine.save())
 
     private suspend fun stationFor(seed: Song): List<Song> {
         val wanted = _tuning.value
@@ -330,4 +338,5 @@ internal object DesktopMyWave {
     private const val KEY_ONLY_NEW = "wave_only_new"
     private const val KEY_SHOWN = "wave_shown"
     private const val KEY_PLAYLIST = "wave_playlist"
+    private const val KEY_STATE = "wave_state"
 }

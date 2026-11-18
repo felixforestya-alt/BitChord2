@@ -4008,8 +4008,13 @@ fun BitChordDesktopApp() {
             DesktopFrameProfiler.countIdleFrames("start-home", 3_000)
             // A track to show, picked and left paused: the player only opens with one.
             if (selectedSong == null) {
-                (homeState as? UiState.Success)?.data?.flatMap { it.items }?.firstOrNull { it.videoId != null }
-                    ?.let { playSong(it.toSong(), startPlaying = false) }
+                // BITCHORD_PROFILE_SONG="videoId|title|artist": the same track every run, so two
+                // runs differ by what was changed and not by what the feed happened to offer first.
+                val fixed = System.getenv("BITCHORD_PROFILE_SONG")?.split('|')?.takeIf { it.size == 3 }?.let { (id, title, artist) ->
+                    Song(videoId = id, title = title, artist = artist, thumbnailUrl = "https://i.ytimg.com/vi/$id/hqdefault.jpg")
+                }
+                (fixed ?: (homeState as? UiState.Success)?.data?.flatMap { it.items }?.firstOrNull { it.videoId != null }?.toSong())
+                    ?.let { playSong(it, startPlaying = false) }
                 kotlinx.coroutines.delay(4_000)
             }
             // BITCHORD_PROFILE_LOAD=1: what the app costs the rest of the computer while a track
@@ -4041,6 +4046,8 @@ fun BitChordDesktopApp() {
                     val seconds = (System.nanoTime() - wall0) / 1e9
                     val busiest = threadTimes().map { (name, ns) -> name to (ns - (threads0[name] ?: 0L)) }.sortedByDescending { it.second }
                     DesktopTrackLog.log("load   threads: " + busiest.take(8).joinToString { "${it.first}=%.2f".format(it.second / 1e9 / seconds) })
+                    // After the figures above, which the sampling itself would disturb.
+                    DesktopFrameProfiler.sampleThreads(label, 8_000)
                 }
                 if (!playbackEngine.state.value.isPlaying) togglePlayPauseFromUser()
                 // BITCHORD_PROFILE_LOAD_PLAYER=1: the open player alone, quickly — for comparing
@@ -4053,7 +4060,31 @@ fun BitChordDesktopApp() {
                     DesktopTrackLog.log("profile done")
                     return@LaunchedEffect
                 }
+                // BITCHORD_PROFILE_LOAD_PAGE=LIBRARY (or any other page): that page alone, with the
+                // track playing in the bar under it — what a page that does not move costs.
+                System.getenv("BITCHORD_PROFILE_LOAD_PAGE")?.let { name ->
+                    DesktopDestination.entries.firstOrNull { it.name == name }?.let { destination = it }
+                    phase("page-$name")
+                    DesktopFrameProfiler.measure("page-even", hz) { kotlinx.coroutines.delay(10_000) }
+                    DesktopTrackLog.log("profile done")
+                    return@LaunchedEffect
+                }
+                // BITCHORD_PROFILE_LOAD_HOME=scrolled: Home scrolled down the feed, the card become
+                // the bar — what is left to draw once the card's own visualiser is out of sight.
+                if (System.getenv("BITCHORD_PROFILE_LOAD_HOME") == "scrolled") {
+                    homeListState.scrollToItem(3)
+                    phase("home-scrolled")
+                    DesktopFrameProfiler.measure("scrolled-even", hz) { kotlinx.coroutines.delay(10_000) }
+                    DesktopTrackLog.log("profile done")
+                    return@LaunchedEffect
+                }
                 phase("home-playing")
+                // BITCHORD_PROFILE_LOAD_HOME=1: Home alone, as the player alone above.
+                if (System.getenv("BITCHORD_PROFILE_LOAD_HOME") == "1") {
+                    DesktopFrameProfiler.measure("home-even", hz) { kotlinx.coroutines.delay(10_000) }
+                    DesktopTrackLog.log("profile done")
+                    return@LaunchedEffect
+                }
                 overlays.nowPlaying = true
                 phase("player-playing")
                 overlays.nowPlaying = false

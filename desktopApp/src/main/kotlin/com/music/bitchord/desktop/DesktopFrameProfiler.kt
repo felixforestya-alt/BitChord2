@@ -222,6 +222,60 @@ internal object DesktopFrameProfiler {
         if (frameStart != 0L && end - frameStart < 1_000_000_000L) { cpuTimes += end - frameStart; lastCpu = end - frameStart }
     }
 
+    /** BITCHORD_PROFILE_SAMPLE=1: where the UI thread and the drawing thread are, through a steady stretch. */
+    val sampling: Boolean = enabled && System.getenv("BITCHORD_PROFILE_SAMPLE") == "1"
+
+    /**
+     * Samples the UI thread and the drawing thread every couple of milliseconds for [millis] and
+     * logs, for each, the methods it was found in most: at the top of its stack (where the time
+     * goes) and the nearest of this app's own (whose doing it is). Only running samples count — a
+     * thread waiting for its next frame is not spending anything.
+     */
+    suspend fun sampleThreads(label: String, millis: Long) {
+        if (!sampling) return
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val wanted = listOf("AWT-EventQueue", "skiko-dispatcher-to-block-on")
+            class Tally { var taken = 0; var busy = 0; val leaf = HashMap<String, Int>(); val ours = HashMap<String, Int>(); val path = HashMap<String, Int>() }
+            val tallies = wanted.associateWith { Tally() }
+            val until = System.nanoTime() + millis * 1_000_000L
+            while (System.nanoTime() < until) {
+                for ((thread, stack) in Thread.getAllStackTraces()) {
+                    val name = wanted.firstOrNull { thread.name.startsWith(it) } ?: continue
+                    val tally = tallies.getValue(name)
+                    tally.taken++
+                    val top = stack.firstOrNull() ?: continue
+                    // Parked, asleep or waiting for an event: not at work.
+                    val idle = top.methodName in IDLE_METHODS || (top.className.startsWith("com.sun.jna") && stack.any { it.methodName == "sleepFor" })
+                    if (idle) continue
+                    tally.busy++
+                    fun short(e: StackTraceElement) = "${e.className.substringAfterLast('.')}.${e.methodName}"
+                    tally.leaf.merge(short(top), 1, Int::plus)
+                    stack.firstOrNull { it.className.startsWith("com.music.bitchord") && !it.className.contains("FrameProfiler") }
+                        ?.let { tally.ours.merge("${short(it)}:${it.lineNumber}", 1, Int::plus) }
+                    // The way down from Compose's frame to the leaf, thinned to its landmarks.
+                    val marks = stack.reversed().map(::short).filter { m -> LANDMARKS.any { it in m } }.distinct().takeLast(4)
+                    tally.path.merge(marks.joinToString(" > "), 1, Int::plus)
+                }
+                Thread.sleep(2)
+            }
+            for ((name, tally) in tallies) {
+                fun top(map: Map<String, Int>, n: Int) = map.entries.sortedByDescending { it.value }.take(n)
+                    .joinToString(", ") { "${it.key} ${it.value * 100 / tally.busy.coerceAtLeast(1)}%" }
+                DesktopTrackLog.log("sample $label $name: at work in ${tally.busy} of ${tally.taken} samples")
+                DesktopTrackLog.log("sample $label $name leaf: ${top(tally.leaf, 14)}")
+                DesktopTrackLog.log("sample $label $name ours: ${top(tally.ours, 14)}")
+                DesktopTrackLog.log("sample $label $name path: ${top(tally.path, 10)}")
+            }
+        }
+    }
+
+    private val IDLE_METHODS = setOf("park", "wait", "wait0", "sleep", "sleep0", "getNextEvent", "waitForSingleObject", "invokeInt", "poll")
+    private val LANDMARKS = listOf(
+        "onRender", "ComposeScene", "Recomposer", "performRecompose", "measureAndLayout", "draw", "Draw", "record", "Record",
+        "sendApplyNotifications", "withFrameNanos", "doFrame", "onFrame", "flush", "Flush", "swap", "Swap", "present", "Present",
+        "Picture", "RenderNode", "dispatchEvent", "Prefetch", "workUntil", "invokeLater",
+    )
+
     /** How many frames the window draws on its own over [millis], with nothing forcing them. */
     suspend fun countIdleFrames(label: String, millis: Long) {
         drawTimes.clear()
